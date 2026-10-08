@@ -10,4 +10,4 @@ pub mod utf16;
 
 pub use ground::ungrounded_figures;
 pub use kind::Kind;
-pub use number::{Number, Reading, extract_numbers};
+pub use number::{Number, Reading, extract_numbers, numbers};

@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use figures_parser::extract_numbers;
 use figures_parser::number::scan::tokens;
 
@@ -7,7 +9,7 @@ fn keys(text: &str) -> Vec<(String, Option<String>, bool, bool)> {
         .map(|n| {
             (
                 n.integer.into_owned(),
-                n.fraction.map(Into::into),
+                n.fraction.map(Cow::into_owned),
                 n.grouped,
                 n.derived,
             )
@@ -121,15 +123,8 @@ fn groups_that_fit_neither_are_neighbours() {
 
 #[test]
 fn currency_rides_on_the_whole_and_on_the_first_neighbour_only() {
-    let currency = |text: &str| -> Vec<bool> {
-        tokens(text)
-            .next()
-            .unwrap()
-            .readings()
-            .iter()
-            .map(|r| r.currency)
-            .collect()
-    };
+    let currency =
+        |text: &str| -> Vec<bool> { extract_numbers(text).iter().map(|r| r.currency).collect() };
     assert_eq!(currency("$15977,10140,26117"), [true, false, false]);
     assert_eq!(currency("$1,250"), [true, true, true, false]);
 }
@@ -160,7 +155,7 @@ fn every_reading_slices_the_input_at_its_span() {
 }
 
 #[test]
-fn for_each_reading_borrows_the_text_or_the_scratch_and_matches_readings() {
+fn for_each_reading_borrows_the_text_or_the_scratch_and_matches_numbers() {
     let mut scratch = String::new();
     for text in [
         "1,250",
@@ -172,13 +167,59 @@ fn for_each_reading_borrows_the_text_or_the_scratch_and_matches_readings() {
         let token = tokens(text).next().unwrap();
         let mut seen = Vec::new();
         token.for_each_reading(&mut scratch, |r| {
-            seen.push((r.integer.to_owned(), r.fraction.map(str::to_owned), r.span));
+            assert_eq!(text.get(r.span.clone()), Some(r.text));
+            seen.push((
+                r.text,
+                r.integer.to_owned(),
+                r.fraction.map(str::to_owned),
+                r.span,
+            ));
         });
-        let owned: Vec<_> = token
-            .readings()
+        let owned: Vec<_> = extract_numbers(text)
             .into_iter()
-            .map(|n| (n.integer.into_owned(), n.fraction.map(Into::into), n.span))
+            .map(|n| {
+                (
+                    n.text,
+                    n.integer.into_owned(),
+                    n.fraction.map(Cow::into_owned),
+                    n.span,
+                )
+            })
             .collect();
         assert_eq!(seen, owned, "{text}");
     }
+}
+
+#[test]
+fn numbers_yields_readings_lazily_in_order() {
+    let text = "Total $1,250 and 7 then 1.0842.";
+    let lazy: Vec<_> = figures_parser::numbers(text).collect();
+    assert_eq!(lazy, figures_parser::extract_numbers(text));
+    let first = figures_parser::numbers(text).next().unwrap();
+    assert_eq!((first.text, &*first.integer), ("1,250", "1250"));
+    assert_eq!(figures_parser::numbers("no figures").next(), None);
+}
+
+#[test]
+fn a_number_borrows_its_digits_from_the_text_wherever_they_are_a_slice_of_it() {
+    let borrowed = |n: &figures_parser::Number<'_>| {
+        (
+            matches!(n.integer, Cow::Borrowed(_)),
+            n.fraction.as_ref().map(|f| matches!(f, Cow::Borrowed(_))),
+        )
+    };
+    let e = extract_numbers("1250; 1,250; 1.0842; ١٢٥٠");
+    let seen: Vec<_> = e.iter().map(|n| (n.text, borrowed(n))).collect();
+    assert_eq!(
+        seen,
+        [
+            ("1250", (true, None)),
+            ("1,250", (false, None)),
+            ("1,250", (true, Some(true))),
+            ("1", (true, None)),
+            ("250", (true, None)),
+            ("1.0842", (true, Some(true))),
+            ("١٢٥٠", (false, None)),
+        ]
+    );
 }

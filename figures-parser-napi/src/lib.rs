@@ -8,7 +8,7 @@
 use std::borrow::Cow;
 
 use figures_parser::utf16::{Utf16Cursor, units};
-use figures_parser::{Kind, extract_numbers};
+use figures_parser::{Kind, numbers};
 use napi_derive::napi;
 
 /// A number reading's comparable value.
@@ -71,7 +71,7 @@ pub fn extract(text: String, options: Option<ExtractOptions>) -> napi::Result<Ve
         match kind {
             Kind::Number => {
                 let mut cursor = Utf16Cursor::new(&text);
-                out.extend(extract_numbers(&text).into_iter().map(|n| {
+                out.extend(numbers(&text).map(|n| {
                     let start = cursor.at(n.span.start);
                     Entity {
                         kind: kind.name().to_owned(),

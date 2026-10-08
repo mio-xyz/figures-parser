@@ -1,6 +1,7 @@
 //! The number kind: digits in any script, grouped or decimal, and what a
 //! reading of one is held to.
 
+mod currency_codes;
 pub mod digits;
 mod digits_table;
 mod readings;
@@ -9,9 +10,34 @@ pub mod scan;
 use std::borrow::Cow;
 use std::ops::Range;
 
-use scan::tokens;
+use scan::{Tokens, tokens};
 
-/// One reading of a numeric token, borrowed from the text it was read in.
+/// One reading of a numeric token, as [`scan::Token::for_each_reading`]
+/// yields it: the text borrowed from the scanned text, the digits from the
+/// text or from the scratch buffer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reading<'a, 's> {
+    /// As written, separators kept.
+    pub text: &'a str,
+    /// Byte range of `text` in the scanned text.
+    pub span: Range<usize>,
+    /// The integer part in ASCII digits, separators dropped.
+    pub integer: &'s str,
+    /// The fractional digits in ASCII, or None for a whole number.
+    pub fraction: Option<&'s str>,
+    /// Written with thousands separators, so stated as a precise amount.
+    pub grouped: bool,
+    /// Written beside a currency sign or code.
+    pub currency: bool,
+    /// A neighbour reading of a run that also reads as thousands: the corpus
+    /// may ground with it, the reply never states it.
+    pub derived: bool,
+}
+
+/// One reading of a numeric token that outlives the scratch buffer.
+///
+/// Its digits borrow the text where they are a slice of it, which they are
+/// for every ASCII group, and are owned where they were joined or converted.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Number<'a> {
     /// As written, separators kept.
@@ -24,32 +50,78 @@ pub struct Number<'a> {
     pub fraction: Option<Cow<'a, str>>,
     /// Written with thousands separators, so stated as a precise amount.
     pub grouped: bool,
-    /// Written behind a currency sign.
+    /// Written beside a currency sign or code.
     pub currency: bool,
     /// A neighbour reading of a run that also reads as thousands: the corpus
     /// may ground with it, the reply never states it.
     pub derived: bool,
 }
 
-/// One reading of a numeric token, as [`Token::for_each_reading`] yields it:
-/// valid for the call, borrowing the text or the scratch buffer.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Reading<'t> {
-    /// As written, separators kept.
-    pub text: &'t str,
-    /// Byte range of `text` in the scanned text.
-    pub span: Range<usize>,
-    /// The integer part in ASCII digits, separators dropped.
-    pub integer: &'t str,
-    /// The fractional digits in ASCII, or None for a whole number.
-    pub fraction: Option<&'t str>,
-    /// Written with thousands separators, so stated as a precise amount.
-    pub grouped: bool,
-    /// Written behind a currency sign.
-    pub currency: bool,
-    /// A neighbour reading of a run that also reads as thousands: the corpus
-    /// may ground with it, the reply never states it.
-    pub derived: bool,
+/// `digits` borrowed from `text` when it starts (or, from the end, ends)
+/// with exactly those bytes, else owned.
+fn digits_of<'a>(text: &'a str, digits: &str, from_end: bool) -> Cow<'a, str> {
+    let slice = if from_end {
+        text.len()
+            .checked_sub(digits.len())
+            .and_then(|at| text.get(at..))
+    } else {
+        text.get(..digits.len())
+    };
+    match slice {
+        Some(slice) if slice == digits => Cow::Borrowed(slice),
+        _ => Cow::Owned(digits.to_owned()),
+    }
+}
+
+impl<'a> From<Reading<'a, '_>> for Number<'a> {
+    fn from(r: Reading<'a, '_>) -> Self {
+        Self {
+            text: r.text,
+            span: r.span,
+            integer: digits_of(r.text, r.integer, false),
+            fraction: r.fraction.map(|f| digits_of(r.text, f, true)),
+            grouped: r.grouped,
+            currency: r.currency,
+            derived: r.derived,
+        }
+    }
+}
+
+/// The readings of a text's numeric tokens, found as they are asked for.
+#[derive(Debug)]
+pub struct Numbers<'a> {
+    /// The tokens not yet read.
+    tokens: Tokens<'a>,
+    /// The digits a reading joins or converts.
+    scratch: String,
+    /// The current token's readings not yet yielded, in reverse order.
+    pending: Vec<Number<'a>>,
+}
+
+/// Every reading of every numeric token in `text`, in order of appearance,
+/// one at a time: a consumer that stops early reads no further.
+#[must_use]
+pub const fn numbers(text: &str) -> Numbers<'_> {
+    Numbers {
+        tokens: tokens(text),
+        scratch: String::new(),
+        pending: Vec::new(),
+    }
+}
+
+impl<'a> Iterator for Numbers<'a> {
+    type Item = Number<'a>;
+
+    fn next(&mut self) -> Option<Number<'a>> {
+        loop {
+            if let Some(number) = self.pending.pop() {
+                return Some(number);
+            }
+            let token = self.tokens.next()?;
+            token.for_each_reading(&mut self.scratch, |r| self.pending.push(r.into()));
+            self.pending.reverse();
+        }
+    }
 }
 
 /// Every reading of every numeric token in `text`, in order of appearance.
@@ -58,7 +130,7 @@ pub fn extract_numbers(text: &str) -> Vec<Number<'_>> {
     let mut out = Vec::new();
     let mut scratch = String::new();
     for token in tokens(text) {
-        token.readings_into(&mut scratch, &mut out);
+        token.for_each_reading(&mut scratch, |r| out.push(r.into()));
     }
     out
 }
@@ -76,7 +148,7 @@ const MIN_CURRENCY_FIGURE: u128 = 100;
 /// rounded arithmetic of the model's own.
 const PRECISE_FRACTION_DIGITS: usize = 4;
 
-/// What a reading is compared as.
+/// What a stated reading is compared as.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Key {
     /// The integer, which a printed decimal of the same integer part also grounds.
@@ -90,29 +162,32 @@ pub enum Key {
     },
 }
 
-impl Number<'_> {
-    /// This reading, borrowed.
+impl Key {
+    /// The integer part, which every reading that grounds this key shares.
     #[must_use]
-    pub fn as_reading(&self) -> Reading<'_> {
-        Reading {
-            text: self.text,
-            span: self.span.clone(),
-            integer: &self.integer,
-            fraction: self.fraction.as_deref(),
-            grouped: self.grouped,
-            currency: self.currency,
-            derived: self.derived,
+    pub fn integer(&self) -> &str {
+        match self {
+            Self::Integer(integer) | Self::Decimal { integer, .. } => integer,
         }
     }
 
-    /// The key a reply states with this reading; see [`Reading::stated`].
+    /// Whether a corpus reading carries this key: the same integer, and for a
+    /// precise decimal a printed fraction that starts with the stated one.
     #[must_use]
-    pub fn stated(&self) -> Option<Key> {
-        self.as_reading().stated()
+    pub fn grounded_by(&self, reading: &Reading<'_, '_>) -> bool {
+        match self {
+            Self::Integer(integer) => integer == reading.integer,
+            Self::Decimal { integer, fraction } => {
+                integer == reading.integer
+                    && reading
+                        .fraction
+                        .is_some_and(|printed| printed.starts_with(fraction.as_str()))
+            }
+        }
     }
 }
 
-impl Reading<'_> {
+impl Reading<'_, '_> {
     /// The key a reply states with this reading, or None when it is not held
     /// to it: a derived reading, or a figure under the floor its notation sets.
     #[must_use]
