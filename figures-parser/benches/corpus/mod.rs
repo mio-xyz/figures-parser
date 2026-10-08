@@ -1,10 +1,13 @@
 //! The inputs both benches run over: four 300 KB corpora shaped like the
 //! turns the gate sees, and the replies checked against them.
 
-#![allow(dead_code, reason = "each bench uses the subset it needs")]
+use std::hint::black_box;
+
+use figures_parser::number::scan::tokens;
+use figures_parser::{extract_numbers, ungrounded_figures};
 
 /// The size every corpus is built to, in bytes.
-pub const SIZE: usize = 300 * 1024;
+const SIZE: usize = 300 * 1024;
 
 /// `unit` repeated to `SIZE` bytes.
 fn repeat_to_size(unit: &str) -> String {
@@ -62,6 +65,31 @@ pub struct Case {
     pub text: String,
     /// A reply whose figures the corpus carries, so the comparison exits early.
     pub grounded: &'static str,
+}
+
+/// One measured path over a case: its name and the call, which returns a
+/// count so the work cannot be optimised away.
+pub type Path<'c> = (&'static str, Box<dyn Fn() -> usize + 'c>);
+
+/// The hot paths both benches measure over `case`.
+#[must_use]
+pub fn paths(case: &Case) -> [Path<'_>; 4] {
+    let text = case.text.as_str();
+    [
+        ("tokens", Box::new(move || tokens(black_box(text)).count())),
+        (
+            "extract_numbers",
+            Box::new(move || extract_numbers(black_box(text)).len()),
+        ),
+        (
+            "ungrounded/grounded",
+            Box::new(move || ungrounded_figures(case.grounded, black_box(text)).len()),
+        ),
+        (
+            "ungrounded/ungrounded",
+            Box::new(move || ungrounded_figures(UNGROUNDED_REPLY, black_box(text)).len()),
+        ),
+    ]
 }
 
 /// Every corpus with its grounded reply.
