@@ -1,0 +1,16 @@
+[package]
+name = "figures-parser"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+unicode-general-category.workspace = true
+unicode-script.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
