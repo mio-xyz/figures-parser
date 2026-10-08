@@ -6,7 +6,6 @@
 use unicode_general_category::{GeneralCategory, get_general_category};
 use unicode_script::{Script, UnicodeScript};
 
-use super::currency_codes::CURRENCY_CODES;
 use super::digits::digit_value;
 
 /// The group and decimal symbols CLDR locales print. `tests/it/locales.rs`
@@ -111,7 +110,7 @@ fn char_before(text: &str, at: usize) -> Option<char> {
 /// code standing as a whole word: `edge`, the character past the run, must
 /// not continue it.
 fn is_currency_code(run: &str, edge: Option<char>) -> bool {
-    !edge.is_some_and(char::is_alphanumeric) && CURRENCY_CODES.binary_search(&run).is_ok()
+    !edge.is_some_and(char::is_alphanumeric) && iso_currency::Currency::from_code(run).is_some()
 }
 
 /// Whether a currency sign or code marks the figure at `start..end`, on either

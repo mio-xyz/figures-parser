@@ -1,9 +1,7 @@
 //! The number kind: digits in any script, grouped or decimal, and what a
 //! reading of one is held to.
 
-mod currency_codes;
 pub mod digits;
-mod digits_table;
 mod readings;
 pub mod scan;
 

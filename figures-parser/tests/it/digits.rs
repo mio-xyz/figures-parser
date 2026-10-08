@@ -1,30 +1,54 @@
 use std::borrow::Cow;
-use std::collections::BTreeMap;
 
 use figures_parser::number::digits::{ascii, digit_value};
+use unicode_general_category::{GeneralCategory, get_general_category};
+
+// The table must hold every decimal digit the Unicode tables know; it may
+// hold digits newer than them, which they report as unassigned.
+#[test]
+fn the_table_holds_every_decimal_digit_unicode_encodes() {
+    let mut digits = 0;
+    for c in '\0'..=char::MAX {
+        let category = get_general_category(c);
+        let known = digit_value(c).is_some();
+        if category == GeneralCategory::DecimalNumber {
+            assert!(
+                known,
+                "U+{:04X} is a decimal digit missing from the table",
+                u32::from(c)
+            );
+        }
+        if known {
+            assert!(
+                matches!(
+                    category,
+                    GeneralCategory::DecimalNumber | GeneralCategory::Unassigned
+                ),
+                "U+{:04X} is in the table but not a decimal digit",
+                u32::from(c)
+            );
+            digits += 1;
+        }
+    }
+    assert_eq!(digits, 770);
+}
 
 #[test]
-fn table_matches_the_platform_fixture() {
-    let json = include_str!("../fixtures/digits.json");
-    let table: BTreeMap<String, u8> = serde_json::from_str(json).expect("fixture parses");
-    assert_eq!(table.len(), 770);
-    for (glyph, value) in &table {
-        let c = glyph.chars().next().unwrap();
-        assert_eq!(
-            digit_value(c),
-            Some(*value),
-            "glyph {glyph:?} (U+{:04X})",
-            u32::from(c)
-        );
+fn reads_each_scripts_digits_by_their_place_in_the_run() {
+    for (c, value) in [
+        ('0', 0),
+        ('9', 9),
+        ('٣', 3),
+        ('۷', 7),
+        ('७', 7),
+        ('๙', 9),
+        ('５', 5),
+        ('𞥕', 5),
+        ('𝟗', 9),
+        ('\u{1D7EE}', 2),
+    ] {
+        assert_eq!(digit_value(c), Some(value), "{c:?}");
     }
-    let digits = ('\0'..=char::MAX)
-        .filter(|&c| digit_value(c).is_some())
-        .count();
-    assert_eq!(
-        digits,
-        table.len(),
-        "every digit the reader knows is in the fixture"
-    );
 }
 
 #[test]

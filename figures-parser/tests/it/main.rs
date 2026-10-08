@@ -6,7 +6,7 @@
     clippy::panic,
     clippy::indexing_slicing,
     clippy::missing_docs_in_private_items,
-    reason = "a test asserts with unwrap and reads fixtures by index"
+    reason = "a test asserts with unwrap and reads by index"
 )]
 
 mod digits;

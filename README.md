@@ -5,14 +5,14 @@ with no consumer yet: the agent's grounding gate still runs its
 TypeScript reader, and plugging this in is a later round.
 
 - `figures-parser`: pure Rust, speaking byte offsets. `number` is the number
-  kind: `digits` maps every decimal digit the platform's ICU formats to its
-  value, from the run starts `scripts/dump-digit-values.mjs` generates into
-  `src/number/digits_table.rs` (regenerate it on a Node upgrade); `scan` is an
+  kind: `digits` maps every decimal digit Unicode encodes to its value, from
+  a table of the 77 runs of ten it encodes them in (append-only by Unicode's
+  stability policy; a test fails when the `unicode-general-category` tables
+  know a digit it lacks); `scan` is an
   iterator over numeric tokens, found by a byte cursor in one pass with no
   allocation, each marked when a currency sign (`\p{Sc}`) or an ISO 4217 code
-  stands on either side of it with at most one space between (the codes are
-  generated from Node's Intl by `scripts/dump-currency-codes.mjs` into
-  `src/number/currency_codes.rs`); a token's `for_each_reading` yields
+  stands on either side of it with at most one space between (the codes come
+  from the `iso_currency` crate); a token's `for_each_reading` yields
   thousands, decimal or neighbour readings (`Reading`, borrowing the text and
   one scratch buffer the caller keeps), and `numbers(text)` iterates `Number`s lazily (digits borrowed from the
   text wherever they are a slice of it), so a consumer that stops early reads
@@ -29,14 +29,6 @@ TypeScript reader, and plugging this in is a later round.
   newer than its tables bounds a token.
 - `figures-parser-napi`: the napi-rs binding, with `extract` (UTF-16 offsets,
   an error for an unknown kind name) and `ungrounded_figures`.
-
-The fixtures under `figures-parser/tests/fixtures` are generated from Node's
-Intl: `digits.json` (with the digit table) by `scripts/dump-digit-values.mjs`,
-`locale-numbers.json` (how each locale prints 1234567.89) by
-`scripts/dump-locale-numbers.mjs`, and `currency-codes.json` (with the code
-table) by `scripts/dump-currency-codes.mjs`; the three share
-`scripts/lib/generated-files.mjs`. Each script takes `--check` and exits 1
-while its files differ from what the running Node generates.
 
 `cargo build --release -p figures-parser-napi` builds the addon, which
 `smoke.mjs` loads as `figures-parser.linux-x64-gnu.node` (`rust-toolchain.toml`

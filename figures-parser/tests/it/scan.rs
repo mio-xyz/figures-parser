@@ -94,17 +94,17 @@ fn a_trailing_symbol_is_not_part_of_the_token() {
 }
 
 #[test]
-fn currency_codes_match_the_platform_fixture() {
-    let json = include_str!("../fixtures/currency-codes.json");
-    let codes: Vec<String> = serde_json::from_str(json).expect("fixture parses");
-    assert!(codes.len() > 100);
-    for code in &codes {
+fn a_currency_code_is_an_iso_4217_code_standing_as_a_word() {
+    for code in ["EUR", "JPY", "GBP", "INR", "CHF", "XAU", "VED"] {
         let before = format!("{code} 1,250");
         let after = format!("1,250 {code}");
         assert!(tokens(&before).all(|t| t.currency), "{before}");
         assert!(tokens(&after).all(|t| t.currency), "{after}");
     }
-    assert!(tokens("ARR 1,250").all(|t| !t.currency));
+    for word in ["ARR", "FYI", "KPI", "EURO"] {
+        let before = format!("{word} 1,250");
+        assert!(tokens(&before).all(|t| !t.currency), "{before}");
+    }
 }
 
 // The scanner answers ASCII by byte before consulting the tables; both arms
