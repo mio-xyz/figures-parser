@@ -1,5 +1,8 @@
 //! Numeric tokens of a text: digit groups joined by single symbols.
 
+use std::iter::Peekable;
+use std::str::CharIndices;
+
 use unicode_general_category::{GeneralCategory, get_general_category};
 use unicode_script::{Script, UnicodeScript};
 
@@ -35,6 +38,9 @@ pub const fn is_decimal_symbol(c: char) -> bool {
 /// Whether `c` is a group or decimal symbol.
 #[must_use]
 pub fn is_symbol(c: char) -> bool {
+    if c.is_ascii() {
+        return matches!(c, ',' | '.' | '\'' | ' ');
+    }
     GROUP_OR_DECIMAL_SYMBOLS.contains(&c)
 }
 
@@ -59,6 +65,9 @@ fn is_unspaced_script(c: char) -> bool {
 
 /// Whether `c` ends a token: another digit, or a letter of a word.
 fn is_boundary(c: char) -> bool {
+    if c.is_ascii() {
+        return c.is_ascii_alphanumeric();
+    }
     if is_digit(c) {
         return true;
     }
@@ -75,6 +84,9 @@ fn is_boundary(c: char) -> bool {
 
 /// Whether `c` is a currency sign.
 fn is_currency_sign(c: char) -> bool {
+    if c.is_ascii() {
+        return c == '$';
+    }
     get_general_category(c) == GeneralCategory::CurrencySymbol
 }
 
@@ -85,12 +97,19 @@ pub struct Token<'a> {
     pub text: &'a str,
     /// Byte offset of `text` in the scanned text.
     pub start: usize,
-    /// The digit groups, as written.
-    pub groups: Vec<&'a str>,
-    /// The symbol after each group but the last.
-    pub symbols: Vec<char>,
     /// A currency sign stood right before the token, with at most one space between.
     pub currency: bool,
+}
+
+/// The numeric tokens of a text, found as they are asked for.
+#[derive(Debug, Clone)]
+pub struct Tokens<'a> {
+    /// The scanned text.
+    text: &'a str,
+    /// The characters not yet scanned.
+    chars: Peekable<CharIndices<'a>>,
+    /// The character before the next one, and the one before that.
+    before: (Option<char>, Option<char>),
 }
 
 /// The numeric tokens of `text`, in order.
@@ -100,75 +119,74 @@ pub struct Token<'a> {
 /// ("p1789368220119"), a version ("v3.1") or a unit suffix ("12.5K") is not
 /// one. A dash is not a symbol, so a date ("2026-11-05") is read as its parts.
 #[must_use]
-pub fn tokens(text: &str) -> Vec<Token<'_>> {
-    let mut out = Vec::new();
-    let mut chars = text.char_indices().peekable();
-    // The character before the current one, and the one before that.
-    let mut before: (Option<char>, Option<char>) = (None, None);
-    while let Some((start, c)) = chars.next() {
-        if !is_digit(c) || before.0.is_some_and(is_boundary) {
-            before = (Some(c), before.0);
-            continue;
-        }
-        let currency = {
-            let sign = if before.0.is_some_and(char::is_whitespace) {
-                before.1
-            } else {
-                before.0
-            };
-            sign.is_some_and(is_currency_sign)
-        };
-        let mut groups = Vec::new();
-        let mut symbols = Vec::new();
-        let mut group_start = start;
-        let mut end = start + c.len_utf8();
-        let mut last = c;
+pub fn tokens(text: &str) -> Tokens<'_> {
+    Tokens {
+        text,
+        chars: text.char_indices().peekable(),
+        before: (None, None),
+    }
+}
+
+impl<'a> Iterator for Tokens<'a> {
+    type Item = Token<'a>;
+
+    fn next(&mut self) -> Option<Token<'a>> {
         loop {
-            while let Some(&(at, d)) = chars.peek() {
-                if !is_digit(d) {
-                    break;
-                }
-                chars.next();
-                end = at + d.len_utf8();
-                last = d;
-            }
-            groups.push(text.get(group_start..end).unwrap_or_default());
-            // Extend over `symbol digits+` while a single symbol joins two groups.
-            let joined = chars.peek().and_then(|&(at, s)| {
-                if !is_symbol(s) {
-                    return None;
-                }
-                let next = at + s.len_utf8();
-                let d = text.get(next..)?.chars().next()?;
-                is_digit(d).then_some((s, next))
-            });
-            let Some((symbol, next)) = joined else {
-                break;
-            };
-            chars.next();
-            symbols.push(symbol);
-            group_start = next;
-        }
-        before = (Some(last), None);
-        // A run that ends against a word letter ("12.5K") gives back its
-        // last group; a single group against a letter ("2026x") is part of
-        // that word and reads as nothing.
-        if chars.peek().is_some_and(|&(_, n)| is_boundary(n)) {
-            if groups.len() == 1 {
+            let (start, c) = self.chars.next()?;
+            if !is_digit(c) || self.before.0.is_some_and(is_boundary) {
+                self.before = (Some(c), self.before.0);
                 continue;
             }
-            groups.pop();
-            symbols.pop();
+            let currency = {
+                let sign = if self.before.0.is_some_and(char::is_whitespace) {
+                    self.before.1
+                } else {
+                    self.before.0
+                };
+                sign.is_some_and(is_currency_sign)
+            };
+            let mut end = start + c.len_utf8();
+            let mut last = c;
+            // Where the last joining symbol stands, once there is one.
+            let mut last_symbol: Option<usize> = None;
+            loop {
+                while let Some(&(at, d)) = self.chars.peek() {
+                    if !is_digit(d) {
+                        break;
+                    }
+                    self.chars.next();
+                    end = at + d.len_utf8();
+                    last = d;
+                }
+                // Extend over `symbol digits+` while a single symbol joins two groups.
+                let joins = self.chars.peek().is_some_and(|&(at, s)| {
+                    is_symbol(s)
+                        && self
+                            .text
+                            .get(at + s.len_utf8()..)
+                            .and_then(|rest| rest.chars().next())
+                            .is_some_and(is_digit)
+                });
+                if !joins {
+                    break;
+                }
+                last_symbol = self.chars.next().map(|(at, _)| at);
+            }
+            self.before = (Some(last), None);
+            // A run that ends against a word letter ("12.5K") gives back its
+            // last group; a single group against a letter ("2026x") is part of
+            // that word and reads as nothing.
+            if self.chars.peek().is_some_and(|&(_, n)| is_boundary(n)) {
+                let Some(at) = last_symbol else {
+                    continue;
+                };
+                end = at;
+            }
+            return Some(Token {
+                text: self.text.get(start..end).unwrap_or_default(),
+                start,
+                currency,
+            });
         }
-        let len = groups.iter().map(|g| g.len()).sum::<usize>()
-            + symbols.iter().map(|s| s.len_utf8()).sum::<usize>();
-        out.push(Token {
-            text: text.get(start..start + len).unwrap_or_default(),
-            start,
-            groups,
-            symbols,
-            currency,
-        });
     }
-    out
 }

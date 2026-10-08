@@ -1,7 +1,7 @@
 use figures_parser::number::scan::tokens;
 
 fn texts(s: &str) -> Vec<&str> {
-    tokens(s).into_iter().map(|t| t.text).collect()
+    tokens(s).map(|t| t.text).collect()
 }
 
 #[test]
@@ -18,11 +18,9 @@ fn reads_digit_groups_joined_by_single_symbols() {
 }
 
 #[test]
-fn a_token_carries_its_groups_and_symbols() {
-    let t = tokens("ARR 1,250.5 now").remove(0);
-    assert_eq!((t.text, t.start), ("1,250.5", 4));
-    assert_eq!(t.groups, ["1", "250", "5"]);
-    assert_eq!(t.symbols, [',', '.']);
+fn a_token_knows_where_it_starts() {
+    let t = tokens("ARR 1,250.5 now").next().unwrap();
+    assert_eq!((t.text, t.start, t.currency), ("1,250.5", 4, false));
 }
 
 #[test]
@@ -61,9 +59,10 @@ fn sits_against_letters_of_scripts_written_without_spaces() {
 
 #[test]
 fn marks_a_currency_sign_before_the_token() {
-    let t = tokens("The fee was $729 and € 1,458 and USD 99.");
     assert_eq!(
-        t.iter().map(|t| (t.text, t.currency)).collect::<Vec<_>>(),
+        tokens("The fee was $729 and € 1,458 and USD 99.")
+            .map(|t| (t.text, t.currency))
+            .collect::<Vec<_>>(),
         [("729", true), ("1,458", true), ("99", false)]
     );
 }

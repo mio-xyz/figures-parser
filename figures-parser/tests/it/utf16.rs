@@ -7,7 +7,6 @@ fn converts_byte_offsets_to_utf16_and_slices_the_input() {
     let u: Vec<u16> = s.encode_utf16().collect();
     let mut cursor = Utf16Cursor::new(s);
     let found: Vec<(&str, u32, u32)> = tokens(s)
-        .into_iter()
         .map(|t| {
             let start = cursor.at(t.start);
             (t.text, start, start + units(t.text))

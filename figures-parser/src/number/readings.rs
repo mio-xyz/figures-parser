@@ -3,38 +3,46 @@
 
 use std::borrow::Cow;
 
-use super::Number;
-use super::digits::ascii;
-use super::scan::{Token, is_decimal_symbol};
+use super::digits::{ascii_in, push_ascii};
+use super::scan::{Token, is_decimal_symbol, is_symbol};
+use super::{Number, Reading};
 
-/// Whether `groups` is thousands grouping: a lead of 1–3 digits, then
-/// three-digit groups; or the Indian lakh notation, two-digit groups ending
-/// in one of three ("12,50,000").
-fn is_thousands(groups: &[&str]) -> bool {
-    let Some((lead, rest)) = groups.split_first() else {
-        return false;
-    };
-    let Some((last, middle)) = rest.split_last() else {
-        return false;
-    };
-    let lead_len = lead.chars().count();
-    if lead_len > 3 || last.chars().count() != 3 {
-        return false;
+/// The length of a digit group in code points.
+fn len_chars(group: &str) -> usize {
+    if group.is_ascii() {
+        group.len()
+    } else {
+        group.chars().count()
     }
-    middle.iter().all(|g| g.chars().count() == 3)
-        || (lead_len <= 2 && middle.iter().all(|g| g.chars().count() == 2))
 }
 
-/// The groups joined, in ASCII digits.
-fn joined<'a>(groups: &[&'a str]) -> Cow<'a, str> {
-    match groups {
-        [one] => ascii(one),
-        _ => Cow::Owned(ascii(&groups.concat()).into_owned()),
+/// Whether group lengths are thousands grouping: a lead of 1–3 digits, then
+/// three-digit groups; or the Indian lakh notation, two-digit groups ending
+/// in one of three ("12,50,000").
+fn is_thousands(mut lengths: impl Iterator<Item = usize>) -> bool {
+    let Some(lead) = lengths.next() else {
+        return false;
+    };
+    let Some(mut last) = lengths.next() else {
+        return false;
+    };
+    let (mut threes, mut twos) = (true, true);
+    for next in lengths {
+        threes &= last == 3;
+        twos &= last == 2;
+        last = next;
     }
+    lead <= 3 && last == 3 && (threes || (lead <= 2 && twos))
 }
 
 impl<'a> Token<'a> {
-    /// The readings of this token.
+    /// The digit groups, as written.
+    fn groups(&self) -> impl DoubleEndedIterator<Item = &'a str> + Clone {
+        self.text.split(is_symbol)
+    }
+
+    /// Calls `f` with each reading of this token. `scratch` holds the digits
+    /// a reading joins or converts, so a token allocates nothing of its own.
     ///
     /// Groups joined by one repeated symbol that fit thousands grouping are
     /// one integer; a last symbol that may end a decimal, after a single group
@@ -44,51 +52,131 @@ impl<'a> Token<'a> {
     /// derived readings, since a printed table may mean either. A single dot
     /// or comma before three digits fits both ("1.250" is 1,250 in Berlin and
     /// 1.25 in Boston) and yields both.
-    #[must_use]
-    pub fn readings(&self) -> Vec<Number<'a>> {
-        let whole = |integer: Cow<'a, str>, fraction: Option<Cow<'a, str>>, grouped: bool| Number {
-            text: self.text,
-            span: self.start..self.start + self.text.len(),
-            integer,
-            fraction,
-            grouped,
-            currency: self.currency,
-            derived: false,
+    pub fn for_each_reading(&self, scratch: &mut String, mut f: impl FnMut(Reading<'_>)) {
+        let span = self.start..self.start + self.text.len();
+        let mut symbols = self.text.chars().filter(|&c| is_symbol(c));
+        let Some(first) = symbols.next() else {
+            f(Reading {
+                text: self.text,
+                span,
+                integer: ascii_in(self.text, scratch),
+                fraction: None,
+                grouped: false,
+                currency: self.currency,
+                derived: false,
+            });
+            return;
         };
-        let (Some((&last, leading)), Some((last_group, head))) =
-            (self.symbols.split_last(), self.groups.split_last())
-        else {
-            return vec![whole(ascii(self.text), None, false)];
-        };
-        let thousands = leading.iter().all(|&s| s == last) && is_thousands(&self.groups);
+        let mut last = first;
+        let mut count = 1;
+        // Whether every symbol but the last is the first one.
+        let mut leading_first = true;
+        for s in symbols {
+            leading_first &= last == first;
+            last = s;
+            count += 1;
+        }
+        let thousands =
+            leading_first && last == first && is_thousands(self.groups().map(len_chars));
         let decimal = is_decimal_symbol(last)
-            && (head.len() == 1
-                || leading.split_first().is_some_and(|(&first, _)| {
-                    first != last && leading.iter().all(|&s| s == first) && is_thousands(head)
-                }));
+            && (count == 1
+                || (first != last
+                    && leading_first
+                    && is_thousands(self.groups().take(count).map(len_chars))));
 
-        let mut out = Vec::new();
         if thousands {
-            out.push(whole(joined(&self.groups), None, true));
+            scratch.clear();
+            for group in self.groups() {
+                push_ascii(group, scratch);
+            }
+            f(Reading {
+                text: self.text,
+                span: span.clone(),
+                integer: scratch.as_str(),
+                fraction: None,
+                grouped: true,
+                currency: self.currency,
+                derived: false,
+            });
         }
         if decimal {
-            out.push(whole(joined(head), Some(ascii(last_group)), head.len() > 1));
+            scratch.clear();
+            let mut groups = self.groups();
+            let fraction_group = groups.next_back().unwrap_or_default();
+            for group in groups {
+                push_ascii(group, scratch);
+            }
+            let integer_len = scratch.len();
+            push_ascii(fraction_group, scratch);
+            let (integer, fraction) = scratch
+                .split_at_checked(integer_len)
+                .unwrap_or((scratch.as_str(), ""));
+            f(Reading {
+                text: self.text,
+                span,
+                integer,
+                fraction: Some(fraction),
+                grouped: count > 1,
+                currency: self.currency,
+                derived: false,
+            });
         }
         if thousands || !decimal {
-            let mut at = self.start;
-            for (i, &group) in self.groups.iter().enumerate() {
-                out.push(Number {
+            let mut at = 0;
+            for (i, group) in self.groups().enumerate() {
+                let symbol_len = self
+                    .text
+                    .get(at + group.len()..)
+                    .and_then(|rest| rest.chars().next())
+                    .map_or(0, char::len_utf8);
+                f(Reading {
                     text: group,
-                    span: at..at + group.len(),
-                    integer: ascii(group),
+                    span: self.start + at..self.start + at + group.len(),
+                    integer: ascii_in(group, scratch),
                     fraction: None,
                     grouped: false,
                     currency: self.currency && i == 0,
                     derived: thousands,
                 });
-                at += group.len() + self.symbols.get(i).map_or(0, |s| s.len_utf8());
+                at += group.len() + symbol_len;
             }
         }
+    }
+
+    /// The readings of this token, each owning what it could not borrow from
+    /// the text. See [`Token::for_each_reading`] for what the readings are.
+    #[must_use]
+    pub fn readings(&self) -> Vec<Number<'a>> {
+        let mut out = Vec::new();
+        self.readings_into(&mut String::new(), &mut out);
         out
+    }
+
+    /// Appends the readings of this token to `out`; see [`Token::readings`].
+    pub fn readings_into(&self, scratch: &mut String, out: &mut Vec<Number<'a>>) {
+        self.for_each_reading(scratch, |r| {
+            let text = self
+                .text
+                .get(r.span.start - self.start..r.span.end - self.start)
+                .unwrap_or_default();
+            let integer = if r.integer == text {
+                Cow::Borrowed(text)
+            } else {
+                Cow::Owned(r.integer.to_owned())
+            };
+            let fraction = r.fraction.map(|f| match text.get(text.len() - f.len()..) {
+                Some(tail) if tail == f => Cow::Borrowed(tail),
+                _ => Cow::Owned(f.to_owned()),
+            });
+            out.push(Number {
+                text,
+                span: r.span,
+                integer,
+                fraction,
+                grouped: r.grouped,
+                currency: r.currency,
+                derived: r.derived,
+            });
+        });
     }
 }

@@ -20,6 +20,30 @@ pub fn digit_value(c: char) -> Option<u8> {
         .filter(|&d| d < 10)
 }
 
+/// Appends `digits` to `out` with every decimal digit replaced by its ASCII
+/// value; any other character is kept as is.
+pub fn push_ascii(digits: &str, out: &mut String) {
+    if digits.is_ascii() {
+        out.push_str(digits);
+        return;
+    }
+    out.extend(
+        digits
+            .chars()
+            .map(|c| digit_value(c).map_or(c, |v| char::from(b'0' + v))),
+    );
+}
+
+/// `digits` in ASCII: itself when it already is, else converted into `scratch`.
+pub fn ascii_in<'s>(digits: &'s str, scratch: &'s mut String) -> &'s str {
+    if digits.is_ascii() {
+        return digits;
+    }
+    scratch.clear();
+    push_ascii(digits, scratch);
+    scratch.as_str()
+}
+
 /// `digits` with every decimal digit replaced by its ASCII value; any other
 /// character is kept as is. Borrowed when nothing needs replacing.
 #[must_use]
@@ -27,10 +51,7 @@ pub fn ascii(digits: &str) -> Cow<'_, str> {
     if digits.is_ascii() {
         return Cow::Borrowed(digits);
     }
-    Cow::Owned(
-        digits
-            .chars()
-            .map(|c| digit_value(c).map_or(c, |v| char::from(b'0' + v)))
-            .collect(),
-    )
+    let mut out = String::with_capacity(digits.len());
+    push_ascii(digits, &mut out);
+    Cow::Owned(out)
 }

@@ -123,7 +123,8 @@ fn groups_that_fit_neither_are_neighbours() {
 fn currency_rides_on_the_whole_and_on_the_first_neighbour_only() {
     let currency = |text: &str| -> Vec<bool> {
         tokens(text)
-            .remove(0)
+            .next()
+            .unwrap()
             .readings()
             .iter()
             .map(|r| r.currency)
@@ -156,4 +157,28 @@ fn every_reading_slices_the_input_at_its_span() {
     }
     assert!(e[0].currency && e[0].grouped && !e[0].derived);
     assert!(e[2].derived);
+}
+
+#[test]
+fn for_each_reading_borrows_the_text_or_the_scratch_and_matches_readings() {
+    let mut scratch = String::new();
+    for text in [
+        "1,250",
+        "١٬٢٥٠٬٠٠٠",
+        "8.220,5042",
+        "15977,10140,26117",
+        "٣٫١٤",
+    ] {
+        let token = tokens(text).next().unwrap();
+        let mut seen = Vec::new();
+        token.for_each_reading(&mut scratch, |r| {
+            seen.push((r.integer.to_owned(), r.fraction.map(str::to_owned), r.span));
+        });
+        let owned: Vec<_> = token
+            .readings()
+            .into_iter()
+            .map(|n| (n.integer.into_owned(), n.fraction.map(Into::into), n.span))
+            .collect();
+        assert_eq!(seen, owned, "{text}");
+    }
 }

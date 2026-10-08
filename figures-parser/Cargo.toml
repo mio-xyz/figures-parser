@@ -14,3 +14,12 @@ unicode-script.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "figures"
+harness = false
+
+[[bench]]
+name = "allocations"
+harness = false
