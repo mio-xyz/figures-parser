@@ -30,14 +30,9 @@ impl<'a> Utf16Cursor<'a> {
             self.byte = 0;
             self.unit = 0;
         }
-        let units = self
-            .text
-            .get(self.byte..byte)
-            .map_or(0, |s| s.encode_utf16().count());
+        let width = self.text.get(self.byte..byte).map_or(0, units);
         self.byte = byte;
-        self.unit = self
-            .unit
-            .saturating_add(u32::try_from(units).unwrap_or(u32::MAX));
+        self.unit = self.unit.saturating_add(width);
         self.unit
     }
 }

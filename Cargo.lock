@@ -184,6 +184,9 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "iso_currency",
+ "linkify",
+ "rustc-hash",
+ "stats_alloc",
  "unicode-general-category",
  "unicode-script",
 ]
@@ -358,6 +361,15 @@ checksum = "754ca22de805bb5744484a5b151a9e1a8e837d5dc232c2d7d8c2e3492edc8b60"
 dependencies = [
  "cfg-if",
  "windows-link",
+]
+
+[[package]]
+name = "linkify"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "92f9ae2f3d31697697311f016320fe984127e636b45cf5eb5c175b7eb103dadb"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]
@@ -583,6 +595,12 @@ name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
+
+[[package]]
+name = "stats_alloc"
+version = "0.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c0e04424e733e69714ca1bbb9204c1a57f09f5493439520f9f68c132ad25eec"
 
 [[package]]
 name = "syn"

@@ -1,6 +1,4 @@
-use std::borrow::Cow;
-
-use figures_parser::number::digits::{ascii, digit_value};
+use figures_parser::number::digits::{ascii_in, digit_value};
 use unicode_general_category::{GeneralCategory, get_general_category};
 
 // The table must hold every decimal digit the Unicode tables know; it may
@@ -59,11 +57,15 @@ fn letters_and_symbols_are_not_digits() {
 }
 
 #[test]
-fn ascii_maps_every_script_and_keeps_the_rest() {
-    assert_eq!(ascii("١٬٢٥٠"), "1٬250");
-    assert_eq!(ascii("۱۲۵۰"), "1250");
-    assert_eq!(ascii("１，２５０"), "1，250");
-    assert_eq!(ascii("1250"), "1250");
-    assert!(matches!(ascii("1250"), Cow::Borrowed(_)));
-    assert!(matches!(ascii("١٢٥٠"), Cow::Owned(_)));
+fn ascii_in_maps_every_script_and_keeps_the_rest() {
+    let mut scratch = String::new();
+    for (written, ascii) in [
+        ("١٬٢٥٠", "1٬250"),
+        ("۱۲۵۰", "1250"),
+        ("１，２５０", "1，250"),
+    ] {
+        assert_eq!(ascii_in(written, &mut scratch), ascii);
+    }
+    let plain = "1250";
+    assert!(std::ptr::eq(ascii_in(plain, &mut scratch), plain));
 }

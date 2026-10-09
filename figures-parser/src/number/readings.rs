@@ -5,7 +5,7 @@ use super::Reading;
 use super::digits::{ascii_in, push_ascii};
 use super::scan::{Token, is_decimal_symbol, is_symbol};
 
-/// The group lengths seen so far, and whether they are thousands grouping.
+/// The group lengths seen so far, and where they stop being thousands grouping.
 #[derive(Default)]
 struct Run {
     /// How many groups have ended.
@@ -14,10 +14,10 @@ struct Run {
     lead: usize,
     /// The last ended group's length in code points.
     prev: usize,
-    /// Whether every middle group so far has three digits.
-    threes: bool,
-    /// Whether every middle group so far has two digits.
-    twos: bool,
+    /// A middle group so far had other than three digits.
+    broke_threes: bool,
+    /// A middle group so far had other than two digits.
+    broke_twos: bool,
 }
 
 impl Run {
@@ -26,8 +26,8 @@ impl Run {
         if self.groups == 0 {
             self.lead = len;
         } else if self.groups >= 2 {
-            self.threes &= self.prev == 3;
-            self.twos &= self.prev == 2;
+            self.broke_threes |= self.prev != 3;
+            self.broke_twos |= self.prev != 2;
         }
         self.prev = len;
         self.groups += 1;
@@ -40,21 +40,21 @@ impl Run {
         self.groups >= 2
             && self.lead <= 3
             && self.prev == 3
-            && (self.threes || (self.lead <= 2 && self.twos))
+            && (!self.broke_threes || (self.lead <= 2 && !self.broke_twos))
     }
 }
 
 /// What one pass over a token's text tells about its groups and symbols.
 #[derive(Default)]
 struct Shape {
-    /// How many symbols join the groups.
-    symbols: usize,
     /// The first symbol.
     first: Option<char>,
     /// The last symbol.
     last: Option<char>,
-    /// Whether every symbol but the last is the first one.
-    leading_first: bool,
+    /// The byte offset of the last symbol.
+    last_at: usize,
+    /// A symbol before the last differs from the first.
+    mixed_lead: bool,
     /// The groups.
     run: Run,
     /// Whether the groups before the last one are thousands grouping.
@@ -64,39 +64,33 @@ struct Shape {
 impl Shape {
     /// Reads `text` in one pass.
     fn of(text: &str) -> Self {
-        let mut shape = Self {
-            leading_first: true,
-            run: Run {
-                threes: true,
-                twos: true,
-                ..Run::default()
-            },
-            ..Self::default()
-        };
+        let mut shape = Self::default();
         let mut len = 0;
-        for c in text.chars() {
+        for (at, c) in text.char_indices() {
             if is_symbol(c) {
-                shape.group(len);
+                shape.run.push(len);
                 len = 0;
-                shape.symbols += 1;
                 match shape.first {
                     None => shape.first = Some(c),
-                    Some(first) => shape.leading_first &= shape.last == Some(first),
+                    Some(first) => shape.mixed_lead |= shape.last != Some(first),
                 }
                 shape.last = Some(c);
+                shape.last_at = at;
             } else {
                 len += 1;
             }
         }
-        shape.group(len);
+        shape.head_thousands = shape.run.thousands();
+        shape.run.push(len);
         shape
     }
+}
 
-    /// Ends a group of `len` digits, remembering first whether the groups
-    /// before it were thousands grouping.
-    const fn group(&mut self, len: usize) {
-        self.head_thousands = self.run.thousands();
-        self.run.push(len);
+/// Writes the digit groups of `text` into `scratch`, joined and in ASCII.
+fn join_groups(text: &str, scratch: &mut String) {
+    scratch.clear();
+    for group in text.split(is_symbol) {
+        push_ascii(group, scratch);
     }
 }
 
@@ -114,7 +108,7 @@ impl<'a> Token<'a> {
             integer,
             fraction,
             grouped,
-            currency: self.currency,
+            currency: self.currency(),
             derived: false,
         }
     }
@@ -131,37 +125,44 @@ impl<'a> Token<'a> {
     /// or comma before three digits fits both ("1.250" is 1,250 in Berlin and
     /// 1.25 in Boston) and yields both.
     pub fn for_each_reading(&self, scratch: &mut String, mut f: impl FnMut(Reading<'a, '_>)) {
+        if self.text.bytes().all(|b| b.is_ascii_digit()) {
+            f(self.whole(self.text, None, false));
+            return;
+        }
         let shape = Shape::of(self.text);
         let (Some(first), Some(last)) = (shape.first, shape.last) else {
             f(self.whole(ascii_in(self.text, scratch), None, false));
             return;
         };
-        let thousands = shape.leading_first && last == first && shape.run.thousands();
+        let groups = shape.run.groups;
+        let thousands = !shape.mixed_lead && last == first && shape.run.thousands();
         let decimal = is_decimal_symbol(last)
-            && (shape.symbols == 1
-                || (first != last && shape.leading_first && shape.head_thousands));
+            && (groups == 2 || (first != last && !shape.mixed_lead && shape.head_thousands));
 
         if thousands {
-            scratch.clear();
-            for group in self.text.split(is_symbol) {
-                push_ascii(group, scratch);
-            }
+            join_groups(self.text, scratch);
             f(self.whole(scratch.as_str(), None, true));
         }
         if decimal {
-            scratch.clear();
-            let (head, fraction_group) = self.text.rsplit_once(last).unwrap_or((self.text, ""));
-            for group in head.split(is_symbol) {
-                push_ascii(group, scratch);
+            let head = self.text.get(..shape.last_at).unwrap_or_default();
+            let tail = self
+                .text
+                .get(shape.last_at + last.len_utf8()..)
+                .unwrap_or_default();
+            if groups == 2 && self.text.is_ascii() {
+                f(self.whole(head, Some(tail), false));
+            } else {
+                join_groups(head, scratch);
+                let integer_len = scratch.len();
+                push_ascii(tail, scratch);
+                let (integer, fraction) = scratch
+                    .split_at_checked(integer_len)
+                    .unwrap_or((scratch.as_str(), ""));
+                f(self.whole(integer, Some(fraction), groups > 2));
             }
-            let integer_len = scratch.len();
-            push_ascii(fraction_group, scratch);
-            let (integer, fraction) = scratch
-                .split_at_checked(integer_len)
-                .unwrap_or((scratch.as_str(), ""));
-            f(self.whole(integer, Some(fraction), shape.symbols > 1));
         }
         if thousands || !decimal {
+            let last_group = shape.run.groups - 1;
             let mut at = self.start;
             for (i, piece) in self.text.split_inclusive(is_symbol).enumerate() {
                 let group = piece.strip_suffix(is_symbol).unwrap_or(piece);
@@ -171,7 +172,8 @@ impl<'a> Token<'a> {
                     integer: ascii_in(group, scratch),
                     fraction: None,
                     grouped: false,
-                    currency: self.currency && i == 0,
+                    currency: (i == 0 && self.marked_before)
+                        || (i == last_group && self.marked_after),
                     derived: thousands,
                 });
                 at += piece.len();

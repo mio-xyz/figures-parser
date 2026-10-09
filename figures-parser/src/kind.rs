@@ -8,17 +8,20 @@ use std::str::FromStr;
 pub enum Kind {
     /// A number written in digits, in any script.
     Number,
+    /// An http(s) link.
+    Url,
 }
 
 impl Kind {
     /// Every kind, in the order `extract` reads them.
-    pub const ALL: [Self; 1] = [Self::Number];
+    pub const ALL: [Self; 2] = [Self::Number, Self::Url];
 
     /// The name a caller selects the kind by.
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
             Self::Number => "number",
+            Self::Url => "url",
         }
     }
 }

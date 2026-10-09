@@ -12,10 +12,12 @@ workspace = true
 unicode-general-category.workspace = true
 unicode-script.workspace = true
 iso_currency.workspace = true
+linkify.workspace = true
+rustc-hash.workspace = true
 
 [dev-dependencies]
-unicode-general-category.workspace = true
 criterion.workspace = true
+stats_alloc.workspace = true
 
 [[bench]]
 name = "figures"

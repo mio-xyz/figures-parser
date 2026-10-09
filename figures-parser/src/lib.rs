@@ -1,13 +1,14 @@
-//! Reads the figures a text states and decides which of a reply's figures
+//! Reads the figures and links a text states, and decides which of a reply's
 //! the turn it answers does not carry.
 
 #![forbid(unsafe_code)]
 
-pub mod ground;
-pub mod kind;
+mod kind;
 pub mod number;
+mod text;
+mod url;
 pub mod utf16;
 
-pub use ground::ungrounded_figures;
-pub use kind::Kind;
-pub use number::{Number, Reading, extract_numbers, numbers};
+pub use kind::{Kind, UnknownKind};
+pub use number::{Figure, Number, Reading, extract_numbers, numbers, ungrounded_figures};
+pub use url::{Url, fabricated_urls, ungrounded_urls, urls};

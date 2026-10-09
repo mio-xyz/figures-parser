@@ -3,7 +3,10 @@ use std::borrow::Cow;
 use figures_parser::extract_numbers;
 use figures_parser::number::scan::tokens;
 
-fn keys(text: &str) -> Vec<(String, Option<String>, bool, bool)> {
+/// A reading as compared here: integer, fraction, grouped, derived.
+type Key = (String, Option<String>, bool, bool);
+
+fn keys(text: &str) -> Vec<Key> {
     extract_numbers(text)
         .into_iter()
         .map(|n| {
@@ -17,16 +20,11 @@ fn keys(text: &str) -> Vec<(String, Option<String>, bool, bool)> {
         .collect()
 }
 
-fn k(
-    i: &str,
-    f: Option<&str>,
-    grouped: bool,
-    derived: bool,
-) -> (String, Option<String>, bool, bool) {
+fn k(i: &str, f: Option<&str>, grouped: bool, derived: bool) -> Key {
     (i.to_owned(), f.map(str::to_owned), grouped, derived)
 }
 
-fn thousands(whole: &str, parts: [&str; 3]) -> [(String, Option<String>, bool, bool); 4] {
+fn thousands(whole: &str, parts: [&str; 3]) -> [Key; 4] {
     let [a, b, c] = parts;
     [
         k(whole, None, true, false),
@@ -122,11 +120,13 @@ fn groups_that_fit_neither_are_neighbours() {
 }
 
 #[test]
-fn currency_rides_on_the_whole_and_on_the_first_neighbour_only() {
+fn currency_rides_on_the_whole_and_on_the_neighbour_beside_the_mark() {
     let currency =
         |text: &str| -> Vec<bool> { extract_numbers(text).iter().map(|r| r.currency).collect() };
     assert_eq!(currency("$15977,10140,26117"), [true, false, false]);
+    assert_eq!(currency("15977,10140,26117 €"), [false, false, true]);
     assert_eq!(currency("$1,250"), [true, true, true, false]);
+    assert_eq!(currency("1,250 USD"), [true, true, false, true]);
 }
 
 #[test]

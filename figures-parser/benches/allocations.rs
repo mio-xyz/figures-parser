@@ -1,6 +1,8 @@
-//! Heap allocations per call of each hot path over each corpus, counted by a
-//! wrapping allocator: `cargo bench --bench allocations`. A number here is
-//! exact, so a change that adds an allocation per token shows as such.
+//! Heap allocations per call of each hot path over each corpus, counted by
+//! `stats_alloc`: `cargo bench --bench allocations`. A count here is exact, so
+//! a change that adds an allocation per token shows as such. `allocs` counts
+//! allocations and reallocations; `bytes` is the bytes they requested, a
+//! reallocation counted by how much it grew.
 
 #![allow(
     clippy::missing_docs_in_private_items,
@@ -10,42 +12,21 @@
 
 mod corpus;
 
-use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::alloc::System;
 
-struct Counting;
-
-static CALLS: AtomicUsize = AtomicUsize::new(0);
-static BYTES: AtomicUsize = AtomicUsize::new(0);
-
-// SAFETY: every call is forwarded to the system allocator unchanged; the
-// counters are the only addition and touch no allocator state.
-#[allow(unsafe_code, reason = "a global allocator is an unsafe trait")]
-unsafe impl GlobalAlloc for Counting {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        CALLS.fetch_add(1, Ordering::Relaxed);
-        BYTES.fetch_add(layout.size(), Ordering::Relaxed);
-        // SAFETY: the layout is the caller's, forwarded as is.
-        unsafe { System.alloc(layout) }
-    }
-
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        // SAFETY: `ptr` came from `alloc` above with this layout.
-        unsafe { System.dealloc(ptr, layout) }
-    }
-}
+use stats_alloc::{INSTRUMENTED_SYSTEM, Region, StatsAlloc};
 
 #[global_allocator]
-static ALLOCATOR: Counting = Counting;
+static ALLOCATOR: &StatsAlloc<System> = &INSTRUMENTED_SYSTEM;
 
-fn measure(f: &dyn Fn() -> usize) -> (usize, usize) {
+fn measure(f: &dyn Fn() -> usize) -> (usize, isize) {
     f();
-    let calls = CALLS.load(Ordering::Relaxed);
-    let bytes = BYTES.load(Ordering::Relaxed);
+    let region = Region::new(ALLOCATOR);
     f();
+    let stats = region.change();
     (
-        CALLS.load(Ordering::Relaxed) - calls,
-        BYTES.load(Ordering::Relaxed) - bytes,
+        stats.allocations + stats.reallocations,
+        isize::try_from(stats.bytes_allocated).unwrap_or(isize::MAX) + stats.bytes_reallocated,
     )
 }
 

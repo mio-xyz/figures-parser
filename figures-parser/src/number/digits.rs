@@ -1,7 +1,5 @@
 //! Decimal digits of every script.
 
-use std::borrow::Cow;
-
 /// The first code point of every run of ten decimal digits Unicode encodes,
 /// sorted. Unicode's stability policy encodes every decimal digit in a run
 /// of ten ascending from zero and never moves one, so the table only grows:
@@ -42,8 +40,13 @@ pub fn digit_value(c: char) -> Option<u8> {
 pub fn push_ascii(digits: &str, out: &mut String) {
     if digits.is_ascii() {
         out.push_str(digits);
-        return;
+    } else {
+        push_converted(digits, out);
     }
+}
+
+/// Appends `digits` to `out`, every decimal digit converted to ASCII.
+fn push_converted(digits: &str, out: &mut String) {
     out.extend(
         digits
             .chars()
@@ -57,18 +60,6 @@ pub fn ascii_in<'s>(digits: &'s str, scratch: &'s mut String) -> &'s str {
         return digits;
     }
     scratch.clear();
-    push_ascii(digits, scratch);
+    push_converted(digits, scratch);
     scratch.as_str()
-}
-
-/// `digits` with every decimal digit replaced by its ASCII value; any other
-/// character is kept as is. Borrowed when nothing needs replacing.
-#[must_use]
-pub fn ascii(digits: &str) -> Cow<'_, str> {
-    if digits.is_ascii() {
-        return Cow::Borrowed(digits);
-    }
-    let mut out = String::with_capacity(digits.len());
-    push_ascii(digits, &mut out);
-    Cow::Owned(out)
 }

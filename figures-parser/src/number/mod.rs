@@ -2,27 +2,29 @@
 //! reading of one is held to.
 
 pub mod digits;
+mod ground;
 mod readings;
 pub mod scan;
 
+pub use ground::ungrounded_figures;
+
 use std::borrow::Cow;
+use std::collections::VecDeque;
 use std::ops::Range;
 
 use scan::{Tokens, tokens};
 
-/// One reading of a numeric token, as [`scan::Token::for_each_reading`]
-/// yields it: the text borrowed from the scanned text, the digits from the
-/// text or from the scratch buffer.
+/// One reading of a numeric token, its digits held as `D`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Reading<'a, 's> {
+pub struct Figure<'a, D> {
     /// As written, separators kept.
     pub text: &'a str,
     /// Byte range of `text` in the scanned text.
     pub span: Range<usize>,
     /// The integer part in ASCII digits, separators dropped.
-    pub integer: &'s str,
+    pub integer: D,
     /// The fractional digits in ASCII, or None for a whole number.
-    pub fraction: Option<&'s str>,
+    pub fraction: Option<D>,
     /// Written with thousands separators, so stated as a precise amount.
     pub grouped: bool,
     /// Written beside a currency sign or code.
@@ -32,28 +34,14 @@ pub struct Reading<'a, 's> {
     pub derived: bool,
 }
 
-/// One reading of a numeric token that outlives the scratch buffer.
-///
-/// Its digits borrow the text where they are a slice of it, which they are
-/// for every ASCII group, and are owned where they were joined or converted.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Number<'a> {
-    /// As written, separators kept.
-    pub text: &'a str,
-    /// Byte range of `text` in the scanned text.
-    pub span: Range<usize>,
-    /// The integer part in ASCII digits, separators dropped.
-    pub integer: Cow<'a, str>,
-    /// The fractional digits in ASCII, or None for a whole number.
-    pub fraction: Option<Cow<'a, str>>,
-    /// Written with thousands separators, so stated as a precise amount.
-    pub grouped: bool,
-    /// Written beside a currency sign or code.
-    pub currency: bool,
-    /// A neighbour reading of a run that also reads as thousands: the corpus
-    /// may ground with it, the reply never states it.
-    pub derived: bool,
-}
+/// A reading as [`scan::Token::for_each_reading`] yields it: its digits
+/// borrow the text or the scratch buffer, for the call.
+pub type Reading<'a, 's> = Figure<'a, &'s str>;
+
+/// A reading that outlives the scratch buffer: its digits borrow the text
+/// where they are a slice of it, which they are for every ASCII group, and
+/// are owned where they were joined or converted.
+pub type Number<'a> = Figure<'a, Cow<'a, str>>;
 
 /// `digits` borrowed from `text` when it starts (or, from the end, ends)
 /// with exactly those bytes, else owned.
@@ -92,8 +80,8 @@ pub struct Numbers<'a> {
     tokens: Tokens<'a>,
     /// The digits a reading joins or converts.
     scratch: String,
-    /// The current token's readings not yet yielded, in reverse order.
-    pending: Vec<Number<'a>>,
+    /// The current token's readings not yet yielded.
+    pending: VecDeque<Number<'a>>,
 }
 
 /// Every reading of every numeric token in `text`, in order of appearance,
@@ -103,7 +91,7 @@ pub const fn numbers(text: &str) -> Numbers<'_> {
     Numbers {
         tokens: tokens(text),
         scratch: String::new(),
-        pending: Vec::new(),
+        pending: VecDeque::new(),
     }
 }
 
@@ -112,12 +100,11 @@ impl<'a> Iterator for Numbers<'a> {
 
     fn next(&mut self) -> Option<Number<'a>> {
         loop {
-            if let Some(number) = self.pending.pop() {
+            if let Some(number) = self.pending.pop_front() {
                 return Some(number);
             }
             let token = self.tokens.next()?;
-            token.for_each_reading(&mut self.scratch, |r| self.pending.push(r.into()));
-            self.pending.reverse();
+            token.for_each_reading(&mut self.scratch, |r| self.pending.push_back(r.into()));
         }
     }
 }

@@ -1,4 +1,4 @@
-use figures_parser::number::scan::{GROUP_OR_DECIMAL_SYMBOLS, is_symbol, tokens};
+use figures_parser::number::scan::tokens;
 use unicode_general_category::{GeneralCategory, get_general_category};
 
 fn texts(s: &str) -> Vec<&str> {
@@ -21,7 +21,7 @@ fn reads_digit_groups_joined_by_single_symbols() {
 #[test]
 fn a_token_knows_where_it_starts() {
     let t = tokens("ARR 1,250.5 now").next().unwrap();
-    assert_eq!((t.text, t.start, t.currency), ("1,250.5", 4, false));
+    assert_eq!((t.text, t.start, t.currency()), ("1,250.5", 4, false));
 }
 
 #[test]
@@ -59,7 +59,7 @@ fn sits_against_letters_of_scripts_written_without_spaces() {
 }
 
 fn currency(s: &str) -> Vec<(&str, bool)> {
-    tokens(s).map(|t| (t.text, t.currency)).collect()
+    tokens(s).map(|t| (t.text, t.currency())).collect()
 }
 
 #[test]
@@ -98,25 +98,44 @@ fn a_currency_code_is_an_iso_4217_code_standing_as_a_word() {
     for code in ["EUR", "JPY", "GBP", "INR", "CHF", "XAU", "VED"] {
         let before = format!("{code} 1,250");
         let after = format!("1,250 {code}");
-        assert!(tokens(&before).all(|t| t.currency), "{before}");
-        assert!(tokens(&after).all(|t| t.currency), "{after}");
+        assert!(tokens(&before).all(|t| t.currency()), "{before}");
+        assert!(tokens(&after).all(|t| t.currency()), "{after}");
     }
     for word in ["ARR", "FYI", "KPI", "EURO"] {
         let before = format!("{word} 1,250");
-        assert!(tokens(&before).all(|t| !t.currency), "{before}");
+        assert!(tokens(&before).all(|t| !t.currency()), "{before}");
     }
 }
 
-// The scanner answers ASCII by byte before consulting the tables; both arms
-// must agree on every ASCII character.
+// The scanner answers an ASCII sign by byte before consulting the table.
 #[test]
-fn ascii_fast_paths_agree_with_the_tables() {
-    for c in (0u8..128).map(char::from) {
-        assert_eq!(is_symbol(c), GROUP_OR_DECIMAL_SYMBOLS.contains(&c), "{c:?}");
+fn reads_an_ascii_currency_sign_as_the_table_does() {
+    for c in '\0'..='\x7f' {
         let marked = tokens(&format!("{c}729"))
             .next()
-            .is_some_and(|t| t.currency);
+            .is_some_and(|t| t.currency());
         let sign = get_general_category(c) == GeneralCategory::CurrencySymbol;
         assert_eq!(marked, sign, "{c:?}");
     }
+}
+
+// A code reads as one beside a letter of a script written without spaces,
+// as a figure does; a Latin letter or a digit still continues its word.
+#[test]
+fn reads_a_currency_code_beside_a_script_written_without_spaces() {
+    assert_eq!(currency("合計は1,250 USDです"), [("1,250", true)]);
+    assert_eq!(currency("合計USD 1,250です"), [("1,250", true)]);
+    assert_eq!(
+        currency("1,250 USDX and 7 USD5"),
+        [("1,250", false), ("7", false)]
+    );
+}
+
+#[test]
+fn tokens_without_currency_read_no_marks() {
+    let marked: Vec<bool> = tokens("$729 and 99 USD")
+        .without_currency()
+        .map(|t| t.currency())
+        .collect();
+    assert_eq!(marked, [false, false]);
 }

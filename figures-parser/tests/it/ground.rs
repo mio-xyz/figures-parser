@@ -98,7 +98,7 @@ fn flags_a_bare_figure_written_behind_a_currency_sign_from_100_up() {
 }
 
 #[test]
-fn checks_a_separated_currency_figure_once_through_the_separated_path() {
+fn checks_a_separated_currency_figure_once() {
     assert_eq!(
         ungrounded_figures("A $1,458 fee.", "nothing printed"),
         vec!["1,458"]

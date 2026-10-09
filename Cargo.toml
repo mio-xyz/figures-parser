@@ -45,6 +45,9 @@ wildcard_enum_match_arm = "deny"
 unicode-general-category = "1.1"
 unicode-script = "0.5"
 iso_currency = "0.7"
+linkify = "0.11"
+rustc-hash = "2"
+stats_alloc = "0.1"
 criterion = { version = "0.8", default-features = false }
 napi = { version = "3", default-features = false, features = ["napi9"] }
 napi-derive = "3"
