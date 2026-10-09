@@ -1,5 +1,6 @@
 //! The Node binding over `figures_parser`: `extract`, `ungroundedFigures`,
-//! `ungroundedUrls` and `fabricatedUrls`.
+//! `ungroundedUrls` and `fabricatedUrls`. Every export catches a panic and
+//! throws it as an `Error`, since one unwinding into Node aborts the process.
 
 #![allow(
     clippy::needless_pass_by_value,
@@ -78,7 +79,7 @@ fn place(cursor: &mut Utf16Cursor<'_>, start: usize, text: &str) -> (u32, u32) {
 /// # Errors
 ///
 /// A kind name in `options.kinds` the library does not know.
-#[napi]
+#[napi(catch_unwind)]
 pub fn extract(
     text: String,
     options: Option<ExtractOptions>,
@@ -128,7 +129,7 @@ pub fn extract(
 }
 
 /// Figures in `reply` that `corpus` does not carry.
-#[napi]
+#[napi(catch_unwind)]
 #[must_use]
 pub fn ungrounded_figures(reply: String, corpus: String) -> Vec<String> {
     figures_parser::ungrounded_figures(&reply, &corpus)
@@ -139,14 +140,14 @@ pub fn ungrounded_figures(reply: String, corpus: String) -> Vec<String> {
 /// `corpus` is the thread, the request and the run's tool results. The parts
 /// are links, placeholder targets, items labelled on another item's link,
 /// and items named without the link a result carried.
-#[napi]
+#[napi(catch_unwind)]
 #[must_use]
 pub fn ungrounded_urls(reply: String, corpus: String, prompt: Option<String>) -> Vec<String> {
     figures_parser::ungrounded_urls(&reply, &corpus, prompt.as_deref().unwrap_or_default())
 }
 
 /// The links in `reply`, once each, that `corpus` does not carry.
-#[napi]
+#[napi(catch_unwind)]
 #[must_use]
 pub fn fabricated_urls(reply: String, corpus: String) -> Vec<String> {
     figures_parser::fabricated_urls(&reply, &corpus)

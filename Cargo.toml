@@ -53,6 +53,13 @@ napi = { version = "3", default-features = false, features = ["napi9"] }
 napi-derive = "3"
 napi-build = "2"
 
+# A release build that panics on overflow and runs debug assertions, for the
+# panic-freedom tests (`cargo test --profile panic-check -- --ignored`).
+[profile.panic-check]
+inherits = "release"
+overflow-checks = true
+debug-assertions = true
+
 [profile.release]
 lto = true
 strip = "symbols"

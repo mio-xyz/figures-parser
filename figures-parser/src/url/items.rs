@@ -170,9 +170,9 @@ pub fn placeholder_targets(text: &str) -> Vec<&str> {
 
 /// The first URL in `text` (`http://` or `https://` up to whitespace, a quote,
 /// `<`, `>`, `)` or `]`) that holds `fragment` not followed by a digit, cut
-/// after the last such `fragment` in it.
+/// after the last such `fragment` in it; None for an empty `fragment`.
 pub fn url_with_fragment<'a>(text: &'a str, fragment: &str) -> Option<&'a str> {
-    if !text.contains(fragment) {
+    if fragment.is_empty() || !text.contains(fragment) {
         return None;
     }
     let mut from = 0;

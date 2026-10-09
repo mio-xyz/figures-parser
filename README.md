@@ -53,10 +53,16 @@ a link are grounded by different rules and different inputs.
 `figures-parser-napi` is the napi-rs binding: `extract` returns number and url
 entities (UTF-16 offsets, a union on `kind`, an error for an unknown kind
 name), beside `ungroundedFigures`, `ungroundedUrls` and `fabricatedUrls`.
+Every export is `#[napi(catch_unwind)]`: a panic reaches JavaScript as a
+thrown `Error`, where one unwinding into Node would abort the process.
 
 `cargo build --release -p figures-parser-napi` builds the addon, which
 `smoke.mjs` loads as `figures-parser.linux-x64-gnu.node` (`rust-toolchain.toml`
-pins stable). `cargo test` runs the tests.
+pins stable). `cargo test` runs the tests, and with `--profile panic-check -- --ignored` the
+panic-freedom tests in `tests/it/panic_free.rs`: every code point beside a
+figure and a link, and 200,000 generated turns (`PANIC_CHECK_CASES=` for
+more), through every entry point, in the `panic-check` profile (a release
+build with overflow checks and debug assertions).
 `cargo bench` times the hot paths of both kinds over four 300 KB corpora
 (prose, a dumped table, every script, a log of ids) with criterion and prints
 the exact allocations per call from `stats_alloc`

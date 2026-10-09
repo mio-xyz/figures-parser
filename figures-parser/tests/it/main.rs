@@ -12,6 +12,7 @@
 mod digits;
 mod ground;
 mod locales;
+mod panic_free;
 mod readings;
 mod scan;
 mod urls;
