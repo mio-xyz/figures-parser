@@ -456,8 +456,26 @@ cargo bench -p figures-parser --bench figures
 - The weekday readers port the parsers and dictionaries of
   [chrono-node](https://github.com/wanasit/chrono) 2.10.2 (MIT).
 - The duration words and phrases are curated from
-  [rustling-ontology](https://github.com/snipsco/rustling-ontology)'s grammar
+  [rustling-ontology](https://github.com/sonos/rustling-ontology)'s grammar
   (MIT or Apache-2.0).
 - Links and addresses are found with [linkify](https://crates.io/crates/linkify),
   dates computed with [jiff](https://crates.io/crates/jiff), and currency
   codes checked against [iso_currency](https://crates.io/crates/iso_currency).
+
+## License
+
+Copyright (C) 2026 the figures-parser authors.
+
+figures-parser is free software: you can redistribute it and/or modify it
+under the terms of the GNU Affero General Public License, version 3 only
+(`AGPL-3.0-only`), as published by the Free Software Foundation. It is
+distributed in the hope that it will be useful, but without any warranty;
+see `LICENSE` for the full text.
+
+In short: you may use, study, change and share it, and whoever distributes
+it, or a work built on it, must offer the complete source under the same
+license. That holds for a modified version run as a service over a network
+too: its users must be offered its source.
+
+The parts derived from chrono-node and rustling-ontology keep their MIT
+notices in `THIRD_PARTY_NOTICES.md`.
