@@ -1,9 +1,9 @@
 //! What a numeric token may mean: thousands, a decimal, or neighbours printed
 //! side by side.
 
-use super::Reading;
 use super::digits::{ascii_in, push_ascii};
-use super::scan::{Token, is_decimal_symbol, is_symbol};
+use super::scan::{Token, is_decimal_symbol, is_symbol, look_back};
+use super::{Reading, Sign};
 
 /// The group lengths seen so far, and where they stop being thousands grouping.
 #[derive(Default)]
@@ -110,6 +110,19 @@ impl<'a> Token<'a> {
             grouped,
             currency: self.currency(),
             derived: false,
+            sign: self.sign,
+            signed_text: self.signed,
+        }
+    }
+
+    /// The sign `reading`, one of this token's, would carry had the token
+    /// been read with its sign: the token's for a reading that starts it,
+    /// none for a later group. `text` is the text the token was found in.
+    pub(super) fn sign_of(&self, reading: &Reading<'_, '_>, text: &str) -> Sign {
+        if reading.span.start == self.start {
+            look_back(text, self.start, self.start + self.text.len()).0
+        } else {
+            Sign::Unsigned
         }
     }
 
@@ -164,17 +177,25 @@ impl<'a> Token<'a> {
         if thousands || !decimal {
             let last_group = shape.run.groups - 1;
             let mut at = self.start;
+            let sign_len = self.signed.len().saturating_sub(self.text.len());
             for (i, piece) in self.text.split_inclusive(is_symbol).enumerate() {
                 let group = piece.strip_suffix(is_symbol).unwrap_or(piece);
+                let leading = i == 0;
                 f(Reading {
                     text: group,
                     span: at..at + group.len(),
                     integer: ascii_in(group, scratch),
                     fraction: None,
                     grouped: false,
-                    currency: (i == 0 && self.marked_before)
+                    currency: (leading && self.marked_before)
                         || (i == last_group && self.marked_after),
                     derived: thousands,
+                    sign: if leading { self.sign } else { Sign::Unsigned },
+                    signed_text: if leading {
+                        self.signed.get(..sign_len + group.len()).unwrap_or(group)
+                    } else {
+                        group
+                    },
                 });
                 at += piece.len();
             }

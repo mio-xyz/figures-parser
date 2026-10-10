@@ -28,6 +28,10 @@ pub struct NumberValue {
     pub currency: bool,
     /// A neighbour reading of a thousands run: grounds, never stated.
     pub derived: bool,
+    /// The sign written before it; parentheses are accounting's negative or
+    /// an aside.
+    #[napi(ts_type = "\"none\" | \"plus\" | \"minus\" | \"parenthesized\"")]
+    pub sign: String,
 }
 
 /// One reading of one number, with where it sits in the input.
@@ -168,6 +172,7 @@ pub fn extract(
                         grouped: n.grouped,
                         currency: n.currency,
                         derived: n.derived,
+                        sign: n.sign.name().to_owned(),
                     },
                 })
             })),

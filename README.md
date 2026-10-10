@@ -89,9 +89,21 @@ lowers that floor to 1,000, and a currency mark to 100. A decimal with four or
 more fractional digits is always checked, and is grounded by any corpus value
 that starts with the same digits, so "1.1785" is carried by "1.17853".
 
+A sign is part of the value. A minus or a plus before a figure counts
+however a locale writes it: "-12,500", "−1 234,5", "-€1,234.50",
+"€ -1.234,50", "EUR-1'234.50", or behind the bidi marks Arabic and Persian
+print. A dash after a digit or a word letter joins instead ("2026-11-05",
+"CORE-1710", "10-12"). A reply's "-12,500" needs a negative value in the
+corpus, and its "+12,500" a value that is not negative. An unsigned figure
+is grounded by either sign, since a reply may put the sign in words ("fell
+by 12,500"). Accounting's parentheses, "($1,234.50)", ground a negative in
+the corpus, but hold a reply to no sign, since prose writes an aside the
+same way.
+
 `numbers(text)` iterates every reading of every number lazily, and
 `extract_numbers(text)` collects them, each with its byte span, its integer
-and fraction in ASCII digits, and whether it was grouped or marked as money.
+and fraction in ASCII digits, its sign, and whether it was grouped or marked
+as money.
 
 ### Links
 
@@ -205,7 +217,9 @@ Each of these was checked against the library as it stands.
 - Number words ("twelve thousand") and Han numerals ("一万二千") are not read.
 - A magnitude suffix is not expanded: "1.25M" in the corpus does not ground
   "$1,250,000" in the reply, which is reported.
-- A sign is not part of the value, so "-12,500" and "12,500" compare equal.
+- A sign written in words ("minus 12,500"), with an en dash ("–12,500"), after
+  the figure ("12,500-") or as an accounting suffix ("12,500 CR") is not
+  read, so such a figure holds the corpus to no sign.
 
 **Links**
 
@@ -291,6 +305,7 @@ generated inputs: 150,000 for numbers, 120,000 for links and 120,000 for
 weekdays. Every difference that remained is a deliberate one:
 
 - digit groups are counted in code points, so astral digits group;
+- a sign before a figure is part of its value;
 - a currency code or a sign after a figure marks it too;
 - a link right after a backtick or an unspaced script is read;
 - a Slack link is unwrapped whatever the case of its scheme;
@@ -306,14 +321,15 @@ between builds, with code layout alone.
 
 | Check | Prose | Dumped table | Every script | Log of ids | Allocations per call |
 |---|---|---|---|---|---|
-| `ungrounded_figures` | 371 µs | 1.07 ms | 1.80 ms | 429 µs | 12 |
+| `ungrounded_figures` | 371 µs | 1.07 ms | 1.80 ms | 429 µs | 11 |
 | `ungrounded_urls` | 83 µs | 51 µs | 44 µs | 57 µs | 14 |
 | `ungrounded_emails` | 34 µs | 79 µs | 39 µs | 20 µs | 3 |
 | `ungrounded_identifiers` | 9 µs | 73 µs | 24 µs | 64 µs | 5 |
 | `ungrounded_durations` | 1.22 ms | 1.65 ms | 1.21 ms | 1.86 ms | 13 |
 
 A grounded reply usually returns sooner, as soon as the corpus has carried
-every item. The weekday check reads only the reply and allocates nothing:
+every item. A signed figure in the reply costs nothing more: the corpus's
+signs are read only beside a value the reply states. The weekday check reads only the reply and allocates nothing:
 about 50 µs for a 4 KB reply that names no weekday and 100 µs for one that
 does, after a one-time compile of 5 to 13 ms for each language a reply
 names.

@@ -5,6 +5,7 @@
 
 use unicode_general_category::{GeneralCategory, get_general_category};
 
+use super::Sign;
 use super::digits::digit_value;
 use crate::text::{char_at, char_before, is_letter, is_unspaced_script};
 
@@ -81,6 +82,152 @@ fn marked_before(text: &str, start: usize) -> bool {
     }
 }
 
+/// Whether `c` is a bidi mark a locale writes around a sign: the left-to-right
+/// and right-to-left marks, and the Arabic letter mark ("؜-١٬٢٣٤").
+const fn is_bidi_mark(c: char) -> bool {
+    matches!(c, '\u{200e}' | '\u{200f}' | '\u{61c}')
+}
+
+/// Whether `c` is a minus sign: the hyphen-minus, the minus sign Swedish,
+/// Finnish or Croatian print (U+2212), or the fullwidth hyphen-minus.
+const fn is_minus(c: char) -> bool {
+    matches!(c, '-' | '\u{2212}' | '\u{ff0d}')
+}
+
+/// Whether `c` is a plus sign, halfwidth or fullwidth.
+const fn is_plus(c: char) -> bool {
+    matches!(c, '+' | '\u{ff0b}')
+}
+
+/// The byte the bidi marks right before `at` start at.
+fn before_marks(text: &str, mut at: usize) -> usize {
+    while let Some(c) = char_before(text, at).filter(|&c| is_bidi_mark(c)) {
+        at = at.saturating_sub(c.len_utf8());
+    }
+    at
+}
+
+/// The byte just past the bidi marks right after `at`.
+fn after_marks(text: &str, mut at: usize) -> usize {
+    while let Some(c) = char_at(text, at).filter(|&c| is_bidi_mark(c)) {
+        at = at.saturating_add(c.len_utf8());
+    }
+    at
+}
+
+/// Where a currency mark right before byte `at` begins, with at most one
+/// space between: a sign with any capitals glued before it ("$", "US$",
+/// "R$"), or an ISO 4217 code ("USD ").
+fn currency_start(text: &str, end: usize) -> Option<usize> {
+    let before = text.get(..end)?;
+    let at = before_marks(
+        text,
+        before
+            .strip_suffix(char::is_whitespace)
+            .unwrap_or(before)
+            .len(),
+    );
+    let c = char_before(text, at)?;
+    if c.is_ascii_uppercase() {
+        let head = text
+            .get(..at)?
+            .trim_end_matches(|w: char| w.is_ascii_alphanumeric());
+        let run = text.get(head.len()..at)?;
+        return is_currency_code(run, char_before(head, head.len())).then_some(head.len());
+    }
+    if !is_currency_sign(c) {
+        return None;
+    }
+    let sign_at = at.saturating_sub(c.len_utf8());
+    let head = text
+        .get(..sign_at)?
+        .trim_end_matches(|w: char| w.is_ascii_uppercase());
+    Some(head.len())
+}
+
+/// Whether a currency mark, with at most one space before it, and then a
+/// closing parenthesis follow byte `end` ("…)", "… $US)", "… USD)").
+fn closes(text: &str, end: usize) -> bool {
+    let Some(rest) = text.get(after_marks(text, end)..) else {
+        return false;
+    };
+    if rest.starts_with(')') {
+        return true;
+    }
+    let rest = rest.strip_prefix(char::is_whitespace).unwrap_or(rest);
+    let capitals = |r: &str| r.len() - r.trim_start_matches(|c: char| c.is_ascii_uppercase()).len();
+    let lead = capitals(rest);
+    let after_lead = rest.get(lead..).unwrap_or_default();
+    let after_sign = after_lead.strip_prefix(is_currency_sign);
+    let tail = match after_sign {
+        Some(after) => after.get(capitals(after)..).unwrap_or_default(),
+        None if lead == 3 && is_currency_code(rest.get(..3).unwrap_or_default(), None) => {
+            after_lead
+        }
+        None => return false,
+    };
+    tail.trim_start_matches(is_bidi_mark).starts_with(')')
+}
+
+/// The sign written right before byte `at`, and where it starts: a minus or
+/// a plus with only bidi marks after it, standing after no digit or word
+/// letter (after one, a dash joins: "2026-11-05", "CORE-12", "10-12"),
+/// unless that word is a currency code ("EUR-1'234.50").
+fn sign_at(text: &str, at: usize) -> Option<(Sign, usize)> {
+    let c = char_before(text, at)?;
+    let sign = if is_minus(c) {
+        Sign::Minus
+    } else if is_plus(c) {
+        Sign::Plus
+    } else {
+        return None;
+    };
+    let start = at.saturating_sub(c.len_utf8());
+    let edge = before_marks(text, start);
+    let joined =
+        char_before(text, edge).is_some_and(|b| is_boundary(b) || is_minus(b) || is_plus(b));
+    let after_code = joined && currency_start(text, edge).is_some_and(|code| code < edge);
+    (!joined || after_code).then_some((sign, start))
+}
+
+/// Whether the text before `start` may hold a sign, a currency mark or an
+/// opening parenthesis, read from the one or two characters before it, so
+/// most figures are settled without the full look-back: a dash after a digit
+/// or a lowercase letter joins ("2026-11-05", "x-12"), and a space leads one
+/// only after a capital, a currency sign or a bidi mark ("USD 12", "€ 12").
+fn may_be_signed(text: &str, start: usize, prev: char) -> bool {
+    let before = || char_before(text, start.saturating_sub(prev.len_utf8()));
+    if is_minus(prev) || is_plus(prev) {
+        !before().is_some_and(|b| b.is_ascii_digit() || b.is_ascii_lowercase())
+    } else if prev.is_whitespace() {
+        before().is_some_and(|b| b.is_ascii_uppercase() || is_bidi_mark(b) || is_currency_sign(b))
+    } else {
+        prev == '(' || is_bidi_mark(prev) || is_currency_sign(prev)
+    }
+}
+
+/// The sign written before the token `start..end`, and the byte it starts
+/// at: a minus or a plus before the digits, or before a currency mark that
+/// is before them ("-12", "−1 234", "-$12", "$-12", "€ -12", "EUR-1'234"),
+/// or parentheses around the token and its currency mark, as accounting
+/// prints a negative ("($1,234.50)", "(1 234,50 $US)"). [`may_be_signed`]
+/// says, from the characters right before the token, when to look.
+pub(super) fn look_back(text: &str, start: usize, end: usize) -> (Sign, usize) {
+    let digits = before_marks(text, start);
+    if let Some(found) = sign_at(text, digits) {
+        return found;
+    }
+    let currency = currency_start(text, digits).map(|at| before_marks(text, at));
+    if let Some(found) = currency.and_then(|at| sign_at(text, at)) {
+        return found;
+    }
+    let open = currency.unwrap_or(digits);
+    if char_before(text, open) == Some('(') && closes(text, end) {
+        return (Sign::Parenthesized, start);
+    }
+    (Sign::Unsigned, start)
+}
+
 /// Whether a currency sign or code opens the text after byte `end`, with at
 /// most one space between ("99 USD", "12 €").
 fn marked_after(text: &str, end: usize) -> bool {
@@ -112,6 +259,11 @@ pub struct Token<'a> {
     /// A currency sign or ISO 4217 code stands right after the token, with at
     /// most one space between ("99 USD", "12 €").
     pub marked_after: bool,
+    /// The sign written before it.
+    pub sign: Sign,
+    /// The token from its sign on ("-$12,500"), as a reply wrote it; the
+    /// same as `text` when it has no sign before it.
+    pub signed: &'a str,
 }
 
 impl Token<'_> {
@@ -131,6 +283,8 @@ pub struct Tokens<'a> {
     pos: usize,
     /// Whether a token reads the currency marks around it.
     marks: bool,
+    /// Whether a token reads the sign before it.
+    signs: bool,
 }
 
 /// The numeric tokens of `text`, in order.
@@ -145,6 +299,7 @@ pub const fn tokens(text: &str) -> Tokens<'_> {
         text,
         pos: 0,
         marks: true,
+        signs: true,
     }
 }
 
@@ -155,6 +310,15 @@ impl Tokens<'_> {
     #[must_use]
     pub const fn without_currency(mut self) -> Self {
         self.marks = false;
+        self
+    }
+
+    /// These tokens without reading the sign before them, so every token is
+    /// unsigned: for a corpus, where a sign matters only beside a value the
+    /// reply states, and is read there.
+    #[must_use]
+    pub const fn without_signs(mut self) -> Self {
+        self.signs = false;
         self
     }
 
@@ -202,8 +366,9 @@ impl<'a> Iterator for Tokens<'a> {
         let text = self.text;
         loop {
             let start = self.next_digit(self.pos)?;
+            let prev = char_before(text, start);
             // Digits that continue a word ("p1789368220119") are not a token.
-            if char_before(text, start).is_some_and(is_boundary) {
+            if prev.is_some_and(is_boundary) {
                 self.pos = self.digits_end(start);
                 continue;
             }
@@ -230,12 +395,55 @@ impl<'a> Iterator for Tokens<'a> {
                 };
                 end = at;
             }
+            let token = text.get(start..end).unwrap_or_default();
+            let (sign, signed) =
+                if self.signs && prev.is_some_and(|p| may_be_signed(text, start, p)) {
+                    let (sign, from) = look_back(text, start, end);
+                    (sign, text.get(from..end).unwrap_or(token))
+                } else {
+                    (Sign::Unsigned, token)
+                };
             return Some(Token {
-                text: text.get(start..end).unwrap_or_default(),
+                text: token,
                 start,
                 marked_before: self.marks && marked_before(text, start),
                 marked_after: self.marks && marked_after(text, end),
+                sign,
+                signed,
             });
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Sign, char_before, look_back, may_be_signed, tokens};
+
+    /// The fast path skips only figures the full look-back reads as unsigned,
+    /// over every arrangement of up to three pieces before a figure.
+    #[test]
+    fn the_fast_path_skips_only_unsigned_figures() {
+        let pieces = [
+            "", "-", "−", "＋", "+", "(", "$", "€", "US", "EUR", " ", "\u{a0}", "\u{200e}",
+            "\u{200f}", "\u{61c}", "a", "Z", "1", "_", "は", "é", ":",
+        ];
+        for a in pieces {
+            for b in pieces {
+                for c in pieces {
+                    let text = format!("{a}{b}{c}12,500 $US)");
+                    for token in tokens(&text) {
+                        let end = token.start + token.text.len();
+                        let full = look_back(&text, token.start, end).0;
+                        let fast = char_before(&text, token.start)
+                            .is_some_and(|p| may_be_signed(&text, token.start, p));
+                        assert!(
+                            fast || full == Sign::Unsigned,
+                            "{text:?} at {}: {full:?}",
+                            token.start
+                        );
+                    }
+                }
+            }
         }
     }
 }

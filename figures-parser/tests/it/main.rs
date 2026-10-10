@@ -19,5 +19,6 @@ mod locales;
 mod panic_free;
 mod readings;
 mod scan;
+mod signs;
 mod urls;
 mod utf16;

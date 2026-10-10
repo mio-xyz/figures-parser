@@ -14,6 +14,58 @@ use std::ops::Range;
 
 use scan::{Tokens, tokens};
 
+/// The sign written before a figure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Sign {
+    /// None.
+    #[default]
+    Unsigned,
+    /// A plus sign ("+12%").
+    Plus,
+    /// A minus sign ("-12,500", "−1 234,5", "-$12").
+    Minus,
+    /// Parentheses around the figure, as accounting prints a negative
+    /// ("($1,234.50)"); prose writes an aside the same way, so it may or may
+    /// not be negative.
+    Parenthesized,
+}
+
+impl Sign {
+    /// The sign's name, as a caller reads it.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Unsigned => "none",
+            Self::Plus => "plus",
+            Self::Minus => "minus",
+            Self::Parenthesized => "parenthesized",
+        }
+    }
+
+    /// The sign a reply is held to when it writes this one: parentheses,
+    /// which may be an aside, hold it to none.
+    #[must_use]
+    pub const fn stated(self) -> Self {
+        match self {
+            Self::Parenthesized => Self::Unsigned,
+            Self::Unsigned | Self::Plus | Self::Minus => self,
+        }
+    }
+
+    /// Whether a corpus figure written with `read` carries a figure stated
+    /// with this sign: a minus needs one that is or may be negative, a plus
+    /// one that is not negative, and none takes either, since a reply may
+    /// put the sign in words ("fell by 12,500").
+    #[must_use]
+    pub const fn carried_by(self, read: Self) -> bool {
+        match self {
+            Self::Unsigned | Self::Parenthesized => true,
+            Self::Minus => matches!(read, Self::Minus | Self::Parenthesized),
+            Self::Plus => !matches!(read, Self::Minus),
+        }
+    }
+}
+
 /// One reading of a numeric token, its digits held as `D`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Figure<'a, D> {
@@ -32,6 +84,12 @@ pub struct Figure<'a, D> {
     /// A neighbour reading of a run that also reads as thousands: the corpus
     /// may ground with it, the reply never states it.
     pub derived: bool,
+    /// The sign written before it; of a run's neighbours, only the first has
+    /// one.
+    pub sign: Sign,
+    /// Its text from its sign on ("-$12,500"); the same as `text` when it
+    /// has no sign before it.
+    pub signed_text: &'a str,
 }
 
 /// A reading as [`scan::Token::for_each_reading`] yields it: its digits
@@ -69,6 +127,8 @@ impl<'a> From<Reading<'a, '_>> for Number<'a> {
             grouped: r.grouped,
             currency: r.currency,
             derived: r.derived,
+            sign: r.sign,
+            signed_text: r.signed_text,
         }
     }
 }
@@ -158,9 +218,19 @@ const MIN_CURRENCY_FIGURE: u128 = 100;
 /// rounded arithmetic of the model's own.
 const PRECISE_FRACTION_DIGITS: usize = 4;
 
-/// What a stated reading is compared as.
+/// What a stated reading is compared as: its value, and the sign it holds
+/// the corpus to.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Key {
+pub struct Key {
+    /// The value.
+    pub value: Value,
+    /// The sign, as [`Sign::stated`] reads it.
+    pub sign: Sign,
+}
+
+/// The value a stated reading is compared by.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Value {
     /// The integer, which a printed decimal of the same integer part also grounds.
     Integer(String),
     /// A precise decimal, grounded by a printed decimal that starts with it.
@@ -176,13 +246,23 @@ impl Key {
     /// The integer part, which every reading that grounds this key shares.
     #[must_use]
     pub fn integer(&self) -> &str {
-        match self {
-            Self::Integer(integer) | Self::Decimal { integer, .. } => integer,
+        match &self.value {
+            Value::Integer(integer) | Value::Decimal { integer, .. } => integer,
         }
     }
 
-    /// Whether a corpus reading carries this key: the same integer, and for a
-    /// precise decimal a printed fraction that starts with the stated one.
+    /// Whether a corpus reading carries this key: its value, and a sign
+    /// [`Sign::carried_by`] accepts.
+    #[must_use]
+    pub fn grounded_by(&self, reading: &Reading<'_, '_>) -> bool {
+        self.value.grounded_by(reading) && self.sign.carried_by(reading.sign)
+    }
+}
+
+impl Value {
+    /// Whether a corpus reading carries this value, whatever its sign: the
+    /// same integer, and for a precise decimal a printed fraction that starts
+    /// with the stated one.
     #[must_use]
     pub fn grounded_by(&self, reading: &Reading<'_, '_>) -> bool {
         match self {
@@ -208,9 +288,12 @@ impl Reading<'_, '_> {
         if let Some(fraction) = self.fraction
             && fraction.len() >= PRECISE_FRACTION_DIGITS
         {
-            return Some(Key::Decimal {
-                integer: self.integer.to_owned(),
-                fraction: fraction.to_owned(),
+            return Some(Key {
+                value: Value::Decimal {
+                    integer: self.integer.to_owned(),
+                    fraction: fraction.to_owned(),
+                },
+                sign: self.sign.stated(),
             });
         }
         let floor = if self.grouped {
@@ -222,6 +305,9 @@ impl Reading<'_, '_> {
         };
         // An integer too long for u128 is far above every floor.
         let reaches = self.integer.parse::<u128>().map_or(true, |n| n >= floor);
-        reaches.then(|| Key::Integer(self.integer.to_owned()))
+        reaches.then(|| Key {
+            value: Value::Integer(self.integer.to_owned()),
+            sign: self.sign.stated(),
+        })
     }
 }

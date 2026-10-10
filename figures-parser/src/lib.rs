@@ -61,7 +61,7 @@ pub use email::{Email, emails, ungrounded_emails};
 pub use id::{Identifier, identifiers, ungrounded_identifiers, unseen_tokens};
 pub use jiff::civil::Date;
 pub use kind::{Kind, UnknownKind};
-pub use number::{Figure, Number, Reading, extract_numbers, numbers, ungrounded_figures};
+pub use number::{Figure, Number, Reading, Sign, extract_numbers, numbers, ungrounded_figures};
 pub use url::{Url, fabricated_urls, ungrounded_urls, urls};
 
 /// The README's examples, run as doc tests so they stay true.

@@ -52,7 +52,7 @@ pub type Path<'c> = (&'static str, Box<dyn Fn() -> usize + 'c>);
 
 /// The hot paths both benches measure over `case`.
 #[must_use]
-pub fn paths(case: &Case) -> [Path<'_>; 10] {
+pub fn paths(case: &Case) -> [Path<'_>; 11] {
     let text = case.text.as_str();
     [
         ("tokens", Box::new(move || tokens(black_box(text)).count())),
@@ -67,6 +67,10 @@ pub fn paths(case: &Case) -> [Path<'_>; 10] {
         (
             "ungrounded/ungrounded",
             Box::new(move || ungrounded_figures(UNGROUNDED_REPLY, black_box(text)).len()),
+        ),
+        (
+            "ungrounded/signed",
+            Box::new(move || ungrounded_figures(SIGNED_REPLY, black_box(text)).len()),
         ),
         ("urls", Box::new(move || urls(black_box(text)).len())),
         (
@@ -128,6 +132,10 @@ const LINK_REPLY: &str = "See [#87](https://github.com/acme/app/issues/87), \
 /// each comparison reads the whole corpus.
 const OTHER_REPLY: &str = "Mail zed.q@nowhere.example.org about 9f2e4c1a7b and CORE-99999; \
      the call ran 3 hours and 17 minutes, then deux heures et demie.";
+
+/// [`UNGROUNDED_REPLY`] with signs, so the corpus is read with its signs too.
+const SIGNED_REPLY: &str =
+    "Revenue moved by -1,010,000, direct −26,171 and the rate -1.1785; +99,999 bytes.";
 
 /// A reply with figures no corpus carries, so the comparison reads the whole corpus.
 const UNGROUNDED_REPLY: &str =

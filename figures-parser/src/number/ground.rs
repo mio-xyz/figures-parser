@@ -6,7 +6,7 @@ use std::hash::BuildHasher;
 use rustc_hash::FxBuildHasher;
 
 use super::scan::tokens;
-use super::{Key, Reading};
+use super::{Key, Reading, Sign};
 
 /// One figure the reply states.
 struct Needle<'r> {
@@ -72,22 +72,36 @@ impl<'r> Needles<'r> {
         self.all.sort_by_key(|n| n.hash);
     }
 
-    /// Closes every open needle a corpus reading grounds.
-    fn ground(&mut self, reading: &Reading<'_, '_>) {
+    /// Closes every open needle a corpus reading grounds. `sign` is the
+    /// reading's, or None while it is unread: a signed needle whose value
+    /// matches then stays open, and the call returns true so the caller reads
+    /// the sign, which few readings need, and calls again with it.
+    fn ground(&mut self, reading: &Reading<'_, '_>, sign: Option<Sign>) -> bool {
         if self.lengths & length_bit(reading.integer.len()) == 0 {
-            return;
+            return false;
         }
         let wanted = hash_of(reading.integer);
         let from = self.all.partition_point(|n| n.hash < wanted);
         let Some(same) = self.all.get_mut(from..) else {
-            return;
+            return false;
         };
+        let mut wants_sign = false;
         for needle in same.iter_mut().take_while(|n| n.hash == wanted) {
-            if needle.open && needle.key.grounded_by(reading) {
+            if !needle.open || !needle.key.value.grounded_by(reading) {
+                continue;
+            }
+            let carried = match sign {
+                Some(read) => needle.key.sign.carried_by(read),
+                None => needle.key.sign == Sign::Unsigned,
+            };
+            if carried {
                 needle.open = false;
                 self.open -= 1;
+            } else {
+                wants_sign |= sign.is_none();
             }
         }
+        wants_sign
     }
 
     /// The open needles' texts, in the order the reply stated them.
@@ -101,7 +115,8 @@ impl<'r> Needles<'r> {
 /// Figures in `reply` that `corpus` does not carry, as the reply wrote them.
 ///
 /// A decimal is matched as written: the corpus keeps its point, and a printed
-/// decimal grounds the same value written with fewer places.
+/// decimal grounds the same value written with fewer places. A signed figure
+/// is held to its sign, as [`Sign::carried_by`] reads it, and reported with it.
 ///
 /// # Examples
 ///
@@ -109,6 +124,9 @@ impl<'r> Needles<'r> {
 /// let corpus = r#"{"revenue": 1250000, "orders": 4812}"#;
 /// let reply = "Revenue was 1,250,000 on 4,812 orders, up from 1,180,000.";
 /// assert_eq!(figures_parser::ungrounded_figures(reply, corpus), ["1,180,000"]);
+///
+/// // The corpus has the value, not its sign.
+/// assert_eq!(figures_parser::ungrounded_figures("It moved by -12,500.", "delta: 12500"), ["-12,500"]);
 /// ```
 #[must_use]
 pub fn ungrounded_figures(reply: &str, corpus: &str) -> Vec<String> {
@@ -117,7 +135,12 @@ pub fn ungrounded_figures(reply: &str, corpus: &str) -> Vec<String> {
     for token in tokens(reply) {
         token.for_each_reading(&mut scratch, |r| {
             if let Some(key) = r.stated() {
-                needles.add(key, r.text);
+                let written = if key.sign == Sign::Unsigned {
+                    r.text
+                } else {
+                    r.signed_text
+                };
+                needles.add(key, written);
             }
         });
     }
@@ -128,8 +151,12 @@ pub fn ungrounded_figures(reply: &str, corpus: &str) -> Vec<String> {
         return Vec::new();
     }
     needles.seal();
-    for token in tokens(corpus).without_currency() {
-        token.for_each_reading(&mut scratch, |r| needles.ground(&r));
+    for token in tokens(corpus).without_currency().without_signs() {
+        token.for_each_reading(&mut scratch, |r| {
+            if needles.ground(&r, None) {
+                needles.ground(&r, Some(token.sign_of(&r, corpus)));
+            }
+        });
         if needles.open == 0 {
             return Vec::new();
         }
