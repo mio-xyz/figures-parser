@@ -1,5 +1,12 @@
 # figures-parser
 
+[![CI](https://github.com/mio-xyz/figures-parser/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mio-xyz/figures-parser/actions/workflows/ci.yml)
+[![License: AGPL-3.0-only](https://img.shields.io/badge/license-AGPL--3.0--only-blue.svg)](LICENSE)
+[![Rust: stable, 2024 edition](https://img.shields.io/badge/rust-stable%20%C2%B7%202024%20edition-orange.svg?logo=rust)](rust-toolchain.toml)
+[![unsafe: forbidden](https://img.shields.io/badge/unsafe-forbidden-success.svg)](figures-parser/src/lib.rs)
+[![Clippy: pedantic + nursery](https://img.shields.io/badge/clippy-pedantic%20%2B%20nursery-brightgreen.svg)](Cargo.toml)
+[![Node-API 9](https://img.shields.io/badge/Node--API-9-339933.svg?logo=nodedotjs&logoColor=white)](figures-parser-napi)
+
 Check a piece of generated text against the sources it was written from.
 
 `figures-parser` finds the numbers, links, dated weekdays, email addresses,
@@ -450,6 +457,11 @@ cargo test --profile panic-check -p figures-parser --test it -- --ignored
 cargo bench -p figures-parser --bench allocations
 cargo bench -p figures-parser --bench figures
 ```
+
+CI runs the format check, clippy, the tests on Linux, macOS and Windows, the
+docs with warnings denied, the panic-freedom tests and the Node binding's
+smoke test on every push and pull request
+([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 
 ## Acknowledgements
 
