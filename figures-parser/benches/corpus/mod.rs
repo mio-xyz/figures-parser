@@ -51,7 +51,6 @@ pub struct Case {
 pub type Path<'c> = (&'static str, Box<dyn Fn() -> usize + 'c>);
 
 /// The hot paths both benches measure over `case`.
-#[must_use]
 pub fn paths(case: &Case) -> [Path<'_>; 11] {
     let text = case.text.as_str();
     [

@@ -41,7 +41,7 @@ const LONGEST_WORD: usize = 10;
 /// letters already lowercased. "billion" is read on the short scale English
 /// uses; French and German write a thousand million as "milliard" and
 /// "Milliarde".
-fn ascii_word(lower: &[u8]) -> Option<u32> {
+const fn ascii_word(lower: &[u8]) -> Option<u32> {
     let magnitude = match lower {
         b"hundred" => 2,
         b"thousand" | b"mille" | b"tausend" | b"mil" | b"mila" => 3,
