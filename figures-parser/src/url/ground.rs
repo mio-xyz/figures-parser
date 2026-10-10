@@ -6,7 +6,7 @@ use super::items::{
 };
 use super::scan::urls;
 use super::scheme_len;
-use crate::text::{char_at, char_before, is_ascii_word};
+use crate::text::{char_at, char_before, is_ascii_word, is_example_domain};
 
 /// Whether `segment` names one item rather than a page: eight or more word
 /// characters or dashes, a digit among them.
@@ -113,27 +113,13 @@ fn hosts_of<'t>(text: &'t str, path: &'t str, query: bool) -> impl Iterator<Item
     })
 }
 
-/// `s` without `prefix`, compared in any case.
-fn strip_prefix_any_case<'s>(s: &'s str, prefix: &str) -> Option<&'s str> {
-    s.get(..prefix.len())
-        .filter(|head| head.eq_ignore_ascii_case(prefix))
-        .and_then(|_| s.get(prefix.len()..))
-}
-
 /// Whether `url` names a reserved example domain (`example.com`, `.org`,
 /// `.net`), which the prompt's own doctrine illustrates links with.
 fn is_example_host(url: &str) -> bool {
-    let Some(rest) = scheme_len(url, true).and_then(|n| url.get(n..)) else {
-        return false;
-    };
-    let rest = strip_prefix_any_case(rest, "www.").unwrap_or(rest);
-    let Some(tld) = strip_prefix_any_case(rest, "example.") else {
-        return false;
-    };
-    ["com", "org", "net"].iter().any(|t| {
-        strip_prefix_any_case(tld, t)
-            .is_some_and(|after| after.is_empty() || after.starts_with('/'))
-    })
+    scheme_len(url, true)
+        .and_then(|n| url.get(n..))
+        .and_then(|rest| rest.split('/').next())
+        .is_some_and(is_example_domain)
 }
 
 /// The links in `reply`, once each, that `corpus` does not carry.
@@ -141,6 +127,13 @@ fn is_example_host(url: &str) -> bool {
 /// Neither verbatim nor as a path a result gave without its host. A link is
 /// read without the punctuation and markup around it, while the corpus stays
 /// raw text; a link the corpus printed is always a substring of it.
+///
+/// # Examples
+///
+/// ```
+/// let reply = "https://acme.io/a and https://acme.io/b";
+/// assert_eq!(figures_parser::fabricated_urls(reply, "https://acme.io/a"), ["https://acme.io/b"]);
+/// ```
 #[must_use]
 pub fn fabricated_urls<'r>(reply: &'r str, corpus: &str) -> Vec<&'r str> {
     let mut out: Vec<&str> = Vec::new();
@@ -165,6 +158,18 @@ pub fn fabricated_urls<'r>(reply: &'r str, corpus: &str) -> Vec<&'r str> {
 /// - a link target that is not a URL (`(url)`), a template copied from an example;
 /// - an item's label on a link that is not the item's own (`[#429](…/repo)`);
 /// - an item named without a link although a result carried its URL.
+///
+/// # Examples
+///
+/// The made-up link, and an item labelled on its repository's root:
+///
+/// ```
+/// let reply = "See [#87](https://acme.io/repo) and https://acme.io/made-up.";
+/// assert_eq!(
+///     figures_parser::ungrounded_urls(reply, "https://acme.io/repo", ""),
+///     ["https://acme.io/made-up", "[#87](https://acme.io/repo)"]
+/// );
+/// ```
 #[must_use]
 pub fn ungrounded_urls(reply: &str, corpus: &str, prompt: &str) -> Vec<String> {
     let mut seen: Vec<&str> = Vec::new();

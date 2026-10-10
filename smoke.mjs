@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
-const { extract, ungroundedFigures, ungroundedUrls, fabricatedUrls } = createRequire(import.meta.url)("./figures-parser.linux-x64-gnu.node");
+const { extract, ungroundedFigures, ungroundedUrls, fabricatedUrls, ungroundedEmails, misdatedWeekdays, ungroundedIdentifiers, unseenTokens, ungroundedDurations } = createRequire(import.meta.url)("./figures-parser.linux-x64-gnu.node");
 
 const entities = extract("Total $1,250 and ١٢", { kinds: ["number"] });
 const has = (text, integer) => entities.some((e) => e.text === text && e.value.integer === integer);
@@ -17,4 +17,13 @@ assert.deepEqual(ungroundedUrls("See [#87](https://acme.io/repo) and https://acm
 assert.deepEqual(ungroundedUrls("Fix in [PR 512](https://example.com).", "user text", "[TASK-1](https://example.com)"), ["https://example.com"]);
 assert.deepEqual(fabricatedUrls("https://acme.io/a and https://acme.io/b", "https://acme.io/a"), ["https://acme.io/b"]);
 assert.deepEqual(ungroundedFigures("ARR is 1,010,000.", "Total: 101000"), ["1,010,000"]);
+assert.deepEqual(extract("mail ana@acme.io", { kinds: ["email"] }).map((e) => [e.kind, e.text]), [["email", "ana@acme.io"]]);
+assert.deepEqual(ungroundedEmails("ana@acme.io and ben@acme.io", "owner ana@acme.io"), ["ben@acme.io"]);
+assert.deepEqual(misdatedWeekdays("| Fri 26 Sep |", "2026-10-02"), ['"Fri 26 Sep" (2026-09-26 is a Saturday)']);
+assert.throws(() => misdatedWeekdays("x", "2026-13-40"), /YYYY-MM-DD/);
+assert.deepEqual(extract("run 9f2e4c1a", { kinds: ["id"] }).map((e) => [e.kind, e.text, e.shape]), [["id", "9f2e4c1a", "hex"]]);
+assert.deepEqual(ungroundedIdentifiers("CORE-1711 and CORE-1710", "CORE-1710"), ["CORE-1711"]);
+assert.deepEqual(unseenTokens("model claude-opus-5-5", ""), ["claude-opus-5-5"]);
+assert.deepEqual(extract("took 1h30 then 30s", { kinds: ["duration"] }).map((e) => [e.kind, e.text, e.milliseconds, e.centimonths, e.stated]), [["duration", "1h30", 5400000, 0, true], ["duration", "30s", 30000, 0, false]]);
+assert.deepEqual(ungroundedDurations("45 minutes, then 2 hours", '{"duration": 2700}'), ["2 hours"]);
 console.log("ok");

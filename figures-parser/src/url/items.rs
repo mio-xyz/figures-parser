@@ -4,32 +4,17 @@
 use std::ops::Range;
 
 use super::scheme_len;
-use crate::text::{char_at, char_before, is_ascii_word};
+use crate::text::{char_at, char_before, is_ascii_word, key_len, run_end};
 
 /// The byte length of the item identifier (`#429`, `CORE-1710`) that opens
 /// `text`, or None when none does.
 fn identifier_len(text: &str) -> Option<usize> {
-    let bytes = text.as_bytes();
-    let digits_from = |at: usize| {
-        let n = bytes.get(at..).map_or(0, |rest| {
-            rest.iter().take_while(|b| b.is_ascii_digit()).count()
-        });
-        (n > 0).then_some(at + n)
-    };
-    match bytes.first()? {
-        b'#' => digits_from(1),
-        b'A'..=b'Z' => {
-            let team = bytes.get(1..).map_or(0, |rest| {
-                rest.iter()
-                    .take_while(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
-                    .count()
-            });
-            if team == 0 || bytes.get(1 + team) != Some(&b'-') {
-                return None;
-            }
-            digits_from(2 + team)
+    match text.as_bytes().first()? {
+        b'#' => {
+            let end = run_end(text.as_bytes(), 1, |b| b.is_ascii_digit());
+            (end > 1).then_some(end)
         }
-        _ => None,
+        _ => key_len(text),
     }
 }
 
@@ -143,7 +128,7 @@ pub fn bare_identifiers<'a>(text: &'a str, links: &[Range<usize>]) -> Vec<&'a st
 }
 
 /// The target of every markdown link in `text` that is not a URL, a mail
-/// address or an anchor: a template copied from an example ("[PR 512](url)").
+/// address or an anchor: a template copied from an example (`[PR 512](url)`).
 pub fn placeholder_targets(text: &str) -> Vec<&str> {
     let mut out = Vec::new();
     let mut from = 0;

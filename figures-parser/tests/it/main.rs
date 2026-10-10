@@ -9,8 +9,12 @@
     reason = "a test asserts with unwrap and reads by index"
 )]
 
+mod dates;
 mod digits;
+mod durations;
+mod emails;
 mod ground;
+mod ids;
 mod locales;
 mod panic_free;
 mod readings;

@@ -120,7 +120,7 @@ impl<'a> Token<'a> {
     /// one integer; a last symbol that may end a decimal, after a single group
     /// or a whole grouped by another symbol ("1.234.567,89", "8,22"), ends a
     /// decimal part; groups that fit neither are neighbours printed side by
-    /// side ("[15977,10140]"). A thousands run also yields its neighbours as
+    /// side (`[15977,10140]`). A thousands run also yields its neighbours as
     /// derived readings, since a printed table may mean either. A single dot
     /// or comma before three digits fits both ("1.250" is 1,250 in Berlin and
     /// 1.25 in Boston) and yields both.

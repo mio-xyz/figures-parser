@@ -12,7 +12,10 @@ workspace = true
 unicode-general-category.workspace = true
 unicode-script.workspace = true
 iso_currency.workspace = true
+jiff.workspace = true
 linkify.workspace = true
+memchr.workspace = true
+regex.workspace = true
 rustc-hash.workspace = true
 
 [dev-dependencies]

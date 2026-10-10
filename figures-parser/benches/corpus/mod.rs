@@ -4,7 +4,10 @@
 use std::hint::black_box;
 
 use figures_parser::number::scan::tokens;
-use figures_parser::{extract_numbers, ungrounded_figures, ungrounded_urls, urls};
+use figures_parser::{
+    Date, extract_numbers, misdated_weekdays, ungrounded_durations, ungrounded_emails,
+    ungrounded_figures, ungrounded_identifiers, ungrounded_urls, urls,
+};
 
 /// The size every corpus is built to, in bytes.
 const SIZE: usize = 300 * 1024;
@@ -49,7 +52,7 @@ pub type Path<'c> = (&'static str, Box<dyn Fn() -> usize + 'c>);
 
 /// The hot paths both benches measure over `case`.
 #[must_use]
-pub fn paths(case: &Case) -> [Path<'_>; 6] {
+pub fn paths(case: &Case) -> [Path<'_>; 10] {
     let text = case.text.as_str();
     [
         ("tokens", Box::new(move || tokens(black_box(text)).count())),
@@ -69,6 +72,22 @@ pub fn paths(case: &Case) -> [Path<'_>; 6] {
         (
             "ungrounded_urls",
             Box::new(move || ungrounded_urls(LINK_REPLY, black_box(text), "").len()),
+        ),
+        (
+            "ungrounded_emails",
+            Box::new(move || ungrounded_emails(OTHER_REPLY, black_box(text), "").len()),
+        ),
+        (
+            "ungrounded_identifiers",
+            Box::new(move || ungrounded_identifiers(OTHER_REPLY, black_box(text), "").len()),
+        ),
+        (
+            "ungrounded_durations",
+            Box::new(move || ungrounded_durations(OTHER_REPLY, black_box(text), "").len()),
+        ),
+        (
+            "misdated_weekdays",
+            Box::new(move || misdated_weekdays(black_box(text), Date::constant(2026, 10, 2)).len()),
         ),
     ]
 }
@@ -104,6 +123,11 @@ pub fn all() -> Vec<Case> {
 /// link comparison reads the whole corpus for each.
 const LINK_REPLY: &str = "See [#87](https://github.com/acme/app/issues/87), \
      https://linear.app/acme/issue/CORE-1710/spike and CORE-1711; the [board](url).";
+
+/// A reply with addresses, identifiers and durations no corpus carries, so
+/// each comparison reads the whole corpus.
+const OTHER_REPLY: &str = "Mail zed.q@nowhere.example.org about 9f2e4c1a7b and CORE-99999; \
+     the call ran 3 hours and 17 minutes, then deux heures et demie.";
 
 /// A reply with figures no corpus carries, so the comparison reads the whole corpus.
 const UNGROUNDED_REPLY: &str =

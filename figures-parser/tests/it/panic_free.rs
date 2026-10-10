@@ -9,7 +9,9 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use figures_parser::number::scan::tokens;
 use figures_parser::utf16::{Utf16Cursor, units};
 use figures_parser::{
-    extract_numbers, fabricated_urls, numbers, ungrounded_figures, ungrounded_urls, urls,
+    Date, durations, emails, extract_numbers, fabricated_urls, identifiers, misdated_weekdays,
+    numbers, ungrounded_durations, ungrounded_emails, ungrounded_figures, ungrounded_identifiers,
+    ungrounded_urls, unseen_tokens, urls,
 };
 
 /// Calls every entry point on the three texts, and returns a sum the
@@ -24,7 +26,11 @@ fn exercise(reply: &str, corpus: &str, prompt: &str) -> usize {
                 n += r.stated().map_or(0, |k| k.integer().len()) + usize::from(r.currency);
             });
         }
-        n += numbers(text).count() + extract_numbers(text).len();
+        n += numbers(text).count()
+            + extract_numbers(text).len()
+            + emails(text).len()
+            + identifiers(text).len()
+            + durations(text).len();
         let found = urls(text);
         let mut cursor = Utf16Cursor::new(text);
         for url in &found {
@@ -35,12 +41,32 @@ fn exercise(reply: &str, corpus: &str, prompt: &str) -> usize {
             n += usize::try_from(Utf16Cursor::new(text).at(at) + cursor.at(at)).unwrap();
         }
     }
+    n += misdated_weekdays(reply, today_for(reply)).len()
+        + misdated_weekdays(corpus, today_for(corpus)).len();
     n + ungrounded_figures(reply, corpus).len()
         + ungrounded_figures(corpus, reply).len()
         + fabricated_urls(reply, corpus).len()
         + fabricated_urls(corpus, reply).len()
         + ungrounded_urls(reply, corpus, prompt).len()
         + ungrounded_urls(prompt, reply, corpus).len()
+        + ungrounded_emails(reply, corpus, prompt).len()
+        + ungrounded_identifiers(reply, corpus, prompt).len()
+        + unseen_tokens(reply, corpus, prompt).len()
+        + ungrounded_durations(reply, corpus, prompt).len()
+}
+
+/// One "today" per input, rotating through the edges of the calendar.
+fn today_for(text: &str) -> Date {
+    let todays = [
+        Date::constant(2026, 10, 2),
+        Date::constant(2027, 1, 31),
+        Date::MIN,
+        Date::MAX,
+    ];
+    todays
+        .get(text.len() % todays.len())
+        .copied()
+        .unwrap_or(Date::MIN)
 }
 
 fn check(reply: &str, corpus: &str, prompt: &str) {
@@ -58,6 +84,11 @@ fn check(reply: &str, corpus: &str, prompt: &str) {
 fn every_code_point_beside_a_figure_and_a_link() {
     for c in '\0'..=char::MAX {
         let figure = format!("{c}1{c}2,500{c} {c}$9.99{c}USD 3{c}.{c}4 ١{c}٢ {c}");
+        let dated = format!(
+            "Fri{c} 26 Sep{c} lundi {c}29/09 9月{c}26日({c}) 星期{c}五 9月26日 mar. ago.{c} 11"
+        );
+        let run = catch_unwind(|| black_box(misdated_weekdays(&dated, today_for(&dated)).len()));
+        assert!(run.is_ok(), "panicked on {dated:?}");
         let link = format!(
             "{c}https://a.io/{c}x{c}) <https://b.io/{c}|{c}> [#1{c}](https://c.io/{c}) CORE-{c}1 [{c}]({c})"
         );

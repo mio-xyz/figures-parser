@@ -4,24 +4,9 @@
 //! consulted; `benches/` measures the scan.
 
 use unicode_general_category::{GeneralCategory, get_general_category};
-use unicode_script::{Script, UnicodeScript};
 
 use super::digits::digit_value;
-use crate::text::{char_at, char_before};
-
-/// Scripts that write words without spaces, so a figure sits against a
-/// letter ("合計は1,250,000円") without being part of an id.
-const UNSPACED_SCRIPTS: [Script; 9] = [
-    Script::Han,
-    Script::Hiragana,
-    Script::Katakana,
-    Script::Hangul,
-    Script::Thai,
-    Script::Lao,
-    Script::Khmer,
-    Script::Myanmar,
-    Script::Tibetan,
-];
+use crate::text::{char_at, char_before, is_letter, is_unspaced_script};
 
 /// A dot, a comma or the Arabic decimal sign may end a decimal; the others only ever group.
 pub(super) const fn is_decimal_symbol(c: char) -> bool {
@@ -50,20 +35,6 @@ fn is_digit(c: char) -> bool {
     digit_value(c).is_some()
 }
 
-/// Whether `c` belongs to a script written without spaces. Script extensions
-/// are checked so a mark shared between scripts, like the prolonged-sound
-/// mark `ー`, counts for the scripts it serves; a Common or Inherited set
-/// answers true for every script, so those characters ("ℝ", "𝐀") never do.
-fn is_unspaced_script(c: char) -> bool {
-    let extensions = c.script_extension();
-    if extensions.is_common() || extensions.is_inherited() {
-        return false;
-    }
-    UNSPACED_SCRIPTS
-        .into_iter()
-        .any(|script| extensions.contains_script(script))
-}
-
 /// Whether `c` ends a token: another digit, or a letter of a word.
 fn is_boundary(c: char) -> bool {
     if c.is_ascii() {
@@ -72,15 +43,7 @@ fn is_boundary(c: char) -> bool {
     if is_digit(c) {
         return true;
     }
-    let letter = matches!(
-        get_general_category(c),
-        GeneralCategory::UppercaseLetter
-            | GeneralCategory::LowercaseLetter
-            | GeneralCategory::TitlecaseLetter
-            | GeneralCategory::ModifierLetter
-            | GeneralCategory::OtherLetter
-    );
-    letter && !is_unspaced_script(c)
+    is_letter(c) && !is_unspaced_script(c)
 }
 
 /// Whether `c` is a currency sign.

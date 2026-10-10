@@ -86,6 +86,13 @@ pub struct Numbers<'a> {
 
 /// Every reading of every numeric token in `text`, in order of appearance,
 /// one at a time: a consumer that stops early reads no further.
+///
+/// # Examples
+///
+/// ```
+/// let first = figures_parser::numbers("Total $1,250 and 7.").next().unwrap();
+/// assert_eq!((first.text, &*first.integer, first.currency), ("1,250", "1250", true));
+/// ```
 #[must_use]
 pub const fn numbers(text: &str) -> Numbers<'_> {
     Numbers {
@@ -110,6 +117,24 @@ impl<'a> Iterator for Numbers<'a> {
 }
 
 /// Every reading of every numeric token in `text`, in order of appearance.
+///
+/// # Examples
+///
+/// "1.250" fits two readings, and its thousands reading also yields the
+/// groups printed side by side, as derived readings that only ground:
+///
+/// ```
+/// let readings: Vec<_> = figures_parser::extract_numbers("1.250")
+///     .iter()
+///     .map(|n| (n.integer.to_string(), n.fraction.as_deref().map(str::to_owned), n.derived))
+///     .collect();
+/// assert_eq!(readings, [
+///     ("1250".into(), None, false),
+///     ("1".into(), Some("250".into()), false),
+///     ("1".into(), None, true),
+///     ("250".into(), None, true),
+/// ]);
+/// ```
 #[must_use]
 pub fn extract_numbers(text: &str) -> Vec<Number<'_>> {
     let mut out = Vec::new();

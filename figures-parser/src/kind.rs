@@ -1,4 +1,5 @@
-//! The kinds of figure the library reads.
+//! The kinds of figure `extract` returns. The weekday check reads pairs
+//! rather than figures, so it is a comparison with no kind.
 
 use std::fmt;
 use std::str::FromStr;
@@ -10,11 +11,24 @@ pub enum Kind {
     Number,
     /// An http(s) link.
     Url,
+    /// An email address.
+    Email,
+    /// An identifier: a UUID, a hash, a tracker key, a prefixed id, a long
+    /// mixed token.
+    Id,
+    /// A length of time.
+    Duration,
 }
 
 impl Kind {
     /// Every kind, in the order `extract` reads them.
-    pub const ALL: [Self; 2] = [Self::Number, Self::Url];
+    pub const ALL: [Self; 5] = [
+        Self::Number,
+        Self::Url,
+        Self::Email,
+        Self::Id,
+        Self::Duration,
+    ];
 
     /// The name a caller selects the kind by.
     #[must_use]
@@ -22,6 +36,9 @@ impl Kind {
         match self {
             Self::Number => "number",
             Self::Url => "url",
+            Self::Email => "email",
+            Self::Id => "id",
+            Self::Duration => "duration",
         }
     }
 }

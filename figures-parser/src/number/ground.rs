@@ -102,6 +102,14 @@ impl<'r> Needles<'r> {
 ///
 /// A decimal is matched as written: the corpus keeps its point, and a printed
 /// decimal grounds the same value written with fewer places.
+///
+/// # Examples
+///
+/// ```
+/// let corpus = r#"{"revenue": 1250000, "orders": 4812}"#;
+/// let reply = "Revenue was 1,250,000 on 4,812 orders, up from 1,180,000.";
+/// assert_eq!(figures_parser::ungrounded_figures(reply, corpus), ["1,180,000"]);
+/// ```
 #[must_use]
 pub fn ungrounded_figures(reply: &str, corpus: &str) -> Vec<String> {
     let mut scratch = String::new();

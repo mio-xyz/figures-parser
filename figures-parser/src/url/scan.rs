@@ -90,6 +90,14 @@ fn unwrap_slack(text: &str) -> Cow<'_, str> {
 }
 
 /// Every http(s) link in `text`, in order, Slack's `<url|label>` included.
+///
+/// # Examples
+///
+/// ```
+/// let text = "See <https://acme.io/a|the doc> and **https://acme.io/b**.";
+/// let links: Vec<&str> = figures_parser::urls(text).iter().map(|u| u.text).collect();
+/// assert_eq!(links, ["https://acme.io/a", "https://acme.io/b"]);
+/// ```
 #[must_use]
 pub fn urls(text: &str) -> Vec<Url<'_>> {
     let unwrapped = unwrap_slack(text);
