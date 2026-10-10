@@ -93,7 +93,7 @@ fn flags_a_bare_figure_written_behind_a_currency_sign_from_100_up() {
     );
     assert_eq!(
         ungrounded_figures("About $12.5K, or $8k a month, $99 fee.", ""),
-        none()
+        vec!["12.5K", "8k"]
     );
 }
 
@@ -334,11 +334,32 @@ fn reads_a_single_dot_or_comma_before_three_digits_both_ways() {
 #[test]
 fn keeps_a_figure_apart_from_the_id_version_or_unit_it_sits_in() {
     assert_eq!(
-        ungrounded_figures("See p1789368220119 and v3.1, about 12.5K.", ""),
+        ungrounded_figures("See p1789368220119 and v3.1, about 12.5kg.", ""),
         none()
     );
     assert_eq!(
         ungrounded_figures("FY2026 revenue: $1,250,000.", "total 1250000"),
         none()
+    );
+}
+
+#[test]
+fn grounds_a_figure_that_fits_two_readings_by_either() {
+    let reply = "Paid $123.456 in total.";
+    for corpus in ["amount 123456", "amount 123.456", "amount 123"] {
+        assert_eq!(
+            ungrounded_figures(reply, corpus),
+            Vec::<String>::new(),
+            "{corpus}"
+        );
+    }
+    assert_eq!(ungrounded_figures(reply, "amount 124"), ["123.456"]);
+}
+
+#[test]
+fn names_a_figure_stated_twice_once() {
+    assert_eq!(
+        ungrounded_figures("Revenue 12,500, again 12500, then 12,500.", "nothing"),
+        ["12,500"]
     );
 }

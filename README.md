@@ -78,7 +78,7 @@ written.
 A number is read the way a person reads it. "1,250,000", "1.250.000",
 "1 250 000", "12,50,000" and "١٬٢٥٠٬٠٠٠" are the same integer. A notation that
 fits two readings yields both: "1.250" is 1,250 in Berlin and 1.25 in Boston,
-and either one in the corpus grounds it. A row of figures printed side by side
+and either one in the corpus grounds it, in a reply as in a corpus. A row of figures printed side by side
 ("15977,10140,26117") reads as three values. The digit table covers all 77
 runs of ten decimal digits Unicode encodes, astral scripts such as Adlam
 included, and a test fails when the Unicode data knows a digit the table lacks.
@@ -112,10 +112,43 @@ tilde after a digit is a range ("10~20", "10 ~ 20"), and the CJK wave dashes
 (`〜`, `～`) mean a range or "up to", so neither marks a figure. An
 approximate figure is reported as written, mark included.
 
+A scale word after the digits multiplies the figure: "1.2 million",
+"$4.5bn", "12.5K", "2,5 Mio.", "1,5 Mrd.", "3 milliards", "1,2 mil
+millones", "5 lakh", "₹2 Cr", "1.2万", "3億", "5千万". The words are
+CLDR's compact formats and the long forms in English, French, German,
+Spanish, Italian and Portuguese, read case aside; the abbreviations are
+read with their case. A scaled figure is stated as rounded, so it reads as
+approximate: "$1.2 million" is grounded by 1,150,000 to 1,249,999. A letter
+that also names a unit or a size reads as a scale only beside a currency:
+"$5m" and "€3B" scale, "5m" (minutes) and "7B" (a model's size) do not; "M"
+and "K" read glued to the digits, or after a space beside a currency
+("5 M€"). "Mio" and "Bio" need their dot or a currency, since the bare
+letters are also a name. A corpus written with scale words grounds a reply
+written in digits: "ARR: $1.2M" carries "1,200,000".
+
+A number written in words is read too, in English, French, German, Spanish,
+Italian and Portuguese and in Han numerals: "twelve thousand five hundred",
+"fifteen hundred", "quatre-vingt-dix-sept mille", "doce mil millones",
+"zweihundertfünfzigtausend", "un milione duecentomila", "um milhão e
+duzentos mil", "一万二千", "三億五千万". It is read around a hundred or a
+scale word and runs over the number words joined to it, by a space or a
+hyphen, while they continue one number in one language: "twenty cents"
+mixes English and French and is not a number. A lone scale word is not
+read ("mille grazie", "thousands of users"), nor a run of Han numerals that
+is a word ("万一", "百貨店"). A number in words is stated as rounded, like a
+scaled figure, and holds a reply to the same floors as digits, so "five
+thousand users" passes. A number opened by an article ("a million", "a
+hundred thousand") grounds a reply's figure but is never held to anything,
+since prose writes it as an idiom or a round guess ("thanks a million", "a
+thousand times"). A corpus written in words is read only when its digits leave a
+reply's figure unfound, and a transcript that says "one million two hundred
+thousand" grounds a reply's "1,200,000".
+
 `numbers(text)` iterates every reading of every number lazily, and
 `extract_numbers(text)` collects them, each with its byte span, its integer
-and fraction in ASCII digits, its sign, and whether it was grouped, marked
-as money or marked approximate.
+and fraction in ASCII digits (a scale word applied, a number in words
+converted), its sign, and whether it was grouped, marked as money or stated
+as approximate.
 
 ### Links
 
@@ -213,7 +246,7 @@ which readings a reply is held to.
 
 | Kind | Languages and scripts |
 |---|---|
-| Numbers | Any language. Digits of every script Unicode encodes, and the group and decimal symbols every CLDR locale prints: comma, dot, the apostrophes Swiss German uses, the spaces French and Russian group with, the Arabic separators and the fullwidth comma. Indian grouping ("12,50,000") reads too. A test reads back how 23 locales print a number. |
+| Numbers | Any language. Digits of every script Unicode encodes, and the group and decimal symbols every CLDR locale prints: comma, dot, the apostrophes Swiss German uses, the spaces French and Russian group with, the Arabic separators and the fullwidth comma. Indian grouping ("12,50,000") reads too. A test reads back how 23 locales print a number. Scale words after digits and numbers written in words: English, French, German, Spanish, Italian and Portuguese, Indian lakh and crore, and Han numerals. |
 | Links | Any language, internationalized domain names included. |
 | Weekdays | English, French, German, Spanish, Italian, Portuguese, Dutch, Swedish, Finnish, Russian, Ukrainian, Japanese, Chinese (simplified and traditional) and Vietnamese. |
 | Email addresses | Any language, a local part outside ASCII included. |
@@ -226,9 +259,18 @@ Each of these was checked against the library as it stands.
 
 **Numbers**
 
-- Number words ("twelve thousand") and Han numerals ("一万二千") are not read.
-- A magnitude suffix is not expanded: "1.25M" in the corpus does not ground
-  "$1,250,000" in the reply, which is reported.
+- A number in words below a hundred is not read ("twelve users"), nor a
+  half ("two and a half million", "half a million"), a decimal ("one point
+  two million"), an ordinal ("the thousandth"), a number in capitals
+  ("TWELVE THOUSAND") or a number in another language.
+- Han numerals mixed with digits ("3億5千万") read as two figures, "3億" and
+  "5千万", so a reply that writes them is held to each.
+- "billion" is read on the short scale, 10⁹, as English writes it; the
+  French "billion" and the German "Billion" are 10¹², so "1 billion" in a
+  French reply is read a thousand times too small. The plural forms that
+  only those languages write ("Billionen", "billones") are read as 10¹².
+- A long scale word glued to the digits ("12million") is not read, nor is a
+  scale word after more than one space.
 - A sign written in words ("minus 12,500"), with an en dash ("–12,500"), after
   the figure ("12,500-") or as an accounting suffix ("12,500 CR") is not
   read, so such a figure holds the corpus to no sign.
@@ -322,6 +364,9 @@ weekdays. Every difference that remained is a deliberate one:
 - digit groups are counted in code points, so astral digits group;
 - a sign before a figure is part of its value;
 - a figure marked approximate is grounded by a value that rounds to it;
+- a scale word after the digits multiplies the figure;
+- a reply's figure that fits two readings is grounded by either;
+- a number written in words is read;
 - a currency code or a sign after a figure marks it too;
 - a link right after a backtick or an unspaced script is read;
 - a Slack link is unwrapped whatever the case of its scheme;
@@ -337,7 +382,7 @@ between builds, with code layout alone.
 
 | Check | Prose | Dumped table | Every script | Log of ids | Allocations per call |
 |---|---|---|---|---|---|
-| `ungrounded_figures` | 371 µs | 1.07 ms | 1.80 ms | 429 µs | 11 |
+| `ungrounded_figures` | 459 µs | 1.41 ms | 1.98 ms | 557 µs | 13 |
 | `ungrounded_urls` | 83 µs | 51 µs | 44 µs | 57 µs | 14 |
 | `ungrounded_emails` | 34 µs | 79 µs | 39 µs | 20 µs | 3 |
 | `ungrounded_identifiers` | 9 µs | 73 µs | 24 µs | 64 µs | 5 |

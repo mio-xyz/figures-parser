@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use figures_parser::extract_numbers;
-use figures_parser::number::scan::tokens;
+use figures_parser::number::scan::{Scratch, tokens};
 
 /// A reading as compared here: integer, fraction, grouped, derived.
 type Key = (String, Option<String>, bool, bool);
@@ -156,7 +156,7 @@ fn every_reading_slices_the_input_at_its_span() {
 
 #[test]
 fn for_each_reading_borrows_the_text_or_the_scratch_and_matches_numbers() {
-    let mut scratch = String::new();
+    let mut scratch = Scratch::default();
     for text in [
         "1,250",
         "١٬٢٥٠٬٠٠٠",

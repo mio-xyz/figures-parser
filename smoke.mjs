@@ -30,4 +30,8 @@ assert.deepEqual(extract("-$12,500 and (1,250)", { kinds: ["number"] }).filter((
 assert.deepEqual(ungroundedFigures("Moved by -12,500.", "delta: 12500"), ["-12,500"]);
 assert.deepEqual(extract("~$12,500", { kinds: ["number"] }).map((e) => e.value.approximate), [true, true, true, false]);
 assert.deepEqual(ungroundedFigures("About ~12,500 and ~13,000.", "signups: 12487"), ["~13,000"]);
+assert.deepEqual(extract("Revenue hit $1.2 million", { kinds: ["number"] }).filter((e) => !e.value.derived).map((e) => [e.text, e.value.integer, e.value.approximate]), [["1.2 million", "1200000", true]]);
+assert.deepEqual(ungroundedFigures("Revenue hit $1.2 million, $4.7 million planned.", "revenue: 1234567"), ["4.7 million"]);
+assert.deepEqual(extract("We hit twelve thousand five hundred users", { kinds: ["number"] }).map((e) => [e.text, e.value.integer]), [["twelve thousand five hundred", "12500"]]);
+assert.deepEqual(ungroundedFigures("Revenue is 1,200,000.", "on the call: one million two hundred thousand"), []);
 console.log("ok");

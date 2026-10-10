@@ -36,7 +36,8 @@ pub struct NumberValue {
     /// an aside.
     #[napi(ts_type = "\"none\" | \"plus\" | \"minus\" | \"parenthesized\"")]
     pub sign: String,
-    /// An approximation mark stands before it ("~12,500").
+    /// Stated as rounded: an approximation mark before it ("~12,500") or a
+    /// scale word after its digits ("1.2 million").
     pub approximate: bool,
 }
 

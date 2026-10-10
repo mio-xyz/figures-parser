@@ -153,3 +153,11 @@ fn leaves_a_figure_under_its_floor_unchecked() {
     );
     assert_eq!(ungrounded_figures("~$500", "total 12487"), ["~$500"]);
 }
+
+#[test]
+fn grounds_an_approximate_figure_written_with_a_leading_zero_by_itself() {
+    assert_eq!(
+        ungrounded_figures("≈0.51.250", "≈0.51.250"),
+        Vec::<String>::new()
+    );
+}

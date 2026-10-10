@@ -7,6 +7,8 @@ use unicode_general_category::{GeneralCategory, get_general_category};
 
 use super::Sign;
 use super::digits::digit_value;
+pub use super::readings::Scratch;
+use super::scale::{may_scale, scale_after};
 use crate::text::{char_at, char_before, is_letter, is_unspaced_script};
 
 /// A dot, a comma or the Arabic decimal sign may end a decimal; the others only ever group.
@@ -37,7 +39,7 @@ fn is_digit(c: char) -> bool {
 }
 
 /// Whether `c` ends a token: another digit, or a letter of a word.
-fn is_boundary(c: char) -> bool {
+pub(super) fn is_boundary(c: char) -> bool {
     if c.is_ascii() {
         return c.is_ascii_alphanumeric();
     }
@@ -67,7 +69,7 @@ fn is_currency_code(run: &str, edge: Option<char>) -> bool {
 
 /// Whether a currency sign or code ends the text before byte `start`, with
 /// at most one space between ("$729", "€ 1,458", "USD 99").
-fn marked_before(text: &str, start: usize) -> bool {
+pub(super) fn marked_before(text: &str, start: usize) -> bool {
     let before = text.get(..start).unwrap_or_default();
     let before = before.strip_suffix(char::is_whitespace).unwrap_or(before);
     match char_before(before, before.len()) {
@@ -200,7 +202,7 @@ fn sign_at(text: &str, at: usize) -> Option<(Sign, usize)> {
 
 /// Whether `c` is a space within a line: the space, the no-break space or
 /// the narrow no-break space French writes after a mark.
-const fn is_inline_space(c: char) -> bool {
+pub(super) const fn is_inline_space(c: char) -> bool {
     matches!(c, ' ' | '\u{a0}' | '\u{202f}')
 }
 
@@ -289,7 +291,7 @@ pub(super) fn look_back(text: &str, start: usize, end: usize) -> Prefix {
 
 /// Whether a currency sign or code opens the text after byte `end`, with at
 /// most one space between ("99 USD", "12 €").
-fn marked_after(text: &str, end: usize) -> bool {
+pub(super) fn marked_after(text: &str, end: usize) -> bool {
     let after = text.get(end..).unwrap_or_default();
     let after = after.strip_prefix(char::is_whitespace).unwrap_or(after);
     match char_at(after, 0) {
@@ -322,8 +324,15 @@ pub struct Token<'a> {
     pub sign: Sign,
     /// Whether an approximation mark stands before it ("~12,500").
     pub approximate: bool,
-    /// The token from its sign or approximation mark on ("~-$12,500"), as a
-    /// reply wrote it; the same as `text` when neither stands before it.
+    /// The power of ten a scale word after the digits multiplies it by
+    /// ("1.2 million", "12.5K"); 0 without one.
+    pub magnitude: u32,
+    /// The token through its scale word ("1.2 million"); the same as `text`
+    /// without one.
+    pub written: &'a str,
+    /// The token from its sign or approximation mark on, through its scale
+    /// word ("~-$1.2 million"), as a reply wrote it; the same as `written`
+    /// when nothing stands before it.
     pub full: &'a str,
 }
 
@@ -448,18 +457,30 @@ impl<'a> Iterator for Tokens<'a> {
                 next = char_at(text, end);
             }
             self.pos = end;
-            // A run that ends against a word letter ("12.5K") gives back its
+            let scale = if may_scale(text, end) {
+                next.and_then(|n| scale_after(text, start, end, n))
+            } else {
+                None
+            };
+            // A run that ends against a word letter ("12.5kg") gives back its
             // last group; a single group against a letter ("2026x") is part of
             // that word and reads as nothing.
-            if next.is_some_and(is_boundary) {
+            if scale.is_none() && next.is_some_and(is_boundary) {
                 let Some(at) = last_symbol else {
                     continue;
                 };
                 end = at;
             }
+            let written_end = scale.map_or(end, |scale| scale.end);
+            self.pos = self.pos.max(written_end);
             let token = text.get(start..end).unwrap_or_default();
+            let written = if scale.is_some() {
+                text.get(start..written_end).unwrap_or(token)
+            } else {
+                token
+            };
             let prefix = if self.signs && prev.is_some_and(|p| may_have_prefix(text, start, p)) {
-                look_back(text, start, end)
+                look_back(text, start, written_end)
             } else {
                 Prefix {
                     sign: Sign::Unsigned,
@@ -471,10 +492,16 @@ impl<'a> Iterator for Tokens<'a> {
                 text: token,
                 start,
                 marked_before: self.marks && marked_before(text, start),
-                marked_after: self.marks && marked_after(text, end),
+                marked_after: self.marks && marked_after(text, written_end),
                 sign: prefix.sign,
                 approximate: prefix.approximate,
-                full: text.get(prefix.from..end).unwrap_or(token),
+                magnitude: scale.map_or(0, |scale| scale.magnitude),
+                written,
+                full: if prefix.from == start {
+                    written
+                } else {
+                    text.get(prefix.from..written_end).unwrap_or(written)
+                },
             });
         }
     }

@@ -6,7 +6,7 @@
 use std::hint::black_box;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use figures_parser::number::scan::tokens;
+use figures_parser::number::scan::{Scratch, tokens};
 use figures_parser::utf16::{Utf16Cursor, units};
 use figures_parser::{
     Date, durations, emails, extract_numbers, fabricated_urls, identifiers, misdated_weekdays,
@@ -18,7 +18,7 @@ use figures_parser::{
 /// optimizer cannot drop.
 fn exercise(reply: &str, corpus: &str, prompt: &str) -> usize {
     let mut n = 0;
-    let mut scratch = String::new();
+    let mut scratch = Scratch::default();
     for text in [reply, corpus, prompt] {
         n += tokens(text).count() + tokens(text).without_currency().count();
         for token in tokens(text) {
@@ -186,6 +186,29 @@ const POOL: &[&str] = &[
     "≈",
     "~12,500",
     "10~20",
+    " million",
+    " mil millones",
+    "K",
+    "万",
+    "千",
+    "億",
+    " Mrd",
+    "$5m",
+    " thousand",
+    "twelve",
+    " hundred and",
+    "-five",
+    "quatre-vingt",
+    " mille",
+    "zwölf",
+    "tausend",
+    "dodici",
+    "mila",
+    " y ",
+    "一",
+    "零",
+    "百",
+    "a million",
     "/",
     "?",
     "&",

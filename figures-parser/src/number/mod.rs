@@ -4,15 +4,19 @@
 pub mod digits;
 mod ground;
 mod readings;
+mod scale;
 pub mod scan;
+mod spelled;
 
 pub use ground::ungrounded_figures;
 
 use std::borrow::Cow;
 use std::collections::VecDeque;
+use std::iter::Peekable;
 use std::ops::{Range, RangeInclusive};
 
-use scan::{Tokens, tokens};
+use scan::{Scratch, Tokens, tokens};
+use spelled::{SpelledNumbers, spelled};
 
 /// The sign written before a figure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -73,7 +77,7 @@ impl Sign {
     reason = "each flag is a fact of its own about the reading, not a state"
 )]
 pub struct Figure<'a, D> {
-    /// As written, separators kept.
+    /// As written, separators and a scale word kept ("1.2 million").
     pub text: &'a str,
     /// Byte range of `text` in the scanned text.
     pub span: Range<usize>,
@@ -91,11 +95,12 @@ pub struct Figure<'a, D> {
     /// The sign written before it; of a run's neighbours, only the first has
     /// one.
     pub sign: Sign,
-    /// Whether an approximation mark stands before it ("~12,500"); of a
-    /// run's neighbours, only the first has one.
+    /// Whether it is stated as rounded: an approximation mark stands before
+    /// it ("~12,500"), or a scale word after its digits ("1.2 million"). Of
+    /// a run's neighbours, only the first has the mark.
     pub approximate: bool,
-    /// Its text from its sign or approximation mark on ("~-$12,500"); the
-    /// same as `text` when neither stands before it.
+    /// Its text from its sign or approximation mark on ("~-$1.2 million");
+    /// the same as `text` when neither stands before it.
     pub full_text: &'a str,
 }
 
@@ -141,19 +146,24 @@ impl<'a> From<Reading<'a, '_>> for Number<'a> {
     }
 }
 
-/// The readings of a text's numeric tokens, found as they are asked for.
+/// The readings of a text's numbers, found as they are asked for.
 #[derive(Debug)]
 pub struct Numbers<'a> {
-    /// The tokens not yet read.
-    tokens: Tokens<'a>,
-    /// The digits a reading joins or converts.
-    scratch: String,
+    /// The text read.
+    text: &'a str,
+    /// The numeric tokens not yet read.
+    tokens: Peekable<Tokens<'a>>,
+    /// The numbers written in words not yet read.
+    words: Peekable<SpelledNumbers<'a>>,
+    /// The digits a reading joins, converts or scales.
+    scratch: Scratch,
     /// The current token's readings not yet yielded.
     pending: VecDeque<Number<'a>>,
 }
 
-/// Every reading of every numeric token in `text`, in order of appearance,
-/// one at a time: a consumer that stops early reads no further.
+/// Every reading of every number in `text`, written in digits or in words,
+/// in order of appearance, one at a time: a consumer that stops early reads
+/// no further.
 ///
 /// # Examples
 ///
@@ -162,10 +172,12 @@ pub struct Numbers<'a> {
 /// assert_eq!((first.text, &*first.integer, first.currency), ("1,250", "1250", true));
 /// ```
 #[must_use]
-pub const fn numbers(text: &str) -> Numbers<'_> {
+pub fn numbers(text: &str) -> Numbers<'_> {
     Numbers {
-        tokens: tokens(text),
-        scratch: String::new(),
+        text,
+        tokens: tokens(text).peekable(),
+        words: spelled(text).peekable(),
+        scratch: Scratch::new(),
         pending: VecDeque::new(),
     }
 }
@@ -178,13 +190,41 @@ impl<'a> Iterator for Numbers<'a> {
             if let Some(number) = self.pending.pop_front() {
                 return Some(number);
             }
+            let token_start = self.tokens.peek().map(|token| token.start);
+            if let Some(number) = self
+                .words
+                .next_if(|n| token_start.is_none_or(|start| n.span.start < start))
+            {
+                return Some(self.scratch.spelled(self.text, &number).into());
+            }
             let token = self.tokens.next()?;
             token.for_each_reading(&mut self.scratch, |r| self.pending.push_back(r.into()));
         }
     }
 }
 
-/// Every reading of every numeric token in `text`, in order of appearance.
+/// Calls `f` with every reading of `text` in order of appearance: those of
+/// the numeric tokens `tokens` finds, and of the numbers written in words.
+pub(crate) fn for_each_reading_in<'a>(
+    text: &'a str,
+    tokens: Tokens<'a>,
+    scratch: &mut Scratch,
+    mut f: impl FnMut(Reading<'a, '_>),
+) {
+    let mut words = spelled(text).peekable();
+    for token in tokens {
+        while let Some(number) = words.next_if(|n| n.span.start < token.start) {
+            f(scratch.spelled(text, &number));
+        }
+        token.for_each_reading(scratch, &mut f);
+    }
+    for number in words {
+        f(scratch.spelled(text, &number));
+    }
+}
+
+/// Every reading of every number in `text`, written in digits or in words,
+/// in order of appearance.
 ///
 /// # Examples
 ///
@@ -206,10 +246,8 @@ impl<'a> Iterator for Numbers<'a> {
 #[must_use]
 pub fn extract_numbers(text: &str) -> Vec<Number<'_>> {
     let mut out = Vec::new();
-    let mut scratch = String::new();
-    for token in tokens(text) {
-        token.for_each_reading(&mut scratch, |r| out.push(r.into()));
-    }
+    let mut scratch = Scratch::default();
+    for_each_reading_in(text, tokens(text), &mut scratch, |r| out.push(r.into()));
     out
 }
 
@@ -276,13 +314,15 @@ impl Key {
     }
 
     /// The digit counts of the integer parts that may ground this key: its
-    /// own, and for an approximate one those of every value that rounds to
-    /// it.
+    /// own as written, leading zeros kept, and for an approximate one those
+    /// of every value that rounds to it.
     #[must_use]
     pub fn integer_lengths(&self) -> RangeInclusive<usize> {
         let own = self.integer().len();
-        self.around
-            .map_or(own..=own, |around| around.integer_lengths())
+        self.around.map_or(own..=own, |around| {
+            let range = around.integer_lengths();
+            own.min(*range.start())..=own.max(*range.end())
+        })
     }
 
     /// Whether a corpus reading carries this key's value, whatever its sign:

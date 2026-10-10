@@ -34,16 +34,16 @@ fn a_space_joins_groups_but_a_double_space_or_a_dash_does_not() {
     assert_eq!(texts("a  12  b"), ["12"]);
 }
 
-// A run gives back its last group when it ends against a letter: "12.5K"
+// A run gives back its last group when it ends against a letter: "12.5kg"
 // yields "12", "v3.1" yields "1", and an id's digits yield nothing.
 #[test]
 fn stands_apart_from_the_letters_of_a_word_backtracking_by_group() {
     assert_eq!(
-        texts("See p1789368220119 and v3.1, about 12.5K."),
+        texts("See p1789368220119 and v3.1, about 12.5kg."),
         ["1", "12"]
     );
     assert_eq!(texts("FY2026 revenue: $1,250,000."), ["1,250,000"]);
-    assert_eq!(texts("2026x and 1,250K"), ["1"]);
+    assert_eq!(texts("2026x and 1,250kW"), ["1"]);
     assert_eq!(texts("12.5K9 then 7"), ["12", "7"]);
 }
 
