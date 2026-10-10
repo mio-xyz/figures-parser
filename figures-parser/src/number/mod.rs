@@ -10,7 +10,7 @@ pub use ground::ungrounded_figures;
 
 use std::borrow::Cow;
 use std::collections::VecDeque;
-use std::ops::Range;
+use std::ops::{Range, RangeInclusive};
 
 use scan::{Tokens, tokens};
 
@@ -68,6 +68,10 @@ impl Sign {
 
 /// One reading of a numeric token, its digits held as `D`.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag is a fact of its own about the reading, not a state"
+)]
 pub struct Figure<'a, D> {
     /// As written, separators kept.
     pub text: &'a str,
@@ -87,9 +91,12 @@ pub struct Figure<'a, D> {
     /// The sign written before it; of a run's neighbours, only the first has
     /// one.
     pub sign: Sign,
-    /// Its text from its sign on ("-$12,500"); the same as `text` when it
-    /// has no sign before it.
-    pub signed_text: &'a str,
+    /// Whether an approximation mark stands before it ("~12,500"); of a
+    /// run's neighbours, only the first has one.
+    pub approximate: bool,
+    /// Its text from its sign or approximation mark on ("~-$12,500"); the
+    /// same as `text` when neither stands before it.
+    pub full_text: &'a str,
 }
 
 /// A reading as [`scan::Token::for_each_reading`] yields it: its digits
@@ -128,7 +135,8 @@ impl<'a> From<Reading<'a, '_>> for Number<'a> {
             currency: r.currency,
             derived: r.derived,
             sign: r.sign,
-            signed_text: r.signed_text,
+            approximate: r.approximate,
+            full_text: r.full_text,
         }
     }
 }
@@ -218,14 +226,18 @@ const MIN_CURRENCY_FIGURE: u128 = 100;
 /// rounded arithmetic of the model's own.
 const PRECISE_FRACTION_DIGITS: usize = 4;
 
-/// What a stated reading is compared as: its value, and the sign it holds
-/// the corpus to.
+/// What a stated reading is compared as: its value, the sign it holds the
+/// corpus to, and for a figure marked approximate the values that round to
+/// it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Key {
     /// The value.
     pub value: Value,
     /// The sign, as [`Sign::stated`] reads it.
     pub sign: Sign,
+    /// For a figure marked approximate ("~12,500"), the values that round to
+    /// it, which ground it as its exact value does.
+    pub around: Option<Around>,
 }
 
 /// The value a stated reading is compared by.
@@ -242,8 +254,20 @@ pub enum Value {
     },
 }
 
+/// The values that round to an approximate figure: those whose digits,
+/// scaled by `10^scale` and cut there, fall in `low..high`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Around {
+    /// The lowest scaled value that rounds to the figure.
+    pub low: u128,
+    /// The lowest scaled value above it that no longer does.
+    pub high: u128,
+    /// The power of ten the bounds are scaled by.
+    pub scale: u32,
+}
+
 impl Key {
-    /// The integer part, which every reading that grounds this key shares.
+    /// The integer part of the stated value.
     #[must_use]
     pub fn integer(&self) -> &str {
         match &self.value {
@@ -251,11 +275,29 @@ impl Key {
         }
     }
 
+    /// The digit counts of the integer parts that may ground this key: its
+    /// own, and for an approximate one those of every value that rounds to
+    /// it.
+    #[must_use]
+    pub fn integer_lengths(&self) -> RangeInclusive<usize> {
+        let own = self.integer().len();
+        self.around
+            .map_or(own..=own, |around| around.integer_lengths())
+    }
+
+    /// Whether a corpus reading carries this key's value, whatever its sign:
+    /// its exact value, or for an approximate one a value that rounds to it.
+    #[must_use]
+    pub fn value_grounded_by(&self, reading: &Reading<'_, '_>) -> bool {
+        self.value.grounded_by(reading)
+            || self.around.is_some_and(|around| around.contains(reading))
+    }
+
     /// Whether a corpus reading carries this key: its value, and a sign
     /// [`Sign::carried_by`] accepts.
     #[must_use]
     pub fn grounded_by(&self, reading: &Reading<'_, '_>) -> bool {
-        self.value.grounded_by(reading) && self.sign.carried_by(reading.sign)
+        self.value_grounded_by(reading) && self.sign.carried_by(reading.sign)
     }
 }
 
@@ -277,37 +319,115 @@ impl Value {
     }
 }
 
+impl Around {
+    /// The values that round to a figure written as `integer.fraction`, at
+    /// the precision it is written with: its last digit for a decimal, its
+    /// last nonzero digit for a whole number ("~12,500" takes 12,450 to
+    /// 12,549). A power of ten with one significant digit takes from where a
+    /// value rounds up to it ("~10,000" takes 9,500 to 14,999). None when the
+    /// bounds overflow.
+    fn of(integer: &str, fraction: Option<&str>) -> Option<Self> {
+        let fraction = fraction.unwrap_or_default();
+        let places = u32::try_from(fraction.len()).ok()?;
+        let stated = scaled(integer, Some(fraction), places)?;
+        let zeros = if fraction.is_empty() && stated != 0 {
+            integer.len() - integer.trim_end_matches('0').len()
+        } else {
+            0
+        };
+        let unit = 10_u128.checked_pow(u32::try_from(zeros).ok()?)?;
+        let half_above = unit.checked_mul(50)?;
+        let half_below = if stated == unit {
+            unit.checked_mul(5)?
+        } else {
+            half_above
+        };
+        let scale = places
+            .checked_add(2)
+            .filter(|&scale| 10_u128.checked_pow(scale).is_some())?;
+        let centre = stated.checked_mul(100)?;
+        Some(Self {
+            low: centre.checked_sub(half_below)?,
+            high: centre.checked_add(half_above)?,
+            scale,
+        })
+    }
+
+    /// The digit counts of the integer parts of the values in the range.
+    #[must_use]
+    pub fn integer_lengths(&self) -> RangeInclusive<usize> {
+        let integer_of = |v: u128| {
+            10_u128
+                .checked_pow(self.scale)
+                .and_then(|p| v.checked_div(p))
+                .unwrap_or_default()
+        };
+        let digits = |v: u128| {
+            v.checked_ilog10()
+                .and_then(|l| usize::try_from(l).ok())
+                .map_or(1, |l| l.saturating_add(1))
+        };
+        digits(integer_of(self.low))..=digits(integer_of(self.high.saturating_sub(1)))
+    }
+
+    /// Whether a corpus reading's value is in the range, whatever its sign.
+    #[must_use]
+    pub fn contains(&self, reading: &Reading<'_, '_>) -> bool {
+        scaled(reading.integer, reading.fraction, self.scale)
+            .is_some_and(|v| (self.low..self.high).contains(&v))
+    }
+}
+
+/// `integer.fraction` times `10^scale`, the fraction cut or padded with zeros
+/// to `scale` places; None past `u128`. Both parts are ASCII digits.
+fn scaled(integer: &str, fraction: Option<&str>, scale: u32) -> Option<u128> {
+    let mut value = integer.parse::<u128>().ok()?;
+    let mut places = fraction.unwrap_or_default().bytes();
+    for _ in 0..scale {
+        let digit = places.next().map_or(0, |b| b.saturating_sub(b'0'));
+        value = value.checked_mul(10)?.checked_add(u128::from(digit))?;
+    }
+    Some(value)
+}
+
 impl Reading<'_, '_> {
     /// The key a reply states with this reading, or None when it is not held
-    /// to it: a derived reading, or a figure under the floor its notation sets.
+    /// to it: a derived reading, or a figure under the floor its notation
+    /// sets. An approximate reading is also grounded by a value that rounds
+    /// to it.
     #[must_use]
     pub fn stated(&self) -> Option<Key> {
         if self.derived {
             return None;
         }
-        if let Some(fraction) = self.fraction
+        let value = if let Some(fraction) = self.fraction
             && fraction.len() >= PRECISE_FRACTION_DIGITS
         {
-            return Some(Key {
-                value: Value::Decimal {
-                    integer: self.integer.to_owned(),
-                    fraction: fraction.to_owned(),
-                },
-                sign: self.sign.stated(),
-            });
-        }
-        let floor = if self.grouped {
-            MIN_SEPARATED_FIGURE
-        } else if self.currency {
-            MIN_CURRENCY_FIGURE
+            Value::Decimal {
+                integer: self.integer.to_owned(),
+                fraction: fraction.to_owned(),
+            }
         } else {
-            MIN_BARE_FIGURE
+            let floor = if self.grouped {
+                MIN_SEPARATED_FIGURE
+            } else if self.currency {
+                MIN_CURRENCY_FIGURE
+            } else {
+                MIN_BARE_FIGURE
+            };
+            // An integer too long for u128 is far above every floor.
+            if self.integer.parse::<u128>().is_ok_and(|n| n < floor) {
+                return None;
+            }
+            Value::Integer(self.integer.to_owned())
         };
-        // An integer too long for u128 is far above every floor.
-        let reaches = self.integer.parse::<u128>().map_or(true, |n| n >= floor);
-        reaches.then(|| Key {
-            value: Value::Integer(self.integer.to_owned()),
+        Some(Key {
+            value,
             sign: self.sign.stated(),
+            around: self
+                .approximate
+                .then(|| Around::of(self.integer, self.fraction))
+                .flatten(),
         })
     }
 }

@@ -9,6 +9,7 @@
     reason = "a test asserts with unwrap and reads by index"
 )]
 
+mod approximate;
 mod dates;
 mod digits;
 mod durations;

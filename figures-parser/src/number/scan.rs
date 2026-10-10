@@ -99,6 +99,14 @@ const fn is_plus(c: char) -> bool {
     matches!(c, '+' | '\u{ff0b}')
 }
 
+/// Whether `c` marks the figure after it as approximate: a tilde, the tilde
+/// operator or the almost-equal sign ("~12,500", "≈ 1.2"). The wave dashes
+/// CJK text writes (`〜`, `～`) mean a range or "up to" there, so they are
+/// not marks.
+const fn is_approximation_mark(c: char) -> bool {
+    matches!(c, '~' | '\u{223c}' | '\u{2248}')
+}
+
 /// The byte the bidi marks right before `at` start at.
 fn before_marks(text: &str, mut at: usize) -> usize {
     while let Some(c) = char_before(text, at).filter(|&c| is_bidi_mark(c)) {
@@ -190,42 +198,93 @@ fn sign_at(text: &str, at: usize) -> Option<(Sign, usize)> {
     (!joined || after_code).then_some((sign, start))
 }
 
-/// Whether the text before `start` may hold a sign, a currency mark or an
-/// opening parenthesis, read from the one or two characters before it, so
-/// most figures are settled without the full look-back: a dash after a digit
-/// or a lowercase letter joins ("2026-11-05", "x-12"), and a space leads one
-/// only after a capital, a currency sign or a bidi mark ("USD 12", "€ 12").
-fn may_be_signed(text: &str, start: usize, prev: char) -> bool {
+/// Whether `c` is a space within a line: the space, the no-break space or
+/// the narrow no-break space French writes after a mark.
+const fn is_inline_space(c: char) -> bool {
+    matches!(c, ' ' | '\u{a0}' | '\u{202f}')
+}
+
+/// Where an approximation mark right before byte `at` starts, with at most
+/// one space of the same line between ("~12", "≈ 12"), standing after no
+/// digit or word letter: after a digit, with or without a space, a tilde is
+/// a range ("10~20", "10 ~ 20").
+fn approximation_at(text: &str, at: usize) -> Option<usize> {
+    let before = text.get(..at)?;
+    let mark_end = before_marks(
+        text,
+        before.strip_suffix(is_inline_space).unwrap_or(before).len(),
+    );
+    let c = char_before(text, mark_end).filter(|&c| is_approximation_mark(c))?;
+    let start = mark_end.saturating_sub(c.len_utf8());
+    let edge = before_marks(text, start);
+    let head = text.get(..edge)?;
+    let spaced = head.strip_suffix(char::is_whitespace);
+    let joined = char_before(head, edge).is_some_and(is_boundary)
+        || spaced.is_some_and(|h| char_before(h, h.len()).is_some_and(is_digit));
+    (!joined).then_some(start)
+}
+
+/// Whether the text before `start` may hold a sign, an approximation mark, a
+/// currency mark or an opening parenthesis, read from the one or two
+/// characters before it, so most figures are settled without the full
+/// look-back: a dash after a digit or a lowercase letter joins
+/// ("2026-11-05", "x-12"), and a space leads one only after a capital, a
+/// currency sign, an approximation mark or a bidi mark ("USD 12", "€ 12",
+/// "~ 12").
+fn may_have_prefix(text: &str, start: usize, prev: char) -> bool {
     let before = || char_before(text, start.saturating_sub(prev.len_utf8()));
     if is_minus(prev) || is_plus(prev) {
         !before().is_some_and(|b| b.is_ascii_digit() || b.is_ascii_lowercase())
     } else if prev.is_whitespace() {
-        before().is_some_and(|b| b.is_ascii_uppercase() || is_bidi_mark(b) || is_currency_sign(b))
+        before().is_some_and(|b| {
+            b.is_ascii_uppercase()
+                || is_approximation_mark(b)
+                || is_bidi_mark(b)
+                || is_currency_sign(b)
+        })
     } else {
-        prev == '(' || is_bidi_mark(prev) || is_currency_sign(prev)
+        prev == '(' || is_approximation_mark(prev) || is_bidi_mark(prev) || is_currency_sign(prev)
     }
 }
 
-/// The sign written before the token `start..end`, and the byte it starts
-/// at: a minus or a plus before the digits, or before a currency mark that
-/// is before them ("-12", "−1 234", "-$12", "$-12", "€ -12", "EUR-1'234"),
-/// or parentheses around the token and its currency mark, as accounting
-/// prints a negative ("($1,234.50)", "(1 234,50 $US)"). [`may_be_signed`]
+/// What is written before a figure: its sign, whether it is marked
+/// approximate, and the byte the figure starts at with them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Prefix {
+    /// The sign.
+    pub sign: Sign,
+    /// Whether an approximation mark stands before it.
+    pub approximate: bool,
+    /// Where the sign or the approximation mark starts; the token's own
+    /// start when neither is written.
+    pub from: usize,
+}
+
+/// What is written before the token `start..end`. The sign is a minus or a
+/// plus before the digits, or before a currency mark that is before them
+/// ("-12", "−1 234", "-$12", "$-12", "€ -12", "EUR-1'234"), or parentheses
+/// around the token and its currency mark, as accounting prints a negative
+/// ("($1,234.50)", "(1 234,50 $US)"). The approximation mark stands before
+/// all of them ("~12,500", "≈ -$12", "~€ 1.234,50"). [`may_have_prefix`]
 /// says, from the characters right before the token, when to look.
-pub(super) fn look_back(text: &str, start: usize, end: usize) -> (Sign, usize) {
+pub(super) fn look_back(text: &str, start: usize, end: usize) -> Prefix {
     let digits = before_marks(text, start);
-    if let Some(found) = sign_at(text, digits) {
-        return found;
-    }
     let currency = currency_start(text, digits).map(|at| before_marks(text, at));
-    if let Some(found) = currency.and_then(|at| sign_at(text, at)) {
-        return found;
-    }
+    let signed = sign_at(text, digits).or_else(|| currency.and_then(|at| sign_at(text, at)));
     let open = currency.unwrap_or(digits);
-    if char_before(text, open) == Some('(') && closes(text, end) {
-        return (Sign::Parenthesized, start);
+    let (sign, lead) = if let Some((sign, at)) = signed {
+        (sign, at.min(open))
+    } else if char_before(text, open) == Some('(') && closes(text, end) {
+        (Sign::Parenthesized, open)
+    } else {
+        (Sign::Unsigned, open)
+    };
+    let mark = approximation_at(text, lead);
+    Prefix {
+        sign,
+        approximate: mark.is_some(),
+        from: mark.or_else(|| signed.map(|(_, at)| at)).unwrap_or(start),
     }
-    (Sign::Unsigned, start)
 }
 
 /// Whether a currency sign or code opens the text after byte `end`, with at
@@ -261,9 +320,11 @@ pub struct Token<'a> {
     pub marked_after: bool,
     /// The sign written before it.
     pub sign: Sign,
-    /// The token from its sign on ("-$12,500"), as a reply wrote it; the
-    /// same as `text` when it has no sign before it.
-    pub signed: &'a str,
+    /// Whether an approximation mark stands before it ("~12,500").
+    pub approximate: bool,
+    /// The token from its sign or approximation mark on ("~-$12,500"), as a
+    /// reply wrote it; the same as `text` when neither stands before it.
+    pub full: &'a str,
 }
 
 impl Token<'_> {
@@ -283,7 +344,7 @@ pub struct Tokens<'a> {
     pos: usize,
     /// Whether a token reads the currency marks around it.
     marks: bool,
-    /// Whether a token reads the sign before it.
+    /// Whether a token reads the sign and the approximation mark before it.
     signs: bool,
 }
 
@@ -313,9 +374,10 @@ impl Tokens<'_> {
         self
     }
 
-    /// These tokens without reading the sign before them, so every token is
-    /// unsigned: for a corpus, where a sign matters only beside a value the
-    /// reply states, and is read there.
+    /// These tokens without reading the sign or the approximation mark
+    /// before them, so every token is unsigned and exact: for a corpus, where
+    /// a sign matters only beside a value the reply states, and is read
+    /// there.
     #[must_use]
     pub const fn without_signs(mut self) -> Self {
         self.signs = false;
@@ -396,20 +458,23 @@ impl<'a> Iterator for Tokens<'a> {
                 end = at;
             }
             let token = text.get(start..end).unwrap_or_default();
-            let (sign, signed) =
-                if self.signs && prev.is_some_and(|p| may_be_signed(text, start, p)) {
-                    let (sign, from) = look_back(text, start, end);
-                    (sign, text.get(from..end).unwrap_or(token))
-                } else {
-                    (Sign::Unsigned, token)
-                };
+            let prefix = if self.signs && prev.is_some_and(|p| may_have_prefix(text, start, p)) {
+                look_back(text, start, end)
+            } else {
+                Prefix {
+                    sign: Sign::Unsigned,
+                    approximate: false,
+                    from: start,
+                }
+            };
             return Some(Token {
                 text: token,
                 start,
                 marked_before: self.marks && marked_before(text, start),
                 marked_after: self.marks && marked_after(text, end),
-                sign,
-                signed,
+                sign: prefix.sign,
+                approximate: prefix.approximate,
+                full: text.get(prefix.from..end).unwrap_or(token),
             });
         }
     }
@@ -417,15 +482,16 @@ impl<'a> Iterator for Tokens<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Sign, char_before, look_back, may_be_signed, tokens};
+    use super::{Prefix, Sign, char_before, look_back, may_have_prefix, tokens};
 
-    /// The fast path skips only figures the full look-back reads as unsigned,
-    /// over every arrangement of up to three pieces before a figure.
+    /// The fast path skips only figures the full look-back reads as unsigned
+    /// and exact, over every arrangement of up to three pieces before a
+    /// figure.
     #[test]
-    fn the_fast_path_skips_only_unsigned_figures() {
+    fn the_fast_path_skips_only_unprefixed_figures() {
         let pieces = [
             "", "-", "−", "＋", "+", "(", "$", "€", "US", "EUR", " ", "\u{a0}", "\u{200e}",
-            "\u{200f}", "\u{61c}", "a", "Z", "1", "_", "は", "é", ":",
+            "\u{200f}", "\u{61c}", "a", "Z", "1", "_", "は", "é", ":", "~", "≈", "∼",
         ];
         for a in pieces {
             for b in pieces {
@@ -433,11 +499,16 @@ mod tests {
                     let text = format!("{a}{b}{c}12,500 $US)");
                     for token in tokens(&text) {
                         let end = token.start + token.text.len();
-                        let full = look_back(&text, token.start, end).0;
+                        let full = look_back(&text, token.start, end);
                         let fast = char_before(&text, token.start)
-                            .is_some_and(|p| may_be_signed(&text, token.start, p));
+                            .is_some_and(|p| may_have_prefix(&text, token.start, p));
+                        let none = Prefix {
+                            sign: Sign::Unsigned,
+                            approximate: false,
+                            from: token.start,
+                        };
                         assert!(
-                            fast || full == Sign::Unsigned,
+                            fast || full == none,
                             "{text:?} at {}: {full:?}",
                             token.start
                         );

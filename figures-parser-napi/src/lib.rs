@@ -17,6 +17,10 @@ use napi_derive::napi;
 
 /// A number reading's comparable value.
 #[napi(object)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag is a fact of its own about the number, not a state"
+)]
 pub struct NumberValue {
     /// The integer part in ASCII digits, separators dropped.
     pub integer: String,
@@ -32,6 +36,8 @@ pub struct NumberValue {
     /// an aside.
     #[napi(ts_type = "\"none\" | \"plus\" | \"minus\" | \"parenthesized\"")]
     pub sign: String,
+    /// An approximation mark stands before it ("~12,500").
+    pub approximate: bool,
 }
 
 /// One reading of one number, with where it sits in the input.
@@ -173,6 +179,7 @@ pub fn extract(
                         currency: n.currency,
                         derived: n.derived,
                         sign: n.sign.name().to_owned(),
+                        approximate: n.approximate,
                     },
                 })
             })),

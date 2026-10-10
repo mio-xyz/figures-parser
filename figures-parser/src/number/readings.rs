@@ -111,7 +111,8 @@ impl<'a> Token<'a> {
             currency: self.currency(),
             derived: false,
             sign: self.sign,
-            signed_text: self.signed,
+            approximate: self.approximate,
+            full_text: self.full,
         }
     }
 
@@ -120,7 +121,7 @@ impl<'a> Token<'a> {
     /// none for a later group. `text` is the text the token was found in.
     pub(super) fn sign_of(&self, reading: &Reading<'_, '_>, text: &str) -> Sign {
         if reading.span.start == self.start {
-            look_back(text, self.start, self.start + self.text.len()).0
+            look_back(text, self.start, self.start + self.text.len()).sign
         } else {
             Sign::Unsigned
         }
@@ -177,7 +178,7 @@ impl<'a> Token<'a> {
         if thousands || !decimal {
             let last_group = shape.run.groups - 1;
             let mut at = self.start;
-            let sign_len = self.signed.len().saturating_sub(self.text.len());
+            let prefix_len = self.full.len().saturating_sub(self.text.len());
             for (i, piece) in self.text.split_inclusive(is_symbol).enumerate() {
                 let group = piece.strip_suffix(is_symbol).unwrap_or(piece);
                 let leading = i == 0;
@@ -191,8 +192,9 @@ impl<'a> Token<'a> {
                         || (i == last_group && self.marked_after),
                     derived: thousands,
                     sign: if leading { self.sign } else { Sign::Unsigned },
-                    signed_text: if leading {
-                        self.signed.get(..sign_len + group.len()).unwrap_or(group)
+                    approximate: leading && self.approximate,
+                    full_text: if leading {
+                        self.full.get(..prefix_len + group.len()).unwrap_or(group)
                     } else {
                         group
                     },

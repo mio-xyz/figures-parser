@@ -28,4 +28,6 @@ assert.deepEqual(extract("took 1h30 then 30s", { kinds: ["duration"] }).map((e) 
 assert.deepEqual(ungroundedDurations("45 minutes, then 2 hours", '{"duration": 2700}'), ["2 hours"]);
 assert.deepEqual(extract("-$12,500 and (1,250)", { kinds: ["number"] }).filter((e) => !e.value.derived).map((e) => [e.text, e.value.sign]), [["12,500", "minus"], ["12,500", "minus"], ["1,250", "parenthesized"], ["1,250", "parenthesized"]]);
 assert.deepEqual(ungroundedFigures("Moved by -12,500.", "delta: 12500"), ["-12,500"]);
+assert.deepEqual(extract("~$12,500", { kinds: ["number"] }).map((e) => e.value.approximate), [true, true, true, false]);
+assert.deepEqual(ungroundedFigures("About ~12,500 and ~13,000.", "signups: 12487"), ["~13,000"]);
 console.log("ok");

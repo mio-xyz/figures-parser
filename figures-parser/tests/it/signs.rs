@@ -5,7 +5,7 @@ fn first(text: &str) -> (Sign, String) {
     extract_numbers(text)
         .first()
         .map_or((Sign::Unsigned, String::new()), |n| {
-            (n.sign, n.signed_text.to_owned())
+            (n.sign, n.full_text.to_owned())
         })
 }
 
@@ -73,7 +73,7 @@ fn reads_no_sign_in_a_dash_that_joins() {
 fn a_run_signs_its_whole_readings_and_its_first_group_only() {
     let readings: Vec<(String, Sign, String)> = extract_numbers("-12,500")
         .iter()
-        .map(|n| (n.integer.to_string(), n.sign, n.signed_text.to_owned()))
+        .map(|n| (n.integer.to_string(), n.sign, n.full_text.to_owned()))
         .collect();
     assert_eq!(
         readings,

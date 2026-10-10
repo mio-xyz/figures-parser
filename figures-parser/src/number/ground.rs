@@ -16,10 +16,42 @@ struct Needle<'r> {
     text: &'r str,
     /// Its place among the reply's distinct stated figures.
     index: usize,
-    /// [`hash_of`] its integer.
+    /// [`hash_of`] its integer; 0 for an approximate figure, which is not
+    /// searched by hash.
     hash: u64,
     /// Whether the corpus has not yet carried it.
     open: bool,
+}
+
+/// What a corpus reading does to a needle.
+enum Met {
+    /// Nothing: the needle was closed, or the value or the sign differs.
+    Nothing,
+    /// It grounds the needle, which it closes.
+    Closed,
+    /// The value matches, and the needle waits on the reading's unread sign.
+    WantsSign,
+}
+
+impl Needle<'_> {
+    /// Closes this needle when `reading` grounds it, `sign` being the
+    /// reading's, or None while it is unread.
+    fn meet(&mut self, reading: &Reading<'_, '_>, sign: Option<Sign>) -> Met {
+        if !self.open || !self.key.value_grounded_by(reading) {
+            return Met::Nothing;
+        }
+        let carried = match sign {
+            Some(read) => self.key.sign.carried_by(read),
+            None if self.key.sign == Sign::Unsigned => true,
+            None => return Met::WantsSign,
+        };
+        if carried {
+            self.open = false;
+            Met::Closed
+        } else {
+            Met::Nothing
+        }
+    }
 }
 
 /// The bit `lengths` sets for an integer of `len` digits; every length from
@@ -38,12 +70,17 @@ fn hash_of(integer: &str) -> u64 {
 /// reading is compared only against the few that share its own integer.
 #[derive(Default)]
 struct Needles<'r> {
-    /// Every distinct stated figure: in the reply's order while it is read,
-    /// by hash once [`Needles::seal`] has run.
+    /// Every distinct exact stated figure: in the reply's order while it is
+    /// read, by hash once [`Needles::seal`] has run.
     all: Vec<Needle<'r>>,
-    /// A bit per integer length the reply states, so most corpus readings
-    /// are turned away before any search.
+    /// Every distinct approximate one, which readings of several integers
+    /// ground, so each is compared by value.
+    around: Vec<Needle<'r>>,
+    /// A bit per integer length the exact figures state, so most corpus
+    /// readings are turned away before any search.
     lengths: u64,
+    /// A bit per integer length that may ground an approximate figure.
+    around_lengths: u64,
     /// How many the corpus has not yet carried, so the corpus walk stops as
     /// soon as it reaches none.
     open: usize,
@@ -52,15 +89,22 @@ struct Needles<'r> {
 impl<'r> Needles<'r> {
     /// Adds a stated figure unless an equal key is already there.
     fn add(&mut self, key: Key, text: &'r str) {
-        if self.all.iter().any(|n| n.key == key) {
+        let index = self.all.len() + self.around.len();
+        let (list, lengths, hash) = if key.around.is_some() {
+            (&mut self.around, &mut self.around_lengths, 0)
+        } else {
+            (&mut self.all, &mut self.lengths, hash_of(key.integer()))
+        };
+        if list.iter().any(|n| n.key == key) {
             return;
         }
-        self.lengths |= length_bit(key.integer().len());
-        let hash = hash_of(key.integer());
-        self.all.push(Needle {
+        for len in key.integer_lengths() {
+            *lengths |= length_bit(len);
+        }
+        list.push(Needle {
             key,
             text,
-            index: self.all.len(),
+            index,
             hash,
             open: true,
         });
@@ -77,38 +121,37 @@ impl<'r> Needles<'r> {
     /// matches then stays open, and the call returns true so the caller reads
     /// the sign, which few readings need, and calls again with it.
     fn ground(&mut self, reading: &Reading<'_, '_>, sign: Option<Sign>) -> bool {
-        if self.lengths & length_bit(reading.integer.len()) == 0 {
+        let bit = length_bit(reading.integer.len());
+        if (self.lengths | self.around_lengths) & bit == 0 {
             return false;
         }
-        let wanted = hash_of(reading.integer);
-        let from = self.all.partition_point(|n| n.hash < wanted);
-        let Some(same) = self.all.get_mut(from..) else {
-            return false;
-        };
         let mut wants_sign = false;
-        for needle in same.iter_mut().take_while(|n| n.hash == wanted) {
-            if !needle.open || !needle.key.value.grounded_by(reading) {
-                continue;
-            }
-            let carried = match sign {
-                Some(read) => needle.key.sign.carried_by(read),
-                None => needle.key.sign == Sign::Unsigned,
-            };
-            if carried {
-                needle.open = false;
-                self.open -= 1;
-            } else {
-                wants_sign |= sign.is_none();
-            }
+        let mut meet = |needle: &mut Needle<'r>| match needle.meet(reading, sign) {
+            Met::Nothing => {}
+            Met::Closed => self.open -= 1,
+            Met::WantsSign => wants_sign = true,
+        };
+        if self.lengths & bit != 0 {
+            let wanted = hash_of(reading.integer);
+            let from = self.all.partition_point(|n| n.hash < wanted);
+            let same = self.all.get_mut(from..).unwrap_or_default();
+            same.iter_mut()
+                .take_while(|n| n.hash == wanted)
+                .for_each(&mut meet);
+        }
+        if self.around_lengths & bit != 0 {
+            self.around.iter_mut().for_each(&mut meet);
         }
         wants_sign
     }
 
     /// The open needles' texts, in the order the reply stated them.
-    fn texts(mut self) -> Vec<String> {
-        self.all.retain(|n| n.open);
-        self.all.sort_by_key(|n| n.index);
-        self.all.into_iter().map(|n| n.text.to_owned()).collect()
+    fn texts(self) -> Vec<String> {
+        let mut open = self.all;
+        open.extend(self.around);
+        open.retain(|n| n.open);
+        open.sort_by_key(|n| n.index);
+        open.into_iter().map(|n| n.text.to_owned()).collect()
     }
 }
 
@@ -116,7 +159,9 @@ impl<'r> Needles<'r> {
 ///
 /// A decimal is matched as written: the corpus keeps its point, and a printed
 /// decimal grounds the same value written with fewer places. A signed figure
-/// is held to its sign, as [`Sign::carried_by`] reads it, and reported with it.
+/// is held to its sign, as [`Sign::carried_by`] reads it, and an approximate
+/// one ("~12,500") is grounded by any value that rounds to it; each is
+/// reported with its sign and its mark.
 ///
 /// # Examples
 ///
@@ -135,12 +180,7 @@ pub fn ungrounded_figures(reply: &str, corpus: &str) -> Vec<String> {
     for token in tokens(reply) {
         token.for_each_reading(&mut scratch, |r| {
             if let Some(key) = r.stated() {
-                let written = if key.sign == Sign::Unsigned {
-                    r.text
-                } else {
-                    r.signed_text
-                };
-                needles.add(key, written);
+                needles.add(key, r.full_text);
             }
         });
     }

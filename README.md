@@ -100,10 +100,22 @@ by 12,500"). Accounting's parentheses, "($1,234.50)", ground a negative in
 the corpus, but hold a reply to no sign, since prose writes an aside the
 same way.
 
+A figure marked approximate is held to what it rounds. A tilde, the tilde
+operator or the almost-equal sign before the figure, its sign or its
+currency ("~12,500", "≈ $12,500", "~-12,500") makes it grounded by any
+corpus value that rounds to it at the precision it is written with: its last
+nonzero digit for a whole number and its last digit for a decimal. So
+"~12,500" takes 12,450 to 12,549, "~12,000" takes 11,500 to 12,499, and
+"~1.1785" takes 1.17846. A power of ten with one significant digit takes
+from where a value rounds up to it, so "~10,000" takes 9,500 to 14,999. A
+tilde after a digit is a range ("10~20", "10 ~ 20"), and the CJK wave dashes
+(`〜`, `～`) mean a range or "up to", so neither marks a figure. An
+approximate figure is reported as written, mark included.
+
 `numbers(text)` iterates every reading of every number lazily, and
 `extract_numbers(text)` collects them, each with its byte span, its integer
-and fraction in ASCII digits, its sign, and whether it was grouped or marked
-as money.
+and fraction in ASCII digits, its sign, and whether it was grouped, marked
+as money or marked approximate.
 
 ### Links
 
@@ -220,6 +232,9 @@ Each of these was checked against the library as it stands.
 - A sign written in words ("minus 12,500"), with an en dash ("–12,500"), after
   the figure ("12,500-") or as an accounting suffix ("12,500 CR") is not
   read, so such a figure holds the corpus to no sign.
+- Approximation in words ("about 12,500", "roughly", "environ", "約") or
+  after the figure ("12,500-ish", "12,500 or so") is not read, so such a
+  figure is held to its exact value.
 
 **Links**
 
@@ -306,6 +321,7 @@ weekdays. Every difference that remained is a deliberate one:
 
 - digit groups are counted in code points, so astral digits group;
 - a sign before a figure is part of its value;
+- a figure marked approximate is grounded by a value that rounds to it;
 - a currency code or a sign after a figure marks it too;
 - a link right after a backtick or an unspaced script is read;
 - a Slack link is unwrapped whatever the case of its scheme;
