@@ -114,10 +114,15 @@ approximate figure is reported as written, mark included.
 
 A scale word after the digits multiplies the figure: "1.2 million",
 "$4.5bn", "12.5K", "2,5 Mio.", "1,5 Mrd.", "3 milliards", "1,2 mil
-millones", "5 lakh", "₹2 Cr", "1.2万", "3億", "5千万". The words are
-CLDR's compact formats and the long forms in English, French, German,
-Spanish, Italian and Portuguese, read case aside; the abbreviations are
-read with their case. A scaled figure is stated as rounded, so it reads as
+millones", "5 lakh", "₹2 Cr", "1.2万", "3億", "5千万". After whole digits, a Han
+multiplier may be followed by sections of digits and smaller multipliers,
+which add to it: "3億5000万" is 350,000,000, "1億2345万6789" is 123,456,789.
+Digits alone end the sections only after 万 or a smaller multiplier and with
+two digits or more ("2万5000" is 25,000), since "3万5" is spoken shorthand for
+35,000 and a text writes the places below 億 through 万. The words are CLDR's
+compact formats and the long forms in English, French, German, Spanish,
+Italian and Portuguese, read case aside; the abbreviations are read with
+their case. A scaled figure is stated as rounded, so it reads as
 approximate: "$1.2 million" is grounded by 1,150,000 to 1,249,999. A letter
 that also names a unit or a size reads as a scale only beside a currency:
 "$5m" and "€3B" scale, "5m" (minutes) and "7B" (a model's size) do not; "M"
@@ -130,19 +135,29 @@ A number written in words is read too, in English, French, German, Spanish,
 Italian and Portuguese and in Han numerals: "twelve thousand five hundred",
 "fifteen hundred", "quatre-vingt-dix-sept mille", "doce mil millones",
 "zweihundertfünfzigtausend", "un milione duecentomila", "um milhão e
-duzentos mil", "一万二千", "三億五千万". It is read around a hundred or a
-scale word and runs over the number words joined to it, by a space or a
-hyphen, while they continue one number in one language: "twenty cents"
-mixes English and French and is not a number. A lone scale word is not
-read ("mille grazie", "thousands of users"), nor a run of Han numerals that
-is a word ("万一", "百貨店"). A number in words is stated as rounded, like a
-scaled figure, and holds a reply to the same floors as digits, so "five
-thousand users" passes. A number opened by an article ("a million", "a
-hundred thousand") grounds a reply's figure but is never held to anything,
-since prose writes it as an idiom or a round guess ("thanks a million", "a
-thousand times"). A corpus written in words is read only when its digits leave a
-reply's figure unfound, and a transcript that says "one million two hundred
-thousand" grounds a reply's "1,200,000".
+duzentos mil", "一万二千", "三億五千万". It is read around a hundred or a scale word
+and runs over the number words joined to it, by a space or a hyphen, while
+they continue one number in one language: "twenty cents" mixes English and
+French and is not a number. A half is read beside its scale ("two and a half
+million", "half a million", "a million and a half", "deux millions et demi",
+"dos millones y medio", "mezzo milione", "zweieinhalb Millionen",
+"anderthalb Millionen"), and a decimal point before one ("one point two five
+million", "zwei Komma fünf Millionen", "uno coma cinco mil millones"); a
+half or a decimal without a scale ("two and a half", "one point two") is not
+a number of its own. Whole digits of one to three places may lead the words
+("3 thousand five hundred", "2 million three hundred thousand", "2 and a
+half million", "1 millón y medio"), and the whole is one figure, with the
+sign before the digits; other digits keep their scale word ("1.5 million and
+a half" reads "1.5 million"). A lone scale word is not read ("mille grazie",
+"thousands of users"), nor a run of Han numerals that is a word ("万一",
+"百貨店"). A number in words is stated as rounded, like a scaled figure, and
+holds a reply to the same floors as digits, so "five thousand users" passes.
+A number opened by an article ("a million", "a hundred thousand") grounds a
+reply's figure but is never held to anything, since prose writes it as an
+idiom or a round guess ("thanks a million", "a thousand times"). A corpus
+written in words is read only when its digits leave a reply's figure
+unfound, and a transcript that says "one million two hundred thousand"
+grounds a reply's "1,200,000".
 
 `numbers(text)` iterates every reading of every number lazily, and
 `extract_numbers(text)` collects them, each with its byte span, its integer
@@ -259,12 +274,16 @@ Each of these was checked against the library as it stands.
 
 **Numbers**
 
-- A number in words below a hundred is not read ("twelve users"), nor a
-  half ("two and a half million", "half a million"), a decimal ("one point
-  two million"), an ordinal ("the thousandth"), a number in capitals
-  ("TWELVE THOUSAND") or a number in another language.
-- Han numerals mixed with digits ("3億5千万") read as two figures, "3億" and
-  "5千万", so a reply that writes them is held to each.
+- A number in words below a hundred is not read ("twelve users"), nor an
+  ordinal ("the thousandth"), a fraction other than a half ("a quarter
+  million"), a number in capitals ("TWELVE THOUSAND") or a number in
+  another language.
+- "At one point two million people" reads "one point two million", since
+  "point" between number words is read as a decimal point.
+- Han digits after Arabic ones ("3億五千万") read as two figures, "3億" and
+  "五千万", and so do digits after a Han multiplier that follows a decimal
+  ("1.2万5000"). Korean multipliers are not read, so "3억 5천만" reads as 3
+  and 5.
 - "billion" is read on the short scale, 10⁹, as English writes it; the
   French "billion" and the German "Billion" are 10¹², so "1 billion" in a
   French reply is read a thousand times too small. The plural forms that

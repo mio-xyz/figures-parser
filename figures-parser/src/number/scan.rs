@@ -327,7 +327,8 @@ pub struct Token<'a> {
     /// The power of ten a scale word after the digits multiplies it by
     /// ("1.2 million", "12.5K"); 0 without one.
     pub magnitude: u32,
-    /// The token through its scale word ("1.2 million"); the same as `text`
+    /// The token through its scale word ("1.2 million"), and through the
+    /// sections after a Han multiplier ("3億5000万"); the same as `text`
     /// without one.
     pub written: &'a str,
     /// The token from its sign or approximation mark on, through its scale

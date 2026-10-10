@@ -1,7 +1,7 @@
 //! The number words of English, French, German, Spanish, Italian and
 //! Portuguese, each with the languages that write it.
 
-use super::Part::{self, Article, Hundred, Hundreds, Join, Scale, Value};
+use super::Part::{self, Article, Half, Hundred, Hundreds, Join, OneAndAHalf, Point, Scale, Value};
 
 /// The languages a word is written in, one bit each.
 pub type Langs = u8;
@@ -25,6 +25,7 @@ pub const ALL: Langs = EN | FR | DE | ES | IT | PT;
 /// word, which [`MORPHEMES`] splits; their scale words stand apart and are
 /// here.
 pub const WORDS: &[(&str, Part, Langs)] = &[
+    ("zero", Value(0), EN | IT | PT),
     ("one", Value(1), EN),
     ("two", Value(2), EN),
     ("three", Value(3), EN),
@@ -65,6 +66,9 @@ pub const WORDS: &[(&str, Part, Langs)] = &[
     ("and", Join, EN),
     ("a", Article, EN),
     ("an", Article, EN),
+    ("half", Half, EN),
+    ("point", Point, EN),
+    ("zéro", Value(0), FR),
     ("un", Value(1), FR | ES | IT),
     ("une", Value(1), FR),
     ("deux", Value(2), FR),
@@ -94,10 +98,16 @@ pub const WORDS: &[(&str, Part, Langs)] = &[
     ("milliard", Scale(9), FR),
     ("milliards", Scale(9), FR),
     ("et", Join, FR),
+    ("demi", Half, FR),
+    ("demie", Half, FR),
+    ("virgule", Point, FR),
+    ("null", Value(0), DE),
+    ("komma", Point, DE),
     ("millionen", Scale(6), DE),
     ("milliarde", Scale(9), DE),
     ("milliarden", Scale(9), DE),
     ("billionen", Scale(12), DE),
+    ("cero", Value(0), ES),
     ("uno", Value(1), ES | IT),
     ("una", Value(1), ES | IT),
     ("dos", Value(2), ES),
@@ -168,11 +178,22 @@ pub const WORDS: &[(&str, Part, Langs)] = &[
     ("billon", Scale(12), ES),
     ("billones", Scale(12), ES),
     ("y", Join, ES),
+    ("medio", Half, ES),
+    ("media", Half, ES),
+    ("coma", Point, ES),
+    ("punto", Point, ES | IT),
     ("milione", Scale(6), IT),
     ("milioni", Scale(6), IT),
     ("miliardo", Scale(9), IT),
     ("miliardi", Scale(9), IT),
     ("e", Join, IT | PT),
+    ("mezzo", Half, IT),
+    ("mezza", Half, IT),
+    ("virgola", Point, IT),
+    ("meio", Half, PT),
+    ("meia", Half, PT),
+    ("vírgula", Point, PT),
+    ("virgula", Point, PT),
     ("um", Value(1), PT),
     ("uma", Value(1), PT),
     ("dois", Value(2), PT),
@@ -270,6 +291,8 @@ pub const MORPHEMES: &[(&str, Part, Langs)] = &[
     ("hundert", Hundred, DE),
     ("tausend", Scale(3), DE),
     ("und", Join, DE),
+    ("einhalb", Half, DE),
+    ("anderthalb", OneAndAHalf, DE),
     ("uno", Value(1), IT),
     ("una", Value(1), IT),
     ("un", Value(1), IT),

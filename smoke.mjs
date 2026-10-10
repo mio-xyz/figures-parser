@@ -34,4 +34,5 @@ assert.deepEqual(extract("Revenue hit $1.2 million", { kinds: ["number"] }).filt
 assert.deepEqual(ungroundedFigures("Revenue hit $1.2 million, $4.7 million planned.", "revenue: 1234567"), ["4.7 million"]);
 assert.deepEqual(extract("We hit twelve thousand five hundred users", { kinds: ["number"] }).map((e) => [e.text, e.value.integer]), [["twelve thousand five hundred", "12500"]]);
 assert.deepEqual(ungroundedFigures("Revenue is 1,200,000.", "on the call: one million two hundred thousand"), []);
+assert.deepEqual(extract("2 and a half million, one point two million, 3億5000万円", { kinds: ["number"] }).filter((e) => !e.value.derived).map((e) => [e.text, e.value.integer]), [["2 and a half million", "2500000"], ["one point two million", "1200000"], ["3億5000万", "350000000"]]);
 console.log("ok");

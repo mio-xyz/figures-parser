@@ -2,7 +2,10 @@
 //! "1,2万". The words are CLDR's compact number formats and the long forms
 //! of the languages the library reads.
 
-use super::scan::{is_boundary, is_inline_space, marked_after, marked_before};
+use std::ops::Range;
+
+use super::digits::digit_value;
+use super::scan::{is_boundary, is_inline_space, is_symbol, marked_after, marked_before};
 use crate::text::{char_at, is_letter, lookup};
 
 /// A scale written after a figure's digits.
@@ -10,7 +13,8 @@ use crate::text::{char_at, is_letter, lookup};
 pub struct Scale {
     /// The power of ten it multiplies the figure by.
     pub magnitude: u32,
-    /// The byte it ends at.
+    /// The byte it ends at, past the sections written after a Han
+    /// multiplier ("5000万" in "3億5000万").
     pub end: usize,
 }
 
@@ -103,9 +107,40 @@ const fn han_magnitude(c: char) -> Option<(u32, bool)> {
     }
 }
 
-/// The Han multipliers glued after byte `end` ("1.2万", "3億", "5千万",
-/// "2万亿"): the small one, if any, then the large ones, their powers added.
-fn han_scale(text: &str, end: usize) -> Option<Scale> {
+/// The Han multipliers glued after the digits `digits` ("1.2万", "3億",
+/// "5千万", "2万亿"), and, after digits alone, the sections of digits and
+/// smaller multipliers written after them ("3億5000万", "1億2345万6789").
+fn han_scale(text: &str, digits: Range<usize>) -> Option<Scale> {
+    let (magnitude, _, end) = han_head(text, digits)?;
+    Some(Scale { magnitude, end })
+}
+
+/// The power of the Han multipliers after the digits `digits`, what the
+/// sections after them add, and the byte those end at; no sections after a
+/// head that is not digits alone.
+fn han_head(text: &str, digits: Range<usize>) -> Option<(u32, u128, usize)> {
+    let (magnitude, at) = han_multipliers(text, digits.end)?;
+    let whole = text
+        .get(digits)
+        .is_some_and(|head| head.chars().all(|c| digit_value(c).is_some()));
+    let (rest, end) = if whole {
+        han_sections(text, at, magnitude)
+    } else {
+        (0, at)
+    };
+    Some((magnitude, rest, end))
+}
+
+/// What the sections a scaled figure writes after its Han multiplier add to
+/// it ("5000万" in "3億5000万"), its digits being `written`'s first
+/// `head_len` bytes; 0 without them.
+pub(super) fn han_rest(written: &str, head_len: usize) -> u128 {
+    han_head(written, 0..head_len).map_or(0, |(_, rest, _)| rest)
+}
+
+/// The Han multipliers glued after byte `end`: the small one, if any, then
+/// the large ones; their powers added, and the byte they end at.
+fn han_multipliers(text: &str, end: usize) -> Option<(u32, usize)> {
     let mut magnitude = 0_u32;
     let mut at = end;
     let mut large_seen = false;
@@ -120,7 +155,97 @@ fn han_scale(text: &str, end: usize) -> Option<Scale> {
         magnitude = magnitude.saturating_add(power);
         at = at.saturating_add(c.len_utf8());
     }
-    (magnitude > 0).then_some(Scale { magnitude, end: at })
+    (magnitude > 0).then_some((magnitude, at))
+}
+
+/// The sections written from byte `at` after a Han multiplier of power
+/// `power`: digits, each run with smaller multipliers than the one before
+/// it, and at the end a run of digits alone after 万 or a smaller one
+/// ("2万5000", "1億2345万6789"). Each must stay below the multiplier before
+/// it. A last run of one digit is not read, since "3万5" is spoken shorthand
+/// for 35,000, nor one after a larger multiplier, whose places a text fills
+/// through 万 ("3億5000" is short for "3億5000万"). Returns what the sections
+/// add and the byte they end at.
+fn han_sections(text: &str, mut at: usize, mut power: u32) -> (u128, usize) {
+    let mut added = 0_u128;
+    while let Some((value, digits, digits_end)) = section_digits(text, at) {
+        let section = match han_multipliers(text, digits_end) {
+            Some((magnitude, end)) if magnitude < power => {
+                let section = 10_u128
+                    .checked_pow(magnitude)
+                    .and_then(|scale| value.checked_mul(scale));
+                section.map(|section| (section, magnitude, end))
+            }
+            Some(_) => None,
+            None => (digits >= 2 && power <= 4 && !continues_figure(text, digits_end))
+                .then_some((value, 0, digits_end)),
+        };
+        let Some((section, magnitude, end)) = section else {
+            break;
+        };
+        let below = 10_u128
+            .checked_pow(power)
+            .is_some_and(|limit| section < limit);
+        let Some(sum) = added.checked_add(section).filter(|_| below) else {
+            break;
+        };
+        added = sum;
+        at = end;
+        power = magnitude;
+        if power == 0 {
+            break;
+        }
+    }
+    (added, at)
+}
+
+/// The digits written from byte `at`, a comma allowed before each group of
+/// three ("5,000"): their value, how many there are, and the byte they end
+/// at; None when no digit stands there.
+fn section_digits(text: &str, mut at: usize) -> Option<(u128, u32, usize)> {
+    let mut value = 0_u128;
+    let mut digits = 0_u32;
+    let mut group = 0_u32;
+    while let Some(c) = char_at(text, at) {
+        if let Some(digit) = digit_value(c) {
+            value = value.checked_mul(10)?.checked_add(u128::from(digit))?;
+            digits = digits.saturating_add(1);
+            group = group.saturating_add(1);
+        } else if matches!(c, ',' | '\u{ff0c}')
+            && (1..=3).contains(&group)
+            && grouped_after(text, at)
+        {
+            group = 0;
+        } else {
+            break;
+        }
+        at = at.saturating_add(c.len_utf8());
+    }
+    (digits > 0).then_some((value, digits, at))
+}
+
+/// Whether the comma at byte `at` is followed by a group of exactly three
+/// digits.
+fn grouped_after(text: &str, at: usize) -> bool {
+    let mut next = at.saturating_add(char_at(text, at).map_or(1, char::len_utf8));
+    for _ in 0..3 {
+        match char_at(text, next) {
+            Some(c) if digit_value(c).is_some() => next = next.saturating_add(c.len_utf8()),
+            _ => return false,
+        }
+    }
+    char_at(text, next).is_none_or(|c| digit_value(c).is_none())
+}
+
+/// Whether the figure goes on at byte `end`: a word letter, or a symbol
+/// before another digit ("2万5000.5", "2万5000kg").
+fn continues_figure(text: &str, end: usize) -> bool {
+    char_at(text, end).is_some_and(|c| {
+        is_boundary(c)
+            || (is_symbol(c)
+                && char_at(text, end.saturating_add(c.len_utf8()))
+                    .is_some_and(|d| digit_value(d).is_some()))
+    })
 }
 
 /// Whether the bytes at `at` may begin a Latin scale word or abbreviation,
@@ -242,7 +367,7 @@ fn word_magnitude(word: &str) -> Option<u32> {
 /// letterless character follows it.
 pub(super) fn scale_after(text: &str, start: usize, end: usize, next: char) -> Option<Scale> {
     if han_magnitude(next).is_some() {
-        return han_scale(text, end);
+        return han_scale(text, start..end);
     }
     let spaced = is_inline_space(next);
     let word_start = if spaced {

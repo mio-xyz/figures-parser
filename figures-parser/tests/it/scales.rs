@@ -161,3 +161,62 @@ fn holds_a_scaled_figure_to_the_floors() {
     );
     assert_eq!(ungrounded_figures("$5k budget", "nothing"), ["5k"]);
 }
+
+#[test]
+fn reads_the_sections_written_after_a_han_multiplier() {
+    for (text, written, integer) in [
+        ("売上高は3億5000万円", "3億5000万", "350000000"),
+        ("3億5,000万円", "3億5,000万", "350000000"),
+        ("３億５０００万円", "３億５０００万", "350000000"),
+        ("1億2345万6789円", "1億2345万6789", "123456789"),
+        ("1万2千", "1万2千", "12000"),
+        ("2万5000円", "2万5000", "25000"),
+        ("1万500円", "1万500", "10500"),
+        ("3亿5000万元", "3亿5000万", "350000000"),
+        ("1兆2000億", "1兆2000億", "1200000000000"),
+    ] {
+        assert_eq!(
+            first(text),
+            Some((written.to_owned(), integer.to_owned(), None, true)),
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn ends_the_sections_where_they_stop_fitting_below_the_multiplier() {
+    for (text, written, integer) in [
+        ("3万5", "3万", "30000"),
+        ("1万12000", "1万", "10000"),
+        ("3万5億", "3万", "30000"),
+        ("2万5000.5", "2万", "20000"),
+        ("2万5000kg", "2万", "20000"),
+        ("3万〜5万", "3万", "30000"),
+        ("3億5000", "3億", "300000000"),
+        ("1.2万25", "1.2万", "12000"),
+        ("1,250万5000", "1,250万", "12500000"),
+        ("5千万3000", "5千万", "50000000"),
+    ] {
+        assert_eq!(
+            first(text),
+            Some((written.to_owned(), integer.to_owned(), None, true)),
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn grounds_a_han_figure_written_in_sections_as_one_value() {
+    assert_eq!(
+        ungrounded_figures("売上高は3億5000万円でした。", "revenue: 350,000,000"),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        ungrounded_figures("Revenue was 350,000,000.", "売上高 3億5,000万円"),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        ungrounded_figures("売上高は3億5000万円でした。", "revenue: 300,000,000"),
+        ["3億5000万"]
+    );
+}

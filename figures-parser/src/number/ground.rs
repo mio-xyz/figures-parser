@@ -252,7 +252,9 @@ pub fn ungrounded_figures(reply: &str, corpus: &str) -> Vec<String> {
     // Numbers written in words are rare in a corpus, and searched for only
     // when the digits left something unfound.
     for number in spelled(corpus) {
-        needles.ground(&scratch.spelled(corpus, &number), Some(Sign::Unsigned));
+        let reading = scratch.spelled(corpus, &number);
+        let sign = reading.sign;
+        needles.ground(&reading, Some(sign));
         if needles.open == 0 {
             return Vec::new();
         }

@@ -15,8 +15,8 @@ use std::collections::VecDeque;
 use std::iter::Peekable;
 use std::ops::{Range, RangeInclusive};
 
-use scan::{Scratch, Tokens, tokens};
-use spelled::{SpelledNumbers, spelled};
+use scan::{Scratch, Token, Tokens, tokens};
+use spelled::{Spelled, SpelledNumbers, spelled};
 
 /// The sign written before a figure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -198,9 +198,21 @@ impl<'a> Iterator for Numbers<'a> {
                 return Some(self.scratch.spelled(self.text, &number).into());
             }
             let token = self.tokens.next()?;
+            if let Some(number) = self.words.next_if(|n| n.span.start == token.start)
+                && continues(&number, &token)
+            {
+                return Some(self.scratch.spelled(self.text, &number).into());
+            }
             token.for_each_reading(&mut self.scratch, |r| self.pending.push_back(r.into()));
         }
     }
+}
+
+/// Whether `number`, written in words after the digits of `token`, goes on
+/// past what the token reads ("2 million three hundred thousand"), and so
+/// stands for it; one that ends with it ("3 mil millones") repeats it.
+const fn continues(number: &Spelled, token: &Token<'_>) -> bool {
+    number.span.end > token.start + token.written.len()
 }
 
 /// Calls `f` with every reading of `text` in order of appearance: those of
@@ -215,6 +227,12 @@ pub(crate) fn for_each_reading_in<'a>(
     for token in tokens {
         while let Some(number) = words.next_if(|n| n.span.start < token.start) {
             f(scratch.spelled(text, &number));
+        }
+        if let Some(number) = words.next_if(|n| n.span.start == token.start)
+            && continues(&number, &token)
+        {
+            f(scratch.spelled(text, &number));
+            continue;
         }
         token.for_each_reading(scratch, &mut f);
     }

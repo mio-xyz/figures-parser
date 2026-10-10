@@ -1,10 +1,14 @@
 //! What a numeric token may mean: thousands, a decimal, or neighbours printed
 //! side by side.
 
-use super::digits::{ascii_in, push_ascii};
+use std::ops::Range;
+
+use super::digits::{ascii_in, digit_value, push_ascii};
+use super::scale::han_rest;
 use super::scan::{Token, is_decimal_symbol, is_symbol, look_back, marked_after, marked_before};
 use super::spelled::Spelled;
 use super::{Reading, Sign};
+use crate::text::char_at;
 
 /// The group lengths seen so far, and where they stop being thousands grouping.
 #[derive(Default)]
@@ -110,22 +114,31 @@ impl Scratch {
 
     /// The reading of `number`, written in words in `text`: stated as
     /// rounded, its digits written here. A number opened by an article ("a
-    /// million") only grounds, as a derived reading does.
+    /// million") only grounds, as a derived reading does. One led by digits
+    /// ("-2 and a half million") carries the sign before them.
     pub(super) fn spelled<'a>(&mut self, text: &'a str, number: &Spelled) -> Reading<'a, '_> {
-        let written = text.get(number.span.clone()).unwrap_or_default();
+        let Range { start, end } = number.span;
+        let written = text.get(start..end).unwrap_or_default();
+        let digit_led = char_at(text, start).is_some_and(|c| digit_value(c).is_some());
+        let (sign, full_text) = if digit_led {
+            let prefix = look_back(text, start, end);
+            (prefix.sign, text.get(prefix.from..end).unwrap_or(written))
+        } else {
+            (Sign::Unsigned, written)
+        };
         self.digits.clear();
         push_decimal(number.value, &mut self.digits);
         Reading {
             text: written,
-            span: number.span.clone(),
+            span: start..end,
             integer: self.digits.as_str(),
             fraction: None,
             grouped: false,
-            currency: marked_before(text, number.span.start) || marked_after(text, number.span.end),
+            currency: marked_before(text, start) || marked_after(text, end),
             derived: number.idiom,
-            sign: Sign::Unsigned,
+            sign,
             approximate: true,
-            full_text: written,
+            full_text,
         }
     }
 }
@@ -255,6 +268,20 @@ impl<'a> Token<'a> {
                 return;
             }
             let (integer, fraction) = scale_into(r.integer, r.fraction, self.magnitude, scaled);
+            let rest = han_rest(self.written, self.text.len());
+            let (integer, fraction) = if rest == 0 {
+                (integer, fraction)
+            } else {
+                // A fraction left after the scale has no place beside the
+                // sections, so such a reading is not one.
+                let integer_value = fraction.is_none().then(|| integer.parse::<u128>().ok());
+                let Some(value) = integer_value.flatten().and_then(|v| v.checked_add(rest)) else {
+                    return;
+                };
+                scaled.clear();
+                push_decimal(value, scaled);
+                (scaled.as_str(), None)
+            };
             f(Reading {
                 text: r.text,
                 span: r.span,

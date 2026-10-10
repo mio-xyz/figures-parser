@@ -5,7 +5,8 @@
 //! and grows over the number words beside it while they continue one number
 //! in one language. A number of one word is read only when it is glued from
 //! several ("zwölftausend", "dodicimila"): "mille", "cent" or "thousand"
-//! alone is not read.
+//! alone is not read. Digits may lead the words ("2 and a half million",
+//! "1 millón y medio"); see [`Lead`].
 
 mod words;
 
@@ -16,6 +17,7 @@ use aho_corasick::{AhoCorasick, MatchKind};
 use rustc_hash::FxHashMap;
 
 use super::digits::digit_value;
+use super::scan::is_symbol;
 use crate::text::{char_at, char_before, is_letter, is_unspaced_script};
 use words::{ALL, DE, FR, Langs, MORPHEMES, WORDS};
 
@@ -35,6 +37,15 @@ pub enum Part {
     Join,
     /// An article that stands for one before a hundred or a scale ("a").
     Article,
+    /// A half: of the scale after it ("half a million", "two and a half
+    /// million", "zweieinhalb Millionen"), or of the scale before it ("a
+    /// million and a half", "deux millions et demi").
+    Half,
+    /// One and a half, as one word ("anderthalb").
+    OneAndAHalf,
+    /// The decimal point a fraction's digits follow ("one point two
+    /// million", "zwei Komma fünf Millionen").
+    Point,
 }
 
 /// A number written in words.
@@ -92,6 +103,11 @@ const MAX_WORD: usize = 48;
 /// line or a hyphen ("twenty-five", "quatre-vingt-dix").
 const fn is_joiner(c: char) -> bool {
     matches!(c, ' ' | '\u{a0}' | '\u{202f}' | '-')
+}
+
+/// Whether `c` is a space within a line.
+const fn is_space(c: char) -> bool {
+    matches!(c, ' ' | '\u{a0}' | '\u{202f}')
 }
 
 /// Whether `c` belongs to a word written with spaces.
@@ -169,6 +185,23 @@ fn parts_of(word: &str, out: &mut [(Part, Langs); MAX_PARTS]) -> Option<usize> {
     split_glued(word, ALL, out, 0)
 }
 
+/// What the parts read so far wait for before they make a number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Pending {
+    /// Nothing.
+    Nothing,
+    /// "a" after a join, which only a half may follow ("two and a half").
+    Half,
+    /// A half, which the scale after it takes ("two and a half million").
+    HalfOfScale,
+    /// A decimal point, the digits after it so far, and how many; a scale
+    /// takes them ("one point two five million").
+    Fraction(u128, u32),
+    /// Nothing but a scale of the one just read: a decimal or a half after a
+    /// scale ends the number ("deux millions et demi").
+    End,
+}
+
 /// A spelled number's value as its parts are read, left to right.
 #[derive(Debug, Clone, Copy)]
 struct Sum {
@@ -192,6 +225,8 @@ struct Sum {
     multiplied: bool,
     /// Whether it opened with an article.
     article: bool,
+    /// What the parts read wait for.
+    pending: Pending,
 }
 
 impl Sum {
@@ -208,6 +243,7 @@ impl Sum {
             parts: 0,
             multiplied: false,
             article: false,
+            pending: Pending::Nothing,
         }
     }
 
@@ -228,6 +264,16 @@ impl Sum {
         if self.langs == 0 {
             return None;
         }
+        let fits = match self.pending {
+            Pending::Nothing => true,
+            Pending::Half => part == Part::Half,
+            Pending::HalfOfScale => matches!(part, Part::Scale(_) | Part::Article),
+            Pending::Fraction(..) => matches!(part, Part::Value(_) | Part::Scale(_)),
+            Pending::End => matches!(part, Part::Scale(_)),
+        };
+        if !fits {
+            return None;
+        }
         let article_waits = self.article && self.parts == 0;
         match part {
             Part::Join => {
@@ -235,18 +281,32 @@ impl Sum {
                     return None;
                 }
             }
-            Part::Article => {
+            Part::Article => self.article()?,
+            Part::Half => self.half()?,
+            Part::OneAndAHalf => {
                 if self.parts > 0 || self.article {
                     return None;
                 }
-                self.article = true;
                 self.group = 1;
+                self.pending = Pending::HalfOfScale;
+                self.parts += 1;
+            }
+            Part::Point => {
+                if self.last_power.is_some() || !matches!(self.last, Some(Part::Value(_))) {
+                    return None;
+                }
+                self.pending = Pending::Fraction(0, 0);
             }
             Part::Value(v) => {
                 if article_waits {
                     return None;
                 }
-                self.value(u128::from(v))?;
+                if let Pending::Fraction(digits, places) = self.pending {
+                    self.pending = fraction_digit(digits, places, v)?;
+                    self.parts += 1;
+                } else {
+                    self.value(u128::from(v))?;
+                }
             }
             Part::Hundreds(v) => {
                 if article_waits || !self.group.is_multiple_of(1000) {
@@ -268,6 +328,50 @@ impl Sum {
             Part::Scale(power) => self.scale(power)?,
         }
         self.last = Some(part);
+        Some(())
+    }
+
+    /// Reads an article: one before a hundred or a scale when it opens the
+    /// number ("a million"), "a" before a half after a join ("two and a
+    /// half"), or the "a" of "half a million".
+    fn article(&mut self) -> Option<()> {
+        if self.parts == 0 && !self.article {
+            self.article = true;
+            self.group = 1;
+        } else if self.last == Some(Part::Join) {
+            self.pending = Pending::Half;
+        } else if self.last != Some(Part::Half) || self.parts != 1 || self.group != 0 {
+            return None;
+        }
+        Some(())
+    }
+
+    /// Reads a half: one the next scale takes ("half a million", "a half
+    /// million", "un demi-million", "two and a half million", "dos y medio
+    /// millones", "zweieinhalb"), or half the scale just read ("a million
+    /// and a half", "dos millones y medio").
+    fn half(&mut self) -> Option<()> {
+        let alone = match self.last {
+            None => true,
+            Some(Part::Article) if self.parts == 0 => true,
+            Some(Part::Value(1)) => self.langs & FR != 0 && self.parts == 1 && self.group == 1,
+            _ => false,
+        };
+        let after_join = matches!(self.last, Some(Part::Article | Part::Join));
+        let glued = self.langs & DE != 0 && matches!(self.last, Some(Part::Value(_)));
+        if alone {
+            self.group = 0;
+            self.pending = Pending::HalfOfScale;
+        } else if self.group > 0 && (after_join || glued) {
+            self.pending = Pending::HalfOfScale;
+        } else if self.group == 0 && after_join {
+            let half = 10_u128.checked_pow(self.last_power?)? / 2;
+            self.total = self.total.checked_add(half)?;
+            self.pending = Pending::End;
+        } else {
+            return None;
+        }
+        self.parts += 1;
         Some(())
     }
 
@@ -315,12 +419,27 @@ impl Sum {
             }
             (_, Some(last_power)) if power >= last_power => return None,
             _ => {
-                let multiplier = match self.group {
-                    0 if self.parts == 0 => 1,
-                    0 => return None,
-                    group => group,
+                let added = match self.pending {
+                    Pending::Fraction(digits, places) => {
+                        let shift = power.checked_sub(places).filter(|_| places > 0)?;
+                        self.pending = Pending::End;
+                        self.group
+                            .checked_mul(scale)?
+                            .checked_add(digits.checked_mul(10_u128.checked_pow(shift)?)?)?
+                    }
+                    Pending::HalfOfScale => {
+                        self.pending = Pending::Nothing;
+                        self.group.checked_mul(scale)?.checked_add(scale / 2)?
+                    }
+                    Pending::Nothing | Pending::Half | Pending::End => {
+                        let multiplier = match self.group {
+                            0 if self.parts == 0 => 1,
+                            0 => return None,
+                            group => group,
+                        };
+                        multiplier.checked_mul(scale)?
+                    }
                 };
-                let added = multiplier.checked_mul(scale)?;
                 self.total = self.total.checked_add(added)?;
                 self.group = 0;
                 self.last_power = Some(power);
@@ -332,16 +451,32 @@ impl Sum {
         Some(())
     }
 
+    /// Whether the parts read make a number: nothing waits, and the last
+    /// part is not a join.
+    fn complete(&self) -> bool {
+        self.last != Some(Part::Join) && matches!(self.pending, Pending::Nothing | Pending::End)
+    }
+
     /// The value read, when it is a number of its own: a hundred or a scale
     /// in it, and two parts at least.
     fn finish(&self) -> Option<(u128, bool)> {
         let words = self.parts.saturating_add(usize::from(self.article));
-        if !self.multiplied || words < 2 {
+        if !self.multiplied || words < 2 || !self.complete() {
             return None;
         }
         let value = self.total.checked_add(self.group)?;
         Some((value, self.article))
     }
+}
+
+/// The fraction `digits` with `places` digits, once the digit word `v`
+/// follows it; None when `v` is not a digit.
+fn fraction_digit(digits: u128, places: u32, v: u32) -> Option<Pending> {
+    if v >= 10 || places >= 6 {
+        return None;
+    }
+    let digits = digits.checked_mul(10)?.checked_add(u128::from(v))?;
+    Some(Pending::Fraction(digits, places.checked_add(1)?))
 }
 
 /// Whether `text` holds a number word at `start..end`.
@@ -353,24 +488,84 @@ fn is_number_word(text: &str, start: usize, end: usize) -> bool {
             .is_some_and(|word| parts_of(word, &mut parts).is_some())
 }
 
+/// What stands before the first word a number may run over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Lead {
+    /// No figure in digits.
+    Words,
+    /// A whole figure of one to three digits, after a space, which the
+    /// words continue ("2 and a half million", "3 thousand five hundred");
+    /// it is the first word, and the value here.
+    Digits(u32),
+    /// Another figure in digits, after a space ("1.5 million"), whose scale
+    /// word a number in words does not start with.
+    Figure,
+}
+
+/// The figure in digits that ends at byte `end`, before the first word of a
+/// number, none of it before byte `floor`: where it starts and what it is.
+fn digits_before(text: &str, end: usize, floor: usize) -> (usize, Lead) {
+    let mut start = end;
+    let mut value = 0_u32;
+    let mut place = 1_u32;
+    let mut count = 0_usize;
+    while let Some(c) = char_before(text, start) {
+        let Some(digit) = digit_value(c) else {
+            break;
+        };
+        value = place
+            .checked_mul(u32::from(digit))
+            .and_then(|d| value.checked_add(d))
+            .unwrap_or(u32::MAX);
+        place = place.saturating_mul(10);
+        count += 1;
+        start = start.saturating_sub(c.len_utf8());
+    }
+    // The run is a whole figure unless a word or a group before it goes on.
+    let whole = char_before(text, start).is_none_or(|c| {
+        let grouped = is_symbol(c)
+            && char_before(text, start.saturating_sub(c.len_utf8()))
+                .is_some_and(|d| digit_value(d).is_some());
+        !(grouped || is_letter(c) || matches!(c, '_' | '.' | ','))
+    });
+    if count == 0 {
+        (end, Lead::Words)
+    } else if whole && start >= floor && (1..=3).contains(&count) && value > 0 {
+        (start, Lead::Digits(value))
+    } else {
+        (end, Lead::Figure)
+    }
+}
+
 /// The words a number may run over around the word `anchor`, in order,
 /// none before byte `floor`: the anchor and the number words joined to it on
-/// either side. Returns how many there are and the anchor's index.
+/// either side, and the figure in digits a space before them. Returns how
+/// many words there are, the anchor's index, and what leads them.
 fn words_around(
     text: &str,
     anchor: Range<usize>,
     floor: usize,
     out: &mut [(usize, usize); MAX_WORDS],
-) -> (usize, usize) {
+) -> (usize, usize, Lead) {
     let mut before = [(0_usize, 0_usize); MAX_WORDS];
     let mut count_before = 0_usize;
     let mut first = anchor.start;
+    let mut lead = Lead::Words;
     while count_before < MAX_WORDS / 2 {
         let Some(joiner) = char_before(text, first).filter(|&c| is_joiner(c)) else {
             break;
         };
         let end = first.saturating_sub(joiner.len_utf8());
         let start = word_start(text, end);
+        if start == end && is_space(joiner) {
+            let (digits_start, found) = digits_before(text, end, floor);
+            lead = found;
+            if let (Lead::Digits(_), Some(slot)) = (found, before.get_mut(count_before)) {
+                *slot = (digits_start, end);
+                count_before += 1;
+            }
+            break;
+        }
         if start < floor || !is_number_word(text, start, end) {
             break;
         }
@@ -408,21 +603,33 @@ fn words_around(
         count += 1;
         last = end;
     }
-    (count, anchor_index)
+    (count, anchor_index, lead)
 }
 
-/// Reads the words `words[from..]` as one number from their first: the sum
-/// and the index past the last word it takes, a join at the end left out;
-/// and the index of the first word it could not take.
-fn read_from(text: &str, words: &[(usize, usize)], from: usize) -> (Sum, usize, usize) {
+/// Reads the words `words[from..]` as one number from their first, the
+/// first standing for `digits` when they lead it: the sum and the index past
+/// the last word it takes, what the number has to wait for left out; and the
+/// index of the first word it could not take.
+fn read_from(
+    text: &str,
+    words: &[(usize, usize)],
+    from: usize,
+    digits: Option<u32>,
+) -> (Sum, usize, usize) {
     let mut sum = Sum::new();
     let mut good = (sum, from);
     let mut parts = [(Part::Join, 0); MAX_PARTS];
     for (i, &(start, end)) in words.iter().enumerate().skip(from) {
-        let count = text
-            .get(start..end)
-            .and_then(|w| parts_of(w, &mut parts))
-            .unwrap_or(0);
+        let count = match (digits, parts.first_mut()) {
+            (Some(value), Some(first)) if i == from => {
+                *first = (Part::Value(value), ALL);
+                1
+            }
+            _ => text
+                .get(start..end)
+                .and_then(|w| parts_of(w, &mut parts))
+                .unwrap_or(0),
+        };
         let took = count > 0
             && parts
                 .iter()
@@ -431,7 +638,7 @@ fn read_from(text: &str, words: &[(usize, usize)], from: usize) -> (Sum, usize, 
         if !took {
             return (good.0, good.1, i);
         }
-        if sum.last != Some(Part::Join) {
+        if sum.complete() {
             good = (sum, i.saturating_add(1));
         }
     }
@@ -449,12 +656,23 @@ fn phrase_at(text: &str, found: Range<usize>, floor: usize) -> Option<Spelled> {
     let mut parts = [(Part::Join, 0); MAX_PARTS];
     parts_of(text.get(start..end)?, &mut parts)?;
     let mut words = [(0_usize, 0_usize); MAX_WORDS];
-    let (count, anchor) = words_around(text, start..end, floor, &mut words);
+    let (count, anchor, lead) = words_around(text, start..end, floor, &mut words);
     let words = words.get(..count)?;
-    let mut from = 0_usize;
+    let mut from = match lead {
+        Lead::Figure if starts_with_multiplier(text, words) => 1,
+        Lead::Words | Lead::Digits(_) | Lead::Figure => 0,
+    };
     loop {
-        let (sum, taken, failed) = read_from(text, words, from);
+        let digits = match lead {
+            Lead::Digits(value) if from == 0 => Some(value),
+            Lead::Digits(_) | Lead::Words | Lead::Figure => None,
+        };
+        let (sum, taken, failed) = read_from(text, words, from, digits);
         if taken > anchor {
+            // Digits and one scale word are the figure's own ("3 thousand").
+            if digits.is_some() && taken < 3 {
+                return None;
+            }
             let (value, idiom) = sum.finish()?;
             let &(first, _) = words.get(from)?;
             let &(_, last) = words.get(taken.checked_sub(1)?)?;
@@ -469,6 +687,17 @@ fn phrase_at(text: &str, found: Range<usize>, floor: usize) -> Option<Spelled> {
         }
         from = failed.max(from.saturating_add(1));
     }
+}
+
+/// Whether the first of `words` is a hundred or a scale word, which a
+/// figure in digits before it takes as its own scale.
+fn starts_with_multiplier(text: &str, words: &[(usize, usize)]) -> bool {
+    let mut parts = [(Part::Join, 0); MAX_PARTS];
+    words
+        .first()
+        .and_then(|&(start, end)| text.get(start..end))
+        .and_then(|word| parts_of(word, &mut parts))
+        .is_some_and(|_| matches!(parts.first(), Some((Part::Hundred | Part::Scale(_), _))))
 }
 
 /// What a Han numeral stands for.
