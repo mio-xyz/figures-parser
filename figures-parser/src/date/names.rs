@@ -1,6 +1,8 @@
 //! Weekday, month and ordinal words as chrono-node 2.10.2 reads them (MIT),
-//! and the weekday names the TypeScript gate takes from Intl. The words are
-//! lowercase; a weekday counts from Sunday as 0, as chrono's do.
+//! the weekday names the TypeScript gate takes from Intl, and Arabic, which
+//! chrono does not read, from CLDR and the four month-name systems Arab
+//! countries write. The words are lowercase; a weekday counts from Sunday as
+//! 0, as chrono's do.
 
 /// en: chrono's weekday words.
 pub const EN_WEEKDAYS: &[(&str, u8)] = &[
@@ -1564,4 +1566,118 @@ pub const UK_FULL_MONTHS: &[&str] = &[
     "лютий",
     "січні",
     "січня",
+];
+
+/// ar: the weekdays with their article, in the spellings writers use: the
+/// hamza on the alef written or left out, a final `ء` dropped, a final `ة`
+/// written `ه`, and the spoken `الاتنين`.
+pub const AR_WEEKDAYS: &[(&str, u8)] = &[
+    ("الأحد", 0),
+    ("الاحد", 0),
+    ("الاثنين", 1),
+    ("الإثنين", 1),
+    ("الأثنين", 1),
+    ("الاتنين", 1),
+    ("الثلاثاء", 2),
+    ("الثلاثا", 2),
+    ("الأربعاء", 3),
+    ("الاربعاء", 3),
+    ("الأربعا", 3),
+    ("الاربعا", 3),
+    ("الخميس", 4),
+    ("الجمعة", 5),
+    ("الجمعه", 5),
+    ("السبت", 6),
+];
+
+/// ar: the months in the four systems Arab countries write: the names CLDR
+/// gives (Egypt and the Gulf), the Syriac names of the Levant and Iraq, the
+/// French-derived names of Algeria and Tunisia, and Morocco's.
+pub const AR_MONTHS: &[(&str, u8)] = &[
+    ("يناير", 1),
+    ("كانون الثاني", 1),
+    ("جانفي", 1),
+    ("فبراير", 2),
+    ("شباط", 2),
+    ("فيفري", 2),
+    ("مارس", 3),
+    ("آذار", 3),
+    ("اذار", 3),
+    ("أبريل", 4),
+    ("ابريل", 4),
+    ("إبريل", 4),
+    ("نيسان", 4),
+    ("أفريل", 4),
+    ("افريل", 4),
+    ("مايو", 5),
+    ("أيار", 5),
+    ("ايار", 5),
+    ("ماي", 5),
+    ("يونيو", 6),
+    ("يونيه", 6),
+    ("حزيران", 6),
+    ("جوان", 6),
+    ("يوليو", 7),
+    ("يوليه", 7),
+    ("تموز", 7),
+    ("جويلية", 7),
+    ("يوليوز", 7),
+    ("أغسطس", 8),
+    ("اغسطس", 8),
+    ("آب", 8),
+    ("أوت", 8),
+    ("اوت", 8),
+    ("غشت", 8),
+    ("سبتمبر", 9),
+    ("أيلول", 9),
+    ("ايلول", 9),
+    ("شتنبر", 9),
+    ("أكتوبر", 10),
+    ("اكتوبر", 10),
+    ("تشرين الأول", 10),
+    ("تشرين الاول", 10),
+    ("نوفمبر", 11),
+    ("تشرين الثاني", 11),
+    ("نونبر", 11),
+    ("ديسمبر", 12),
+    ("كانون الأول", 12),
+    ("كانون الاول", 12),
+    ("دجنبر", 12),
+];
+
+/// ar: the weekday names that open the check, alone or after the
+/// conjunction `و` written onto them.
+pub const AR_GATE: &[&str] = &[
+    "الأحد",
+    "الاحد",
+    "الاثنين",
+    "الإثنين",
+    "الأثنين",
+    "الاتنين",
+    "الثلاثاء",
+    "الثلاثا",
+    "الأربعاء",
+    "الاربعاء",
+    "الأربعا",
+    "الاربعا",
+    "الخميس",
+    "الجمعة",
+    "الجمعه",
+    "السبت",
+    "والأحد",
+    "والاحد",
+    "والاثنين",
+    "والإثنين",
+    "والأثنين",
+    "والاتنين",
+    "والثلاثاء",
+    "والثلاثا",
+    "والأربعاء",
+    "والاربعاء",
+    "والأربعا",
+    "والاربعا",
+    "والخميس",
+    "والجمعة",
+    "والجمعه",
+    "والسبت",
 ];

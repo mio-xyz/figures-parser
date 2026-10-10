@@ -18,7 +18,7 @@ The library has one module per kind, each with a reader and a comparison:
 |---|---|---|
 | `number` | `scan` (tokens), `readings`, `scale` (scale words), `spelled` (numbers in words), `digits` | `ground` |
 | `url` | `scan` | `ground`, `items` (the items named beside links) |
-| `date` | `languages`, `names` (a port of chrono-node) | `calendar` |
+| `date` | `languages`, `names` (a port of chrono-node, and Arabic) | `calendar` |
 | `email` | `emails` | `ungrounded_emails` |
 | `id` | `identifiers` | `ungrounded_identifiers`, `unseen_tokens` |
 | `duration` | `grammar`, `words`, `groups` | `corpus` (the forms a corpus writes a length in) |
@@ -227,6 +227,24 @@ date names. Each pair is checked where it stands, so both ends of "Mon 3 Aug
 to Thu 7 Aug" are read, and a pair is reported once, as written. `jiff`
 computes the calendar.
 
+Arabic, which chrono does not read, has parsers in the same shape:
+
+- a weekday with its article ("الجمعة"), its common spellings included
+  (hamza written or not, a final `ة` written `ه`), after `يوم` ("day") or
+  the conjunction `و` written onto it, with "next" or "last" after it;
+- a date with a month name, in the four systems Arab countries write (يناير,
+  كانون الثاني, جانفي and Morocco's يناير…دجنبر), "من" or "شهر" before the
+  month, a second name after a slash ("أيلول/سبتمبر"), and a year after
+  "عام" or "سنة", with or without the Gregorian `م`;
+- a date in numbers, day first ("26/09/2026") or year first, in Western,
+  Arabic-Indic or extended Arabic-Indic digits.
+
+A weekday and a date merge across whitespace, one comma (`,` or `،`), the
+bidi marks a formatter puts around numbers, and `الموافق` ("corresponding
+to"). A Hijri date has no month these parsers read, so a weekday beside one
+("الجمعة 14 ربيع الأول 1448هـ") is never paired with the Gregorian date that
+may follow it.
+
 ## Email addresses
 
 `emails(text)` finds addresses with `linkify`, `mailto:` links included.
@@ -260,6 +278,21 @@ or a comma, "1½", number words ("forty-five", "vingt et un",
 ("half an hour", "un quart d'heure", "mezz'ora", "a fortnight"). Parts in
 falling units join into one length ("1 hour and 30 minutes", "2 jours, 4
 heures"). The words are curated from rustling-ontology's grammar.
+
+Arabic has a pattern of its own, run only over a text that holds Arabic
+letters (one `memchr` scan decides):
+
+- an amount in Western or Arabic-Indic digits (`٫` as the decimal mark), or
+  a number word up to ninety-nine ("خمس", "خمس عشرة", "خمس وأربعون");
+- a unit in its singular, plural or dual form; a dual counts two by itself
+  ("ساعتين"), while a lone singular counts one only with "واحد" after it,
+  a fraction after it ("ساعة ونصف", "ساعة إلا ربع"), or another amount
+  joined to it ("ساعة و20 دقيقة"), since "يوم" and "ساعة" alone are as often
+  "the day of" and "the clock";
+- a fraction before a unit ("نصف ساعة", "ربع ساعة", "ثلث ساعة", "ثلاثة أرباع
+  الساعة");
+- the conjunction `و` and the prepositions `ب`, `ل`, `ف`, `ك` written onto a
+  part ("بساعتين", "و30 دقيقة"), and `و` or `،` joining two parts.
 
 A length keeps its clock part in milliseconds and its calendar part in
 hundredths of a month, since a month and a year have no fixed length.

@@ -1,6 +1,8 @@
 //! The words a duration is written with in English, French, Spanish, Italian
 //! and Portuguese, curated from rustling-ontology's duration and number
-//! grammars (MIT or Apache-2.0).
+//! grammars (MIT or Apache-2.0), and in Arabic, which rustling does not read.
+
+use super::grammar::Unit;
 
 /// Number words from zero to nineteen, and the Spanish twenties written as
 /// one word.
@@ -274,4 +276,168 @@ pub const QUARTER: &[&str] = &[
 pub const YEAR: &[&str] = &[
     "years", "year", "années", "année", "annees", "annee", "ans", "an", "años", "año", "anos",
     "ano", "anni", "anno", "yrs", "yr",
+];
+
+/// How an Arabic unit word counts what stands before it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Form {
+    /// One unit ("ساعة"), or the unit after a number from eleven on ("15
+    /// دقيقة"), the accusative's final alef included ("20 يوما").
+    Singular,
+    /// The plural a number from three to ten counts ("3 ساعات").
+    Plural,
+    /// Two units, with no number ("ساعتين").
+    Dual,
+    /// The unit with its article, after a fraction ("ربع الساعة").
+    Definite,
+}
+
+/// The Arabic unit words, in the spellings writers use: the hamza written or
+/// left out, a final `ة` written `ه`, the accusative's tanween written or
+/// left out.
+pub const AR_UNITS: &[(&str, Unit, Form)] = &[
+    ("ميلي ثانية", Unit::Millisecond, Form::Singular),
+    ("ميلي ثانيه", Unit::Millisecond, Form::Singular),
+    ("ملي ثانية", Unit::Millisecond, Form::Singular),
+    ("مللي ثانية", Unit::Millisecond, Form::Singular),
+    ("ثانية", Unit::Second, Form::Singular),
+    ("ثانيه", Unit::Second, Form::Singular),
+    ("ثوان", Unit::Second, Form::Plural),
+    ("ثوانٍ", Unit::Second, Form::Plural),
+    ("ثواني", Unit::Second, Form::Plural),
+    ("ثانيتان", Unit::Second, Form::Dual),
+    ("ثانيتين", Unit::Second, Form::Dual),
+    ("دقيقة", Unit::Minute, Form::Singular),
+    ("دقيقه", Unit::Minute, Form::Singular),
+    ("دقائق", Unit::Minute, Form::Plural),
+    ("دقايق", Unit::Minute, Form::Plural),
+    ("دقيقتان", Unit::Minute, Form::Dual),
+    ("دقيقتين", Unit::Minute, Form::Dual),
+    ("الدقيقة", Unit::Minute, Form::Definite),
+    ("ساعة", Unit::Hour, Form::Singular),
+    ("ساعه", Unit::Hour, Form::Singular),
+    ("ساعات", Unit::Hour, Form::Plural),
+    ("ساعتان", Unit::Hour, Form::Dual),
+    ("ساعتين", Unit::Hour, Form::Dual),
+    ("الساعة", Unit::Hour, Form::Definite),
+    ("الساعه", Unit::Hour, Form::Definite),
+    ("يوم", Unit::Day, Form::Singular),
+    ("يوما", Unit::Day, Form::Singular),
+    ("يومًا", Unit::Day, Form::Singular),
+    ("يوماً", Unit::Day, Form::Singular),
+    ("أيام", Unit::Day, Form::Plural),
+    ("ايام", Unit::Day, Form::Plural),
+    ("يومان", Unit::Day, Form::Dual),
+    ("يومين", Unit::Day, Form::Dual),
+    ("أسبوع", Unit::Week, Form::Singular),
+    ("اسبوع", Unit::Week, Form::Singular),
+    ("أسبوعا", Unit::Week, Form::Singular),
+    ("اسبوعا", Unit::Week, Form::Singular),
+    ("أسبوعًا", Unit::Week, Form::Singular),
+    ("أسبوعاً", Unit::Week, Form::Singular),
+    ("أسابيع", Unit::Week, Form::Plural),
+    ("اسابيع", Unit::Week, Form::Plural),
+    ("أسبوعان", Unit::Week, Form::Dual),
+    ("أسبوعين", Unit::Week, Form::Dual),
+    ("اسبوعان", Unit::Week, Form::Dual),
+    ("اسبوعين", Unit::Week, Form::Dual),
+    ("الأسبوع", Unit::Week, Form::Definite),
+    ("الاسبوع", Unit::Week, Form::Definite),
+    ("شهر", Unit::Month, Form::Singular),
+    ("شهرا", Unit::Month, Form::Singular),
+    ("شهرًا", Unit::Month, Form::Singular),
+    ("شهراً", Unit::Month, Form::Singular),
+    ("أشهر", Unit::Month, Form::Plural),
+    ("اشهر", Unit::Month, Form::Plural),
+    ("شهور", Unit::Month, Form::Plural),
+    ("شهران", Unit::Month, Form::Dual),
+    ("شهرين", Unit::Month, Form::Dual),
+    ("الشهر", Unit::Month, Form::Definite),
+    ("سنة", Unit::Year, Form::Singular),
+    ("سنه", Unit::Year, Form::Singular),
+    ("عام", Unit::Year, Form::Singular),
+    ("عاما", Unit::Year, Form::Singular),
+    ("عامًا", Unit::Year, Form::Singular),
+    ("عاماً", Unit::Year, Form::Singular),
+    ("سنوات", Unit::Year, Form::Plural),
+    ("سنين", Unit::Year, Form::Plural),
+    ("أعوام", Unit::Year, Form::Plural),
+    ("اعوام", Unit::Year, Form::Plural),
+    ("سنتان", Unit::Year, Form::Dual),
+    ("سنتين", Unit::Year, Form::Dual),
+    ("عامان", Unit::Year, Form::Dual),
+    ("عامين", Unit::Year, Form::Dual),
+    ("السنة", Unit::Year, Form::Definite),
+    ("العام", Unit::Year, Form::Definite),
+];
+
+/// Arabic number words from one to ten, masculine and feminine, with the
+/// forms eleven and twelve take before `عشر` ("إحدى عشرة", "اثنتا عشرة").
+pub const AR_ONES: &[(&str, u64)] = &[
+    ("واحد", 1),
+    ("واحدة", 1),
+    ("واحده", 1),
+    ("إحدى", 1),
+    ("احدى", 1),
+    ("أحد", 1),
+    ("احد", 1),
+    ("اثنان", 2),
+    ("اثنين", 2),
+    ("إثنين", 2),
+    ("اثنتان", 2),
+    ("اثنتين", 2),
+    ("اثنا", 2),
+    ("اثني", 2),
+    ("اثنتا", 2),
+    ("اثنتي", 2),
+    ("ثلاث", 3),
+    ("ثلاثة", 3),
+    ("ثلاثه", 3),
+    ("أربع", 4),
+    ("اربع", 4),
+    ("أربعة", 4),
+    ("اربعة", 4),
+    ("أربعه", 4),
+    ("اربعه", 4),
+    ("خمس", 5),
+    ("خمسة", 5),
+    ("خمسه", 5),
+    ("ست", 6),
+    ("ستة", 6),
+    ("سته", 6),
+    ("سبع", 7),
+    ("سبعة", 7),
+    ("سبعه", 7),
+    ("ثمان", 8),
+    ("ثماني", 8),
+    ("ثمانية", 8),
+    ("ثمانيه", 8),
+    ("تسع", 9),
+    ("تسعة", 9),
+    ("تسعه", 9),
+    ("عشر", 10),
+    ("عشرة", 10),
+    ("عشره", 10),
+];
+
+/// Arabic tens, nominative and oblique ("عشرون", "عشرين").
+pub const AR_TENS: &[(&str, u64)] = &[
+    ("عشرون", 20),
+    ("عشرين", 20),
+    ("ثلاثون", 30),
+    ("ثلاثين", 30),
+    ("أربعون", 40),
+    ("اربعون", 40),
+    ("أربعين", 40),
+    ("اربعين", 40),
+    ("خمسون", 50),
+    ("خمسين", 50),
+    ("ستون", 60),
+    ("ستين", 60),
+    ("سبعون", 70),
+    ("سبعين", 70),
+    ("ثمانون", 80),
+    ("ثمانين", 80),
+    ("تسعون", 90),
+    ("تسعين", 90),
 ];

@@ -58,7 +58,7 @@ impl Length {
 
 /// One duration, borrowed from the text it was found in: a part, or parts
 /// in falling units joined by a space, a comma or "and" ("1 hour and 30
-/// minutes", "2 jours, 4 heures").
+/// minutes", "2 jours, 4 heures", "ساعتين و30 دقيقة").
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Duration<'a> {
     /// As written.
@@ -72,9 +72,10 @@ pub struct Duration<'a> {
     pub stated: bool,
 }
 
-/// What may stand between two parts of one duration.
+/// What may stand between two parts of one duration: a comma, Latin or
+/// Arabic, and a word for "and", the Arabic `و` written onto the next part.
 static JOIN: LazyLock<Option<Regex>> =
-    LazyLock::new(|| compile(r"^\s*,?\s*(?:(?i:and|et|y|e|&)\s+)?$"));
+    LazyLock::new(|| compile(r"^\s*[,،]?\s*(?:(?i:and|et|y|e|&)\s+|و\s*)?$"));
 
 /// Whether `gap` joins two parts into one duration.
 fn joins(gap: &str) -> bool {

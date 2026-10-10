@@ -11,7 +11,7 @@ use std::sync::LazyLock;
 use jiff::civil::Date;
 use regex::Regex;
 
-use languages::{Found, LANGUAGES, Language, Merge, Reading, YearOf};
+use languages::{Found, LANGUAGES, Language, Merge, Reading, YearOf, is_bidi_mark};
 
 use crate::text::compile;
 
@@ -28,6 +28,20 @@ static ENGLISH_AMBIGUOUS: LazyLock<Option<Regex>> = LazyLock::new(|| {
 fn joins(between: &str, separators: &[char]) -> bool {
     let rest = between.strip_prefix(separators).unwrap_or(between);
     rest.chars().all(char::is_whitespace)
+}
+
+/// Whether `between`, the text between an Arabic weekday and a date, lets
+/// them merge: whitespace, bidi marks and at most one comma, Latin or Arabic.
+fn joins_arabic(between: &str) -> bool {
+    let mut commas = 0_u8;
+    between.chars().all(|c| {
+        if matches!(c, ',' | '،') {
+            commas = commas.saturating_add(1);
+            commas == 1
+        } else {
+            c.is_whitespace() || is_bidi_mark(c)
+        }
+    })
 }
 
 /// The reading two adjacent results merge into, as the language's refiner
@@ -52,6 +66,16 @@ fn merged(merge: Merge, current: Reading, next: Reading, between: &str) -> Optio
             },
             Reading::Weekday(weekday),
         ) if joins(between, &[',', '、', 'の']) => Some(Reading::Dated {
+            weekday,
+            day,
+            month,
+            year,
+        }),
+        (
+            Merge::ArabicWeekdayThenDate,
+            Reading::Weekday(weekday),
+            Reading::Date { day, month, year },
+        ) if joins_arabic(between) => Some(Reading::Dated {
             weekday,
             day,
             month,

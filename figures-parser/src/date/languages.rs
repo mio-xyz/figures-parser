@@ -1,6 +1,9 @@
 //! Each language's weekday and date parsers, translated from chrono-node
 //! 2.10.2's patterns (MIT), in the order its configuration runs them.
 //!
+//! Arabic, which chrono does not read, has parsers of its own in the same
+//! shape.
+//!
 //! A pattern's left word boundary is a consumed `pre` group and its right
 //! lookahead a consumed `post` group, so the engine backtracks the way
 //! chrono's does (an optional year is dropped when what follows it would not
@@ -13,6 +16,7 @@ use std::sync::LazyLock;
 use regex::{Captures, Regex};
 
 use super::names;
+use crate::number::digits::digit_value;
 use crate::text::{
     alternation, inside_word, is_ascii_word, is_unspaced_script, lookup, run_end, same_word,
     starts_with_lowercase,
@@ -77,6 +81,9 @@ pub enum Merge {
     WeekdayThenDate,
     /// A date, then at most `,`, `、` or `の` and whitespace, then a weekday (Japanese).
     DateThenWeekday,
+    /// A weekday, then whitespace, bidi marks and at most one comma, Latin
+    /// or Arabic, then a date (Arabic).
+    ArabicWeekdayThenDate,
 }
 
 /// The words a language's month-name dates read.
@@ -145,6 +152,12 @@ enum Kind {
     Japanese,
     /// Chinese: `Y年M月D日`, digits or Chinese numerals.
     Chinese,
+    /// Arabic: a day, a month word or number and an optional year, in
+    /// Western or Arabic-Indic digits.
+    Arabic,
+    /// Arabic: a day, a month and an optional year, joined by `/`, `.` or
+    /// `-`, day first, in Western or Arabic-Indic digits.
+    ArabicSlash,
 }
 
 /// One parser: its pattern, the pattern without its year, and its reading.
@@ -791,6 +804,60 @@ fn chinese() -> Language {
     }
 }
 
+/// A digit as Arabic texts write them: Western, Arabic-Indic or the extended
+/// Arabic-Indic of Persian and Urdu.
+const AR_DIGIT: &str = "[0-9\u{660}-\u{669}\u{6F0}-\u{6F9}]";
+/// Not such a digit.
+const AR_NOT_DIGIT: &str = "[^0-9\u{660}-\u{669}\u{6F0}-\u{6F9}]";
+/// The bidi marks a formatter puts around numbers in right-to-left text.
+const AR_MARKS: &str = "[\u{200E}\u{200F}\u{61C}]*";
+
+/// Arabic, which chrono does not read: a weekday with its article, after
+/// `يوم` ("day") or the conjunction `و`, before a date with a month name or in
+/// numbers. `الموافق` ("corresponding to") may stand between them, as formal
+/// writing puts it. A Hijri date ("14 ربيع الأول 1448هـ") has no month this
+/// reads, so a weekday beside one is left alone.
+fn arabic() -> Language {
+    let d = AR_DIGIT;
+    let marks = AR_MARKS;
+    let m = keys(names::AR_MONTHS);
+    let modifiers = "القادم|القادمة|المقبل|المقبلة|الماضي|الماضية|المنصرم|المنصرمة|الفائت|الفائتة";
+    Language {
+        merge: Merge::ArabicWeekdayThenDate,
+        parsers: vec![
+            iso(),
+            with_year(
+                &format!(
+                    r"{PRE_U}(?P<d>{d}{{1,2}}){marks}(?:\s*(?:-|–|إلى|الى|حتى)\s*(?P<d2>{d}{{1,2}}){marks})?\s*(?:من\s+)?(?:شهر\s+)?(?P<m>{m})(?:\s*[/(]\s*(?:{m})\s*\)?)?{{Y}}(?:{marks}\s*[,،]?\s*(?:(?:لعام|عام|لسنة|سنة)\s*)?(?P<y>{d}{{4}})(?:\s*م)?){{/Y}}?{POST_U}"
+                ),
+                Kind::Arabic,
+            ),
+            plain(
+                &format!(
+                    r"{PRE_U}(?P<y>{d}{{4}}){marks}[/.\-]{marks}(?P<mn>{d}{{1,2}}){marks}[/.\-]{marks}(?P<d>{d}{{1,2}}){POST_U}"
+                ),
+                Kind::Arabic,
+            ),
+            plain(
+                &format!(
+                    r"(?:(?P<pre>{AR_NOT_DIGIT})|^)(?P<a>{d}{{1,2}}){marks}[/.\-]{marks}(?P<b>{d}{{1,2}})(?:{marks}[/.\-]{marks}(?P<y>{d}{{4}}|{d}{{2}}))?{marks}(?P<post>[^\p{{L}}\p{{N}}_]|$)"
+                ),
+                Kind::ArabicSlash,
+            ),
+            weekday(
+                PRE_U,
+                r"(?:و)?(?:يوم\s+)?",
+                names::AR_WEEKDAYS,
+                "",
+                &format!(
+                    r"(?:\s+(?:{modifiers}))?{marks}(?:\s*[,،])?{marks}(?:\s*الموافق(?:\s*لـ?)?)?"
+                ),
+                POST_U,
+            ),
+        ],
+    }
+}
+
 /// Spanish.
 fn spanish() -> Language {
     iberian(names::ES_WEEKDAYS, &ES_WORDS, "este|esta|pasado|pr[oó]ximo")
@@ -887,7 +954,7 @@ impl Entry {
 }
 
 /// Every language the check reads, in the order the TypeScript runs them.
-pub static LANGUAGES: LazyLock<[Entry; 14]> = LazyLock::new(|| {
+pub static LANGUAGES: LazyLock<[Entry; 15]> = LazyLock::new(|| {
     [
         Entry::new("en", names::EN_GATE, english),
         Entry::new("fr", names::FR_GATE, french),
@@ -903,6 +970,7 @@ pub static LANGUAGES: LazyLock<[Entry; 14]> = LazyLock::new(|| {
         Entry::new("ja", names::JA_GATE, japanese),
         Entry::new("zh", names::ZH_GATE, chinese),
         Entry::new("vi", names::VI_GATE, vietnamese),
+        Entry::new("ar", names::AR_GATE, arabic),
     ]
 });
 
@@ -1080,7 +1148,7 @@ fn retry_offset(parser: &Parser, caps: &Captures<'_>) -> usize {
     let Some(whole) = caps.get(0) else {
         return 0;
     };
-    let header = if matches!(parser.kind, Kind::Slash { .. }) {
+    let header = if matches!(parser.kind, Kind::Slash { .. } | Kind::ArabicSlash) {
         None
     } else {
         caps.name("pre")
@@ -1288,6 +1356,86 @@ fn read_slash(m: &Match<'_, '_>, end: usize, day_first: bool) -> Option<Found> {
     })
 }
 
+/// A number in any decimal digits, Arabic-Indic ones included.
+fn any_digits(text: &str) -> Option<u32> {
+    text.chars().try_fold(0u32, |n, c| {
+        n.checked_mul(10)?.checked_add(u32::from(digit_value(c)?))
+    })
+}
+
+/// An Arabic date: a day, a month word or number, and the year if written.
+fn read_arabic(m: &Match<'_, '_>) -> Option<Reading> {
+    let day = u8::try_from(any_digits(m.group("d")?)?).ok()?;
+    let month = match (m.group("mn"), m.group("m")) {
+        (Some(n), _) => u8::try_from(any_digits(n)?).ok()?,
+        (None, Some(w)) => lookup(names::AR_MONTHS, w)?,
+        (None, None) => return None,
+    };
+    let (month, day) = ordered(month, day)?;
+    let year = match m.group("y") {
+        Some(y) => Some(i32::try_from(any_digits(y)?).ok()?),
+        None => None,
+    };
+    Some(Reading::Date {
+        day,
+        month,
+        year: written_or_nearest(year),
+    })
+}
+
+/// An Arabic date in numbers, day first, under the slash parser's rules: no
+/// digit glued on either side, not a version number, and a year unless the
+/// numbers are joined by `/`.
+fn read_arabic_slash(m: &Match<'_, '_>, end: usize) -> Option<Found> {
+    let is_digit = |c: char| digit_value(c).is_some();
+    let a = m.caps.name("a")?;
+    let index = m.from + a.start();
+    let mut back = m.text.get(..index).unwrap_or_default().chars().rev();
+    let last = back.next();
+    let glued_before =
+        last.is_some_and(is_digit) || (last == Some('/') && back.next().is_some_and(is_digit));
+    let after = m.text.get(end..).unwrap_or_default();
+    let glued_after = after
+        .strip_prefix('/')
+        .unwrap_or(after)
+        .chars()
+        .next()
+        .is_some_and(is_digit);
+    let written = m.text.get(index..end).unwrap_or_default();
+    let ascii: String = written
+        .chars()
+        .filter(|&c| !is_bidi_mark(c))
+        .map(|c| digit_value(c).map_or(c, |d| char::from(b'0'.saturating_add(d))))
+        .collect();
+    let year = m.group("y");
+    if glued_before
+        || glued_after
+        || version_like(&ascii)
+        || (year.is_none() && !written.contains('/'))
+    {
+        return None;
+    }
+    let first = u8::try_from(any_digits(a.as_str())?).ok()?;
+    let second = u8::try_from(any_digits(m.group("b")?)?).ok()?;
+    let (month, day) = ordered(second, first)?;
+    let year = match year {
+        Some(y) => YearOf::Written(likely_ad_year(i32::try_from(any_digits(y)?).ok()?)),
+        None => YearOf::Nearest,
+    };
+    Some(Found {
+        start: index,
+        end,
+        reading: Reading::Date { day, month, year },
+    })
+}
+
+/// Whether `c` is a bidi mark a formatter writes around numbers in
+/// right-to-left text: left-to-right, right-to-left or the Arabic letter
+/// mark.
+pub const fn is_bidi_mark(c: char) -> bool {
+    matches!(c, '\u{200E}' | '\u{200F}' | '\u{61C}')
+}
+
 /// A Japanese date: a day and month in halfwidth or fullwidth digits, the
 /// year in an era (令和 counts from 2019, 平成 from 1989, 昭和 from 1926, 元
 /// its first year), or this year (同, 今, 本).
@@ -1386,6 +1534,8 @@ fn extract(parser: &Parser, caps: &Captures<'_>, text: &str, from: usize) -> Opt
         },
         Kind::Japanese => read_wide(&m)?,
         Kind::Chinese => read_chinese(&m)?,
+        Kind::Arabic => read_arabic(&m)?,
+        Kind::ArabicSlash => return read_arabic_slash(&m, end),
     };
     Some(Found {
         start,

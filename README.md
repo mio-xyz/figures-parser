@@ -139,7 +139,8 @@ included, without the markup around them.
 
 `misdated_weekdays(reply, today)` finds each weekday written beside a date
 and names the pairs whose weekday is wrong. `today` gives a date without a
-year its year. It reads 14 languages (see [Language support](#language-support)).
+year its year. It reads 15 languages, Arabic included (see
+[Language support](#language-support)).
 
 ```rust
 use figures_parser::{Date, misdated_weekdays};
@@ -148,6 +149,10 @@ let today: Date = "2026-10-09".parse().unwrap();
 assert_eq!(
     misdated_weekdays("On se voit le vendredi 26 septembre.", today),
     [r#""vendredi 26 septembre" (2026-09-26 is a Saturday)"#]
+);
+assert_eq!(
+    misdated_weekdays("الاجتماع يوم الجمعة ٢٦ سبتمبر ٢٠٢٦", today),
+    [r#""يوم الجمعة ٢٦ سبتمبر ٢٠٢٦" (2026-09-26 is a Saturday)"#]
 );
 ```
 
@@ -198,8 +203,8 @@ errors.
 `ungrounded_durations(reply, corpus, prompt)` returns the lengths of time the
 corpus does not carry. A reply's "1h30" is grounded by "90 minutes",
 `PT1H30M`, `1:30:00` or `"elapsed_ms": 5400000`. Words and phrases are read
-in English, French, Spanish, Italian and Portuguese ("an hour and a half",
-"deux heures et demie").
+in English, French, Spanish, Italian, Portuguese and Arabic ("an hour and a
+half", "deux heures et demie", "ساعة ونصف").
 
 ```rust
 use figures_parser::ungrounded_durations;
@@ -256,10 +261,10 @@ in one forward pass, as the binding does.
 |---|---|
 | Numbers | Any language: digits of every script Unicode encodes, and the separators every CLDR locale prints, Indian grouping included. Scale words and numbers in words: English, French, German, Spanish, Italian, Portuguese, lakh and crore, and Han numerals. |
 | Links | Any language, internationalized domain names included. |
-| Weekdays | English, French, German, Spanish, Italian, Portuguese, Dutch, Swedish, Finnish, Russian, Ukrainian, Japanese, Chinese (simplified and traditional) and Vietnamese. |
+| Weekdays | English, French, German, Spanish, Italian, Portuguese, Dutch, Swedish, Finnish, Russian, Ukrainian, Japanese, Chinese (simplified and traditional), Vietnamese and Arabic (the month names of every Arab country, Arabic-Indic digits). |
 | Email addresses | Any language, a local part outside ASCII included. |
 | Identifiers | ASCII letters, digits, `-` and `_`, whatever the language around them. |
-| Durations | English, French, Spanish, Italian and Portuguese for words; unit symbols (`ms`, `s`, `h`, `d`, `w`, `y`) in any language. |
+| Durations | English, French, Spanish, Italian, Portuguese and Arabic for words; unit symbols (`ms`, `s`, `h`, `d`, `w`, `y`) in any language. |
 
 ## Documentation
 

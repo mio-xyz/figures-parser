@@ -36,8 +36,12 @@ it stands; a contribution that closes one should remove it here.
 
 ## Weekdays
 
-- Languages outside the fourteen, such as Korean, Polish, Arabic, Hindi or
+- Languages outside the fifteen, such as Korean, Polish, Persian, Hindi or
   Turkish, are not read.
+- Arabic: a Hijri date is not checked, nor a day written as an ordinal word
+  ("السادس والعشرين من سبتمبر"), a weekday without its article ("جمعة"), a
+  weekday after its date, or names written with their short vowels
+  ("الجُمُعَة").
 - Two-letter abbreviations ("Mo", "Fr") are not read, since they are words in
   other languages ("to", "so", "di").
 - Only a weekday written next to its date is paired. A weekday and a date
@@ -67,6 +71,10 @@ it stands; a contribution that closes one should remove it here.
 - German, Dutch, Swedish, Finnish, Russian, Ukrainian, Japanese, Chinese and
   Vietnamese words are not read, though the weekday check reads those
   languages.
+- Arabic: number words past ninety-nine ("مئة ساعة"), dialect numbers
+  ("تلات ساعات"), and units written with their short vowels are not read. A
+  lone singular unit ("استغرق ساعة", "it took an hour") is not read either,
+  for the same reason "an hour" alone is not.
 - Number words past ninety-nine ("a hundred hours") are not read, and a
   decimal in words is misread: "one point five hours" reads as five hours.
 - "An hour" alone is not read, only "an hour and a half", since "once a day"

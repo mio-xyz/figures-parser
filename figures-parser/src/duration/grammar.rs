@@ -1,7 +1,8 @@
 //! The duration grammar: a part is an amount and a unit ("90 minutes",
 //! "deux heures et demie", "1½ hours"), a glued run of units ("1h30",
 //! "1h5m30s"), or a fixed phrase ("half an hour", "un quart d'heure", "a
-//! fortnight").
+//! fortnight"). Arabic has a pattern of its own ("ساعتين و30 دقيقة", "ربع
+//! ساعة"), run only over a text that holds Arabic letters.
 
 use std::cmp::Reverse;
 use std::ops::Range;
@@ -12,9 +13,10 @@ use regex::Regex;
 use super::Length;
 use super::groups::{Groups, scan};
 use super::words::{
-    DAY, HOUR, ITALIAN_TENS, ITALIAN_UNITS, MILLISECOND, MINUTE, MONTH, QUARTER, SECOND, SINGLES,
-    TENS, WEEK, YEAR,
+    AR_ONES, AR_TENS, AR_UNITS, DAY, Form, HOUR, ITALIAN_TENS, ITALIAN_UNITS, MILLISECOND, MINUTE,
+    MONTH, QUARTER, SECOND, SINGLES, TENS, WEEK, YEAR,
 };
+use crate::number::digits::digit_value;
 use crate::text::{alternation, char_at, char_before, compile, lookup};
 
 /// A unit of time, smallest first.
@@ -281,8 +283,30 @@ fn part_pattern() -> String {
 /// The pattern of a fixed phrase.
 const SPECIAL: &str = r"(?i)(?-u:\b)(?:(?P<half>half\s+an?\s+hour|an?\s+half[\s-]hour|(?:une\s+)?demie?[\s-]heure|(?:una\s+)?media\s+hora|(?:una\s+)?mezz['’]?ora|(?:uma\s+)?meia[\s-]hora|1/2\s?h(?:our|eure)?)|(?P<quarter>(?:a\s+)?quarter(?:\s+of\s+an\s+|-)hour|(?:un\s+)?quart\s+d['’]heure|(?:un\s+)?cuarto\s+de\s+hora|(?:un\s+)?quarto\s+d['’]ora|(?:um\s+)?quarto\s+de\s+hora|1/4\s?h(?:our|eure)?)|(?P<threequarters>three[\s-]quarters\s+of\s+an\s+hour|trois\s+quarts\s+d['’]heure|tres\s+cuartos\s+de\s+hora|tre\s+quarti\s+d['’]ora|tr[eê]s\s+quartos\s+de\s+hora|3/4\s?h(?:our|eure)?)|(?P<fortnight>(?:a\s+|one\s+)?fortnight))(?-u:\b)";
 
+/// A digit as Arabic texts write them: Western, Arabic-Indic or extended
+/// Arabic-Indic.
+const AR_DIGIT: &str = "[0-9\u{660}-\u{669}\u{6F0}-\u{6F9}]";
+
+/// The pattern of an Arabic part: an optional amount (digits, a number word
+/// up to ninety-nine, or a fraction), a unit word, then `واحد` ("one") after
+/// it, or a half, a quarter or a third added (`و`) or taken away (`إلا`).
+fn arabic_pattern() -> String {
+    let d = AR_DIGIT;
+    let ones = words_of(AR_ONES, 1..10);
+    let single = words_of(AR_ONES, 3..11);
+    let tens = words_of(AR_TENS, 20..100);
+    let units = alternation(AR_UNITS.iter().map(|&(w, _, _)| w));
+    let fractions = "نصف|نص|ربع|ثلث";
+    format!(
+        r"(?:(?P<digits>{d}+(?:[.,٫]{d}+)?)\s*|(?P<cu>{ones})\s+و\s*(?P<ct>{tens})\s+|(?P<tu>{ones})\s+(?:عشرة|عشره|عشر)\s+|(?P<tens>{tens})\s+|(?P<single>{single})\s+|(?P<frac>ثلاثة\s+أرباع|ثلاث\s+أرباع|ثلاثة\s+ارباع|ثلاث\s+ارباع|{fractions})\s+)?(?P<unit>{units})(?:\s+(?P<one>واحدة|واحده|واحد))?(?:\s*(?P<plus>و\s*(?:{fractions}))|\s+(?P<minus>(?:إلا|الا)\s+(?:ربع|ثلث)))?"
+    )
+}
+
 /// The part pattern, compiled once.
 static PART: LazyLock<Option<Regex>> = LazyLock::new(|| compile(&part_pattern()));
+
+/// The Arabic part pattern, compiled once.
+static ARABIC: LazyLock<Option<Regex>> = LazyLock::new(|| compile(&arabic_pattern()));
 
 /// The fixed phrases, compiled once.
 static PHRASE: LazyLock<Option<Regex>> = LazyLock::new(|| compile(SPECIAL));
@@ -425,6 +449,182 @@ fn read_phrase(text: &str, caps: &Groups<'_, '_>) -> Option<Part> {
     })
 }
 
+/// What an Arabic unit word follows.
+enum Before<'t> {
+    /// No amount.
+    Nothing,
+    /// A number.
+    Count(Amount),
+    /// A fraction word ("نصف", "ربع", "ثلاثة أرباع").
+    Fraction(&'t str),
+}
+
+/// What stands before the unit of an Arabic part's captures.
+fn arabic_before<'t>(caps: &Groups<'_, 't>) -> Option<Before<'t>> {
+    let count = |n: u64| Some(Before::Count(Amount::whole(n)));
+    if let Some(m) = caps.get("digits") {
+        return Some(Before::Count(arabic_digits(m.as_str())?));
+    }
+    if let (Some(ones), Some(tens)) = (caps.get("cu"), caps.get("ct")) {
+        return count(
+            lookup(AR_ONES, ones.as_str())?.checked_add(lookup(AR_TENS, tens.as_str())?)?,
+        );
+    }
+    if let Some(ones) = caps.get("tu") {
+        return count(lookup(AR_ONES, ones.as_str())?.checked_add(10)?);
+    }
+    if let Some(tens) = caps.get("tens") {
+        return count(lookup(AR_TENS, tens.as_str())?);
+    }
+    if let Some(single) = caps.get("single") {
+        return count(lookup(AR_ONES, single.as_str())?);
+    }
+    Some(
+        caps.get("frac")
+            .map_or(Before::Nothing, |f| Before::Fraction(f.as_str())),
+    )
+}
+
+/// An amount in Western or Arabic-Indic digits, its decimal mark a dot, a
+/// comma or the Arabic decimal separator.
+fn arabic_digits(text: &str) -> Option<Amount> {
+    let mut mantissa: u64 = 0;
+    let mut scale: u32 = 0;
+    let mut decimal = false;
+    for c in text.chars() {
+        if let Some(d) = digit_value(c) {
+            mantissa = mantissa.checked_mul(10)?.checked_add(u64::from(d))?;
+            if decimal {
+                scale = scale.checked_add(1)?;
+            }
+        } else {
+            decimal = true;
+        }
+    }
+    Some(Amount { mantissa, scale })
+}
+
+/// `unit` times the fraction `word` names: a half, a quarter, three
+/// quarters, or a third, which only a unit of whole milliseconds divides
+/// into exactly.
+fn arabic_fraction(unit: Unit, word: &str) -> Option<Length> {
+    let word = word.trim_start_matches(|c: char| c == 'و' || c.is_whitespace());
+    if word.starts_with("ثلاث") {
+        return unit.times(Amount::THREE_QUARTERS);
+    }
+    match word {
+        "نصف" | "نص" => unit.times(Amount::HALF),
+        "ربع" => unit.times(Amount::QUARTER),
+        "ثلث" => {
+            let one = unit.one();
+            (one.centimonths == 0 && one.milliseconds.is_multiple_of(3))
+                .then(|| Length::clock(one.milliseconds / 3))
+        }
+        _ => None,
+    }
+}
+
+/// Whether an Arabic part may start at byte `at`: as a part elsewhere may,
+/// or after a one-letter proclitic written onto it ("و", "ب", "ل", "ف",
+/// "ك": "و30 دقيقة", "بساعتين").
+fn arabic_starts_clean(text: &str, at: usize) -> bool {
+    match char_before(text, at) {
+        Some(c @ ('و' | 'ب' | 'ل' | 'ف' | 'ك')) => {
+            starts_clean(text, at.saturating_sub(c.len_utf8()))
+        }
+        _ => starts_clean(text, at),
+    }
+}
+
+/// Whether, after byte `end`, `و` joins another amount: a digit or a number
+/// word ("ساعة و30 دقيقة", "ساعة وعشر دقائق"), so the lone unit before it
+/// counts one.
+fn joined_after(text: &str, end: usize) -> bool {
+    let Some(rest) = text
+        .get(end..)
+        .and_then(|t| t.trim_start().strip_prefix('و'))
+        .map(str::trim_start)
+    else {
+        return false;
+    };
+    if rest.chars().next().and_then(digit_value).is_some() {
+        return true;
+    }
+    let word_end = rest
+        .char_indices()
+        .find(|&(_, c)| !c.is_alphabetic())
+        .map_or(rest.len(), |(i, _)| i);
+    rest.get(..word_end)
+        .is_some_and(|w| lookup(AR_ONES, w).is_some() || lookup(AR_TENS, w).is_some())
+}
+
+/// The part a match of the Arabic pattern writes, if it is one. A unit alone
+/// counts one only with `واحد`, a fraction after it, or another amount
+/// joined to it, since "يوم" and "ساعة" alone are as often "the day of" and
+/// "the clock"; a dual counts two by itself.
+fn read_arabic(text: &str, caps: &Groups<'_, '_>) -> Option<Part> {
+    let whole = caps.whole()?;
+    if !arabic_starts_clean(text, whole.start()) {
+        return None;
+    }
+    let unit_word = caps.get("unit")?;
+    let &(_, unit, form) = AR_UNITS
+        .iter()
+        .find(|&&(w, _, _)| w == unit_word.as_str())?;
+    let one = caps.get("one");
+    let mut plus = caps.get("plus");
+    let mut minus = caps.get("minus");
+    let mut end = whole.end();
+    if !ends_clean(text, end) {
+        // A fraction glued to more letters is not one: read the part without it.
+        plus.take().or_else(|| minus.take())?;
+        end = one.map_or_else(|| unit_word.end(), |o| o.end());
+        if !ends_clean(text, end) {
+            return None;
+        }
+    }
+    let suffixed = plus.is_some() || minus.is_some();
+    let base = match (arabic_before(caps)?, form) {
+        (Before::Count(count), Form::Singular | Form::Plural) if one.is_none() => {
+            unit.times(count)?
+        }
+        (Before::Fraction(word), Form::Singular | Form::Definite) if one.is_none() && !suffixed => {
+            arabic_fraction(unit, word)?
+        }
+        (Before::Nothing, Form::Dual) if one.is_none() => unit.times(Amount::whole(2))?,
+        (Before::Nothing, Form::Singular)
+            if one.is_some() || suffixed || joined_after(text, end) =>
+        {
+            unit.one()
+        }
+        _ => return None,
+    };
+    let length = if let Some(word) = plus {
+        base.checked_add(arabic_fraction(unit, word.as_str())?)?
+    } else if let Some(word) = minus {
+        let fraction = arabic_fraction(unit, word.as_str().split_whitespace().last()?)?;
+        Length {
+            milliseconds: base.milliseconds.checked_sub(fraction.milliseconds)?,
+            centimonths: base.centimonths.checked_sub(fraction.centimonths)?,
+        }
+    } else {
+        base
+    };
+    Some(Part {
+        span: whole.start()..end,
+        length,
+        largest: unit,
+        smallest: unit,
+        stated: true,
+    })
+}
+
+/// Whether `text` holds an Arabic letter or digit: a byte that leads a
+/// character from U+0600 to U+067F.
+fn has_arabic(text: &str) -> bool {
+    memchr::memchr2(0xD8, 0xD9, text.as_bytes()).is_some()
+}
+
 /// What turns a pattern's match into a part, if it is one.
 type Reader = fn(&str, &Groups<'_, '_>) -> Option<Part>;
 
@@ -451,9 +651,13 @@ fn collect(re: &Regex, text: &str, read: Reader, out: &mut Vec<Part>) {
 /// Every part in `text`, in order, a longer one winning an overlap.
 pub fn parts(text: &str) -> Vec<Part> {
     let mut found = Vec::new();
-    let readers: [(&Option<Regex>, Reader); 2] = [(&PART, read_part), (&PHRASE, read_phrase)];
-    for (re, read) in readers {
-        if let Some(re) = re {
+    let readers: [(&Option<Regex>, Reader, bool); 3] = [
+        (&PART, read_part, true),
+        (&PHRASE, read_phrase, true),
+        (&ARABIC, read_arabic, has_arabic(text)),
+    ];
+    for (re, read, wanted) in readers {
+        if wanted && let Some(re) = re {
             collect(re, text, read, &mut found);
         }
     }

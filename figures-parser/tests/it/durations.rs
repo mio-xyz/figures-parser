@@ -233,3 +233,75 @@ fn reads_a_field_named_by_any_word_of_its_unit_and_no_time_of_day() {
         ["14 hours and 30 minutes"]
     );
 }
+
+#[test]
+fn reads_arabic_amounts_units_and_fractions() {
+    const WEEK: u64 = 7 * DAY;
+    for (text, written, length) in [
+        ("استغرق الاجتماع 45 دقيقة.", "45 دقيقة", clock(45 * MINUTE)),
+        ("خلال ٣ ساعات", "٣ ساعات", clock(3 * HOUR)),
+        ("ساعتين", "ساعتين", clock(2 * HOUR)),
+        ("بساعتين", "ساعتين", clock(2 * HOUR)),
+        (
+            "ساعتين و30 دقيقة",
+            "ساعتين و30 دقيقة",
+            clock(2 * HOUR + 30 * MINUTE),
+        ),
+        (
+            "ساعة و20 دقيقة",
+            "ساعة و20 دقيقة",
+            clock(HOUR + 20 * MINUTE),
+        ),
+        (
+            "ساعة وعشر دقائق",
+            "ساعة وعشر دقائق",
+            clock(HOUR + 10 * MINUTE),
+        ),
+        ("ساعة ونصف", "ساعة ونصف", clock(HOUR + 30 * MINUTE)),
+        ("ساعتين ونص", "ساعتين ونص", clock(2 * HOUR + 30 * MINUTE)),
+        ("ساعة إلا ربع", "ساعة إلا ربع", clock(45 * MINUTE)),
+        ("نصف ساعة", "نصف ساعة", clock(30 * MINUTE)),
+        ("ربع ساعة", "ربع ساعة", clock(15 * MINUTE)),
+        ("ثلث ساعة", "ثلث ساعة", clock(20 * MINUTE)),
+        ("ثلاثة أرباع الساعة", "ثلاثة أرباع الساعة", clock(45 * MINUTE)),
+        ("خمس دقائق", "خمس دقائق", clock(5 * MINUTE)),
+        ("خمس عشرة دقيقة", "خمس عشرة دقيقة", clock(15 * MINUTE)),
+        ("خمس وأربعون دقيقة", "خمس وأربعون دقيقة", clock(45 * MINUTE)),
+        ("ثلاثين يوما", "ثلاثين يوما", clock(30 * DAY)),
+        ("أسبوع واحد", "أسبوع واحد", clock(WEEK)),
+        ("1.5 ساعة", "1.5 ساعة", clock(90 * MINUTE)),
+        ("١٫٥ ساعة", "١٫٥ ساعة", clock(90 * MINUTE)),
+        ("3 أشهر", "3 أشهر", Length::calendar(300)),
+        ("سنتين", "سنتين", Length::calendar(2_400)),
+    ] {
+        assert_eq!(read(text), [(written, length)], "{text}");
+    }
+}
+
+#[test]
+fn reads_no_arabic_duration_in_a_weekday_a_time_of_day_or_a_lone_word() {
+    for text in [
+        "يوم الجمعة",
+        "الساعة 3",
+        "ساعة الحائط",
+        "انتظر دقيقة",
+        "معلومات دقيقة",
+        "عام 2026",
+        "للمرة الثانية",
+    ] {
+        assert_eq!(read(text), [], "{text}");
+    }
+}
+
+#[test]
+fn grounds_an_arabic_duration_however_the_corpus_writes_it() {
+    let reply = "استغرقت المهمة ساعة ونصف، ثم ساعتين للمراجعة.";
+    assert_eq!(
+        ungrounded_durations(reply, r#"{"duration_ms": 5400000}"#, ""),
+        ["ساعتين"]
+    );
+    assert_eq!(
+        ungrounded_durations("The job ran 90 minutes.", "استغرق ساعة ونصف", ""),
+        Vec::<String>::new()
+    );
+}
