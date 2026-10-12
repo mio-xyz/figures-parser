@@ -1,0 +1,27 @@
+{
+  "name": "@mio-xyz/figures-parser-win32-x64-msvc",
+  "version": "0.1.0",
+  "cpu": [
+    "x64"
+  ],
+  "main": "figures-parser.win32-x64-msvc.node",
+  "files": [
+    "figures-parser.win32-x64-msvc.node",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "description": "Check a piece of generated text against the sources it was written from: figures, links, dated weekdays, email addresses, identifiers and durations.",
+  "license": "AGPL-3.0-only",
+  "engines": {
+    "node": ">= 22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mio-xyz/figures-parser.git"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "os": [
+    "win32"
+  ]
+}

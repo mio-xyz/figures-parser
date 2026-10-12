@@ -1,0 +1,44 @@
+{
+  "name": "@mio-xyz/figures-parser",
+  "version": "0.1.0",
+  "description": "Check a piece of generated text against the sources it was written from: figures, links, dated weekdays, email addresses, identifiers and durations.",
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mio-xyz/figures-parser.git"
+  },
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "engines": {
+    "node": ">= 22"
+  },
+  "napi": {
+    "binaryName": "figures-parser",
+    "targets": [
+      "x86_64-apple-darwin",
+      "aarch64-apple-darwin",
+      "x86_64-pc-windows-msvc",
+      "aarch64-pc-windows-msvc",
+      "x86_64-unknown-linux-gnu",
+      "aarch64-unknown-linux-gnu",
+      "armv7-unknown-linux-gnueabihf",
+      "x86_64-unknown-linux-musl",
+      "aarch64-unknown-linux-musl"
+    ]
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "scripts": {
+    "build": "napi build --platform --release --package figures-parser-napi --output-dir .",
+    "test": "node smoke.mjs"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "3.10.5"
+  }
+}

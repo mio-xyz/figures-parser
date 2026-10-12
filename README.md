@@ -220,20 +220,28 @@ assert_eq!(
 
 ## From Node
 
-`figures-parser-napi` is a Node binding (Node-API 9) with the same checks,
-named in camelCase, and one `extract` reader for every kind. Offsets are
-UTF-16 units, so `input.slice(start, end)` gives an item back.
+`@mio-xyz/figures-parser` is a Node binding (Node-API 9, Node 22 or later)
+with the same checks, named in camelCase, and one `extract` reader for every
+kind. Offsets are UTF-16 units, so `input.slice(start, end)` gives an item
+back.
 
-```sh
-cargo build --release -p figures-parser-napi
-cp target/release/libfigures_parser_napi.so figures-parser.linux-x64-gnu.node
+It is published to GitHub Packages with a prebuilt binary for macOS (x64,
+arm64), Windows (x64, arm64), Linux on glibc (x64, arm64, armv7) and Linux on
+musl, for Alpine (x64, arm64). GitHub Packages asks for a token even to
+install: a personal access token with `read:packages`, or `GITHUB_TOKEN` in
+GitHub Actions. In your project's `.npmrc`:
+
+```ini
+@mio-xyz:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
 ```
 
-On macOS the library is `libfigures_parser_napi.dylib`, and on Windows
-`figures_parser_napi.dll`.
+```sh
+npm install @mio-xyz/figures-parser
+```
 
 ```js
-const fp = require("./figures-parser.linux-x64-gnu.node");
+const fp = require("@mio-xyz/figures-parser");
 
 fp.ungroundedFigures(reply, corpus);             // ["48,200"]
 fp.ungroundedUrls(reply, corpus, prompt);        // also fabricatedUrls
@@ -248,6 +256,14 @@ fp.extract("Fee $1,250 at https://acme.io/x", { kinds: ["number", "url"] });
 
 A panic inside the library reaches JavaScript as a thrown `Error`, never as a
 crashed process.
+
+To build it from a checkout instead, for the machine you are on:
+
+```sh
+npm ci
+npm run build   # needs a Rust toolchain; writes figures-parser.<platform>.node
+node smoke.mjs  # loads it through index.js, as the package does
+```
 
 ## Offsets
 

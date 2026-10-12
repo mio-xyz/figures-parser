@@ -21,7 +21,7 @@ repository, or ahead of time with:
 rustup toolchain install
 ```
 
-The Node binding's smoke test needs Node 22 or later.
+The Node binding's build and smoke test need Node 22 or later.
 
 ## Checks
 
@@ -41,13 +41,15 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-it
 # PANIC_CHECK_CASES sets the number of generated inputs (default 200,000).
 cargo test --profile panic-check -p figures-parser --test it -- --ignored
 
-# The Node binding (on Linux; see the README for other platforms).
-cargo build --release -p figures-parser-napi
-cp target/release/libfigures_parser_napi.so figures-parser.linux-x64-gnu.node
+# The Node binding, built for this machine and loaded through index.js.
+npm ci
+npm run build
 node smoke.mjs
 ```
 
-CI also runs the library's tests on macOS and Windows.
+CI also runs the library's tests on macOS and Windows, and fails when
+`npm run build` would change the committed `index.js` or `index.d.ts`: commit
+them with a change to the binding's exports.
 
 ## Lint policy
 
@@ -101,6 +103,33 @@ noise.
   when behavior changes.
 - [Known gaps](docs/known-gaps.md) lists what is not read; remove an entry
   your change closes, and add one you find.
+
+## Releases
+
+A tag publishes the Node packages to GitHub Packages
+([`.github/workflows/release.yml`](.github/workflows/release.yml)). To cut
+`0.2.0`:
+
+```sh
+npm version 0.2.0 --no-git-tag-version  # package.json and package-lock.json
+npx napi version                        # the platform packages under npm/
+npm run build                           # index.js checks against the version
+```
+
+Set `version = "0.2.0"` under `[workspace.package]` in `Cargo.toml`, run
+`cargo check` to update `Cargo.lock`, commit, then push the tag:
+
+```sh
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+The workflow builds the binding for each platform, loads every build on its
+own OS and CPU under Node 22 and 24, and publishes the nine platform packages
+and `@mio-xyz/figures-parser` once all of them pass. A version with a hyphen
+(`0.2.0-rc.1`) is published under the `next` tag. A failed run can be run
+again: it skips what is already published. A pull request that changes the
+packaging runs the same builds and tests without publishing.
 
 ## Commits and pull requests
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
-const { extract, ungroundedFigures, ungroundedUrls, fabricatedUrls, ungroundedEmails, misdatedWeekdays, ungroundedIdentifiers, unseenTokens, ungroundedDurations } = createRequire(import.meta.url)("./figures-parser.linux-x64-gnu.node");
+const { extract, ungroundedFigures, ungroundedUrls, fabricatedUrls, ungroundedEmails, misdatedWeekdays, ungroundedIdentifiers, unseenTokens, ungroundedDurations } = createRequire(import.meta.url)("./index.js");
 
 const entities = extract("Total $1,250 and ١٢", { kinds: ["number"] });
 const has = (text, integer) => entities.some((e) => e.text === text && e.value.integer === integer);

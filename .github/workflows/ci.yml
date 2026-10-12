@@ -99,6 +99,10 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
-      - run: cargo build --release -p figures-parser-napi --locked
-      - run: cp target/release/libfigures_parser_napi.so figures-parser.linux-x64-gnu.node
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      # The build writes the loader and its types; the committed ones are what
+      # the package ships.
+      - run: git diff --exit-code index.js index.d.ts
       - run: node smoke.mjs

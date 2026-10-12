@@ -1,0 +1,196 @@
+name: Release
+
+# A tag `vX.Y.Z` builds the Node binding for every platform, loads each build
+# on its own OS and CPU, then publishes the platform packages and
+# `@mio-xyz/figures-parser` to GitHub Packages. A pull request that touches
+# the packaging, or a manual run, builds and tests without publishing.
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - package.json
+      - package-lock.json
+      - index.js
+      - index.d.ts
+      - npm/**
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.host }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { host: macos-latest, target: aarch64-apple-darwin }
+          - { host: macos-latest, target: x86_64-apple-darwin }
+          - { host: windows-latest, target: x86_64-pc-windows-msvc }
+          - { host: windows-latest, target: aarch64-pc-windows-msvc }
+          # glibc 2.17 toolchains, so a build loads on old distributions too.
+          - { host: ubuntu-latest, target: x86_64-unknown-linux-gnu, flags: --use-napi-cross }
+          - { host: ubuntu-latest, target: aarch64-unknown-linux-gnu, flags: --use-napi-cross }
+          - { host: ubuntu-latest, target: armv7-unknown-linux-gnueabihf, flags: --use-napi-cross }
+          # musl, for Alpine, linked through zig.
+          - { host: ubuntu-latest, target: x86_64-unknown-linux-musl, flags: -x }
+          - { host: ubuntu-latest, target: aarch64-unknown-linux-musl, flags: -x }
+    defaults:
+      run:
+        # PowerShell swallows the `--` that hands the flags to napi.
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: rustup toolchain install
+      - run: rustup target add ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - if: contains(matrix.target, 'musl')
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.14.1
+      - if: contains(matrix.target, 'musl')
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild
+      - run: npm ci
+      - run: npm run build -- --target ${{ matrix.target }} ${{ matrix.flags }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bindings-${{ matrix.target }}
+          path: figures-parser.*.node
+          if-no-files-found: error
+
+  test-macos-windows:
+    name: Test ${{ matrix.target }} on Node ${{ matrix.node }}
+    needs: build
+    runs-on: ${{ matrix.host }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { host: macos-latest, target: aarch64-apple-darwin, arch: arm64, node: 22 }
+          - { host: macos-latest, target: aarch64-apple-darwin, arch: arm64, node: 24 }
+          # Rosetta runs the x64 Node on the arm64 runner.
+          - { host: macos-latest, target: x86_64-apple-darwin, arch: x64, node: 22 }
+          - { host: macos-latest, target: x86_64-apple-darwin, arch: x64, node: 24 }
+          - { host: windows-latest, target: x86_64-pc-windows-msvc, arch: x64, node: 22 }
+          - { host: windows-latest, target: x86_64-pc-windows-msvc, arch: x64, node: 24 }
+          - { host: windows-11-arm, target: aarch64-pc-windows-msvc, arch: arm64, node: 22 }
+          - { host: windows-11-arm, target: aarch64-pc-windows-msvc, arch: arm64, node: 24 }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          architecture: ${{ matrix.arch }}
+      - uses: actions/download-artifact@v8
+        with:
+          name: bindings-${{ matrix.target }}
+      - run: node smoke.mjs
+
+  test-linux:
+    name: Test ${{ matrix.target }} on Node ${{ matrix.node }}
+    needs: build
+    runs-on: ${{ matrix.host }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Debian 11 (glibc 2.31) for the glibc builds, Alpine for musl. Node 24
+        # ships no 32-bit ARM build, so armv7 runs on Node 22 alone, under QEMU.
+        include:
+          - { host: ubuntu-latest, target: x86_64-unknown-linux-gnu, image: bullseye-slim, node: 22 }
+          - { host: ubuntu-latest, target: x86_64-unknown-linux-gnu, image: bullseye-slim, node: 24 }
+          - { host: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, image: bullseye-slim, node: 22 }
+          - { host: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, image: bullseye-slim, node: 24 }
+          - { host: ubuntu-latest, target: armv7-unknown-linux-gnueabihf, image: bullseye-slim, node: 22, platform: linux/arm/v7 }
+          - { host: ubuntu-latest, target: x86_64-unknown-linux-musl, image: alpine, node: 22 }
+          - { host: ubuntu-latest, target: x86_64-unknown-linux-musl, image: alpine, node: 24 }
+          - { host: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl, image: alpine, node: 22 }
+          - { host: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl, image: alpine, node: 24 }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: bindings-${{ matrix.target }}
+      - if: matrix.platform
+        uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm
+      - run: >
+          docker run --rm ${{ matrix.platform && format('--platform {0}', matrix.platform) || '' }}
+          -v "$PWD:/build:ro" -w /build
+          node:${{ matrix.node }}-${{ matrix.image }} node smoke.mjs
+
+  publish:
+    name: Publish
+    needs: [test-macos-windows, test-linux]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          registry-url: https://npm.pkg.github.com
+          scope: "@mio-xyz"
+      - run: npm ci
+      - name: Check the tag against the versions
+        run: |
+          version=$(node -p 'require("./package.json").version')
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME, package.json $version"; exit 1
+          fi
+          if ! grep -qx "version = \"$version\"" Cargo.toml; then
+            echo "::error::Cargo.toml's workspace version is not $version"; exit 1
+          fi
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: bindings-*
+          path: artifacts
+          merge-multiple: true
+      # Each build into its platform package, every platform package at the
+      # root's version, and the root depending on each of them.
+      - run: npx napi artifacts --output-dir artifacts
+      - run: npx napi version
+      # The binaries carry code ported under MIT, whose notice travels with it.
+      - run: for dir in npm/*/; do cp LICENSE THIRD_PARTY_NOTICES.md "$dir"; done
+      - run: npx napi pre-publish --tag-style npm --no-gh-release --skip-optional-publish
+      # Publishes what is not out yet, so a run that failed halfway can be
+      # run again.
+      - name: Publish
+        run: |
+          version=$(node -p 'require("./package.json").version')
+          tag=latest
+          case "$version" in *-*) tag=next ;; esac
+          for dir in npm/*/ .; do
+            name=$(node -p "require('./$dir/package.json').name")
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "$name@$version is already published"
+            else
+              npm publish "$dir" --tag "$tag"
+            fi
+          done
