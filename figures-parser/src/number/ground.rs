@@ -150,6 +150,14 @@ impl<'r> Needles<'r> {
         (self.lengths | self.around_lengths) & bit != 0 && self.ground_length(reading, sign, bit)
     }
 
+    /// Whether some needle has the integer length of `reading`: the one test
+    /// that turns most corpus readings away, so a caller's own filter runs
+    /// only on the rest.
+    #[inline]
+    fn may_ground(&self, reading: &Reading<'_, '_>) -> bool {
+        (self.lengths | self.around_lengths) & length_bit(reading.integer.len()) != 0
+    }
+
     /// [`Needles::ground`] for a reading whose integer length, `bit`, some
     /// needle states.
     fn ground_length(&mut self, reading: &Reading<'_, '_>, sign: Option<Sign>, bit: u64) -> bool {
@@ -224,11 +232,27 @@ impl<'r> Needles<'r> {
 /// assert_eq!(figures_parser::ungrounded_figures("It moved by -12,500.", "delta: 12500"), ["-12,500"]);
 /// ```
 #[must_use]
+#[expect(
+    clippy::redundant_closure_for_method_calls,
+    reason = "the method's path fixes the reading's lifetimes, which the bound leaves free"
+)]
 pub fn ungrounded_figures(reply: &str, corpus: &str) -> Vec<String> {
+    ungrounded_by(reply, corpus, |r| r.stated(), |_| true)
+}
+
+/// The figures in `reply` that `corpus` does not carry, a reading being held
+/// to the key `stated` gives it, or to nothing when that is None, and
+/// grounded only by the corpus readings `grounds` accepts.
+pub(super) fn ungrounded_by(
+    reply: &str,
+    corpus: &str,
+    stated: impl Fn(&Reading<'_, '_>) -> Option<Key>,
+    grounds: impl Fn(&Reading<'_, '_>) -> bool,
+) -> Vec<String> {
     let mut scratch = Scratch::default();
     let mut needles = Needles::default();
     for_each_reading_in(reply, tokens(reply), &mut scratch, |r| {
-        if let Some(key) = r.stated() {
+        if let Some(key) = stated(&r) {
             needles.add(key, r.full_text, r.span);
         }
     });
@@ -241,7 +265,7 @@ pub fn ungrounded_figures(reply: &str, corpus: &str) -> Vec<String> {
     needles.seal();
     for token in tokens(corpus).without_currency().without_signs() {
         token.for_each_reading(&mut scratch, |r| {
-            if needles.ground(&r, None) {
+            if needles.may_ground(&r) && grounds(&r) && needles.ground(&r, None) {
                 needles.ground(&r, Some(token.sign_of(&r, corpus)));
             }
         });
@@ -254,7 +278,9 @@ pub fn ungrounded_figures(reply: &str, corpus: &str) -> Vec<String> {
     for number in spelled(corpus) {
         let reading = scratch.spelled(corpus, &number);
         let sign = reading.sign;
-        needles.ground(&reading, Some(sign));
+        if grounds(&reading) {
+            needles.ground(&reading, Some(sign));
+        }
         if needles.open == 0 {
             return Vec::new();
         }

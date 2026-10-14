@@ -4,7 +4,6 @@
 use std::ops::Range;
 
 use super::digits::{ascii_in, digit_value, push_ascii};
-use super::scale::han_rest;
 use super::scan::{Token, is_decimal_symbol, is_symbol, look_back, marked_after, marked_before};
 use super::spelled::Spelled;
 use super::{Reading, Sign};
@@ -208,6 +207,12 @@ fn join_groups(text: &str, scratch: &mut String) {
 }
 
 impl<'a> Token<'a> {
+    /// The byte after `written`.
+    #[must_use]
+    pub const fn end(&self) -> usize {
+        self.start.saturating_add(self.written.len())
+    }
+
     /// A reading of the whole token, as written, scale word included. A
     /// scaled figure is stated as rounded, so it reads as approximate.
     const fn whole<'s>(
@@ -218,7 +223,7 @@ impl<'a> Token<'a> {
     ) -> Reading<'a, 's> {
         Reading {
             text: self.written,
-            span: self.start..self.start + self.written.len(),
+            span: self.start..self.end(),
             integer,
             fraction,
             grouped,
@@ -235,7 +240,7 @@ impl<'a> Token<'a> {
     /// none for a later group. `text` is the text the token was found in.
     pub(super) fn sign_of(&self, reading: &Reading<'_, '_>, text: &str) -> Sign {
         if reading.span.start == self.start {
-            look_back(text, self.start, self.start + self.written.len()).sign
+            look_back(text, self.start, self.end()).sign
         } else {
             Sign::Unsigned
         }
@@ -261,26 +266,33 @@ impl<'a> Token<'a> {
             self.unscaled_readings(digits, f);
             return;
         }
-        let whole = self.start..self.start + self.written.len();
+        let whole = self.start..self.end();
         self.unscaled_readings(digits, |r| {
             if r.span != whole {
                 f(r);
                 return;
             }
             let (integer, fraction) = scale_into(r.integer, r.fraction, self.magnitude, scaled);
-            let rest = han_rest(self.written, self.text.len());
-            let (integer, fraction) = if rest == 0 {
-                (integer, fraction)
-            } else {
-                // A fraction left after the scale has no place beside the
-                // sections, so such a reading is not one.
-                let integer_value = fraction.is_none().then(|| integer.parse::<u128>().ok());
-                let Some(value) = integer_value.flatten().and_then(|v| v.checked_add(rest)) else {
-                    return;
-                };
+            // The sections after a Han multiplier are read after whole digits
+            // only, whose scaled value the scanner checked fits.
+            let with_rest = (self.rest > 0)
+                .then(|| {
+                    integer
+                        .parse::<u128>()
+                        .ok()?
+                        .checked_add(u128::from(self.rest))
+                })
+                .flatten();
+            #[expect(
+                clippy::option_if_let_else,
+                reason = "the else arm keeps the borrow of the buffer the other arm rewrites"
+            )]
+            let (integer, fraction) = if let Some(value) = with_rest {
                 scaled.clear();
                 push_decimal(value, scaled);
                 (scaled.as_str(), None)
+            } else {
+                (integer, fraction)
             };
             f(Reading {
                 text: r.text,

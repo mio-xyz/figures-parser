@@ -16,7 +16,7 @@ The library has one module per kind, each with a reader and a comparison:
 
 | Module | Reader | Comparison |
 |---|---|---|
-| `number` | `scan` (tokens), `readings`, `scale` (scale words), `spelled` (numbers in words), `digits` | `ground` |
+| `number` | `scan` (tokens), `readings`, `scale` (scale words), `spelled` (numbers in words), `digits` | `ground`, `percent`, `arithmetic` |
 | `url` | `scan` | `ground`, `items` (the items named beside links) |
 | `date` | `languages`, `names` (a port of chrono-node, and Arabic) | `calendar` |
 | `email` | `emails` | `ungrounded_emails` |
@@ -43,6 +43,17 @@ comma). A token that continues a word is not one: the inside of an id
 (`p1789368220119`), a version (`v3.1`) or a unit suffix (`12.5kg`). A run
 that ends against a letter gives back its last group, so "12.5kg" yields
 "12". A dash is not a symbol, so "2026-11-05" reads as its parts.
+
+A plain space joins groups only into thousands: a lead of one to three
+digits, then groups of three ("12 500", "1 128 616,50"), never after the
+piece of a date or a time. Anywhere else it sets numbers side by side, as a
+script's `print` does, so "1,250,000 980,000" and "2026 25%" are two numbers
+each. The no-break spaces locales print between groups always join.
+
+Arabic glues a conjunction or a preposition to the next word, a number
+included: "و٣٤٠" is "and 340", "ب١٢٠" "for 120", "وب٥٠٠" "and for 500". One
+of و, ف, ب, ل or ك standing as a word, or two of them led by و or ف, does not
+make the digits after it part of a word.
 
 A token records what stands around it:
 
@@ -137,10 +148,14 @@ bare letters are also a name.
 
 After whole digits, a Han multiplier may be followed by sections of digits
 and smaller multipliers, which add to it: "3億5000万" is 350,000,000, and
-"1億2345万6789" is 123,456,789. Digits alone end the sections only after 万
-or a smaller multiplier, with two digits or more ("2万5000" is 25,000), since
-"3万5" is spoken shorthand for 35,000 and a text writes the places below 億
-through 万.
+"1億2345万6789" is 123,456,789. Digits alone end the sections with two digits
+or more ("2万5000" is 25,000), since "3万5" is spoken shorthand for 35,000. A
+section after 億 or 兆 that stops short of the myriad is such shorthand too
+and fills the place a text writes through 万: "3億5千" and "3億5000" are
+3億5000万. A large multiplier after small ones multiplies all before it:
+"1千200万" is 1,200万, 12,000,000. The scanner keeps what the sections add
+on the token, beside the power of its multipliers, and keeps them only when
+the whole fits a `u128`.
 
 The scale check is a one-byte inline test on the byte after a token, so a
 figure followed by nothing that may begin a scale costs nothing more.
@@ -172,16 +187,33 @@ sums them left to right:
 - a half is read beside its scale ("two and a half million", "a million and
   a half", "deux millions et demi", "zweieinhalb Millionen", "anderthalb
   Millionen"), and a decimal point before one ("one point two five million",
-  "zwei Komma fünf Millionen");
+  "zwei Komma fünf Millionen"); the fraction's words may be two-digit values
+  ("deux virgule vingt-cinq millions", "fünfundzwanzig") or digits ("2 point
+  5 million"), and a half or a decimal ends the number as a scale does;
+- "zero" opens a number only before a decimal point ("zero point five
+  million"), and never fills a group;
+- a value under a hundred standing bare after a million or more is left out,
+  since prose writes it for what follows ("two million three years ago");
+- a number word hyphenated to a word that is none is a compound of its own
+  ("two-bedroom", "forty-foot") and no part of a number, unless a hyphen
+  joins it to a number word on its other side ("two-million-dollar");
 - whole digits of one to three places may lead the words ("2 million three
-  hundred thousand", "1 millón y medio"); the number then stands for the
-  digit token, and carries its sign.
+  hundred thousand", "1 millón y medio"), where the scanner reads the digits
+  as a figure of their own; only a hundred, a scale, a join or a point
+  continues them, so "June 30 two hundred thousand" is a date and a count.
+  The number then stands for the digit token and for every token inside it,
+  and carries its sign.
+
+When the words after an anchor stop continuing one number, the reader starts
+again after the last complete prefix, so "5 and a hundred thousand" yields
+"a hundred thousand" with its article.
 
 A number must hold a hundred or a scale and two words at least, so a lone
 scale word ("mille grazie", "thousands of users") is not read, nor a Han run
 that is a word ("万一", "百貨店"). A number opened by an article ("a
 million", "a hundred thousand") grounds a reply's figure but is never held,
-since prose writes it as an idiom or a round guess ("thanks a million").
+since prose writes it as an idiom or a round guess ("thanks a million"); "a
+half million" counts, as "half a million" does.
 
 A corpus is searched for numbers in words only when its digits leave a reply
 figure unfound, since most corpora write their numbers in digits.
@@ -194,6 +226,48 @@ streams the corpus's readings through it. A corpus reading whose length is
 not in the mask costs one bit test. The walk reads the corpus without
 currency marks and without signs, since no floor applies to a corpus, and
 stops as soon as every claim is grounded.
+
+### Percentages
+
+`number::percent` reads a percentage as a numeric token with a percent mark
+after it: a sign (`%`, the Arabic `٪`, the fullwidth `％`, the small `﹪`)
+after at most one space of the line and any bidi marks, or a percent word
+after one space ("percent", "per cent", "pour cent", "Prozent", "por ciento",
+"por cento", "per cento"). A letter or a digit right after the mark ends it
+("50%off", "12 percentage points", the "%25" of an encoded link). The reading
+that ends at the mark is the percentage: the whole token, or the last of
+numbers a run sets side by side; a group of a thousands run is none.
+
+A reply's percentage is grounded by a corpus percentage, or by a fraction of
+two places or more a script printed for it ("0.1429" for "14.3%"), that
+rounds to it at the places the reply wrote: within half a unit of its last
+digit, both bounds included. The comparison is exact, in scaled integers. A
+bare number never grounds one, since it may be either operand of the
+division, and 0% and 100% are never held. Sizes are compared, so a sign on
+either side does not matter; the reply's sign is kept in what is reported.
+
+### Arithmetic in prose
+
+`number::arithmetic` holds a reply to the values a message gave once it gave
+four or more, counted where each stands ("25 + 25 + 25 + 25" gives four):
+
+- a token counts once, and once more for each plain space inside it, since a
+  list is written so as often as French thousands ("120 340 560 780");
+- a number in words counts once;
+- the pieces of a date, a time or a range ("2026-10-01", "12:30", "10-12")
+  do not count.
+
+A reply's reading is then held when it is a result: past ten, or a decimal,
+or a negative other than zero. A count of ten or less, a year from 1900 to
+2100 written without separators, a piece of a date or a time, and a group a
+symbol joins to more digits of its run ("12" of "12.5kg") are not. A result's
+key is exact: the same integer and the same fraction, trailing zeros aside,
+with the sign held as `ungrounded_figures` holds it. Only a corpus reading
+printed as a value grounds one: not a derived group of a thousands run, nor
+the piece of a time, both of which the figure check accepts.
+
+The comparison is the figure check's own walk (`ground::ungrounded_by`),
+given what a reading states and which corpus readings ground.
 
 ## Links
 

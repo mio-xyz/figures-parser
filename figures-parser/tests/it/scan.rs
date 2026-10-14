@@ -24,11 +24,26 @@ fn a_token_knows_where_it_starts() {
     assert_eq!((t.text, t.start, t.currency()), ("1,250.5", 4, false));
 }
 
+// A plain space groups thousands in French and Russian, and sets figures
+// side by side everywhere else: it joins only a lead of up to three digits
+// and groups of three after it.
 #[test]
-fn a_space_joins_groups_but_a_double_space_or_a_dash_does_not() {
+fn a_space_joins_only_thousands_but_a_double_space_or_a_dash_does_not() {
     assert_eq!(
         texts("Rows 12 5 and 1 2345 are separate."),
-        ["12 5", "1 2345"]
+        ["12", "5", "1", "2345"]
+    );
+    assert_eq!(texts("Total 1 128 616,50 €"), ["1 128 616,50"]);
+    assert_eq!(texts("12 500 and 120 340 560"), ["12 500", "120 340 560"]);
+    assert_eq!(texts("1,250,000 980,000"), ["1,250,000", "980,000"]);
+    assert_eq!(
+        texts("In 2026 25% and 54,916.481 1962"),
+        ["2026", "25", "54,916.481", "1962"]
+    );
+    assert_eq!(texts("1 2345 678"), ["1", "2345", "678"]);
+    assert_eq!(
+        texts("2026-10-05 837 and 14:30 601"),
+        ["2026", "10", "05", "837", "14", "30", "601"]
     );
     assert_eq!(texts("2026-11-05"), ["2026", "11", "05"]);
     assert_eq!(texts("a  12  b"), ["12"]);
@@ -138,4 +153,16 @@ fn tokens_without_currency_read_no_marks() {
         .map(|t| t.currency())
         .collect();
     assert_eq!(marked, [false, false]);
+}
+
+// Arabic glues a conjunction or a preposition to the next word, a number
+// included; a letter that ends a longer word still continues it.
+#[test]
+fn reads_digits_after_an_arabic_proclitic() {
+    assert_eq!(texts("بين ١٢٠ و٣٤٠ وب٥٠٠"), ["١٢٠", "٣٤٠", "٥٠٠"]);
+    assert_eq!(
+        texts("ب١٢٠ ريال ول٣ أيام وك2 و300 ف٤"),
+        ["١٢٠", "٣", "2", "300", "٤"]
+    );
+    assert_eq!(texts("نحو٣ ومو٥"), Vec::<&str>::new());
 }

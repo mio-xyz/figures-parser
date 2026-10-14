@@ -63,6 +63,8 @@ what a text states, with byte spans.
 | Kind | Check | Reader | A reply's item is grounded when |
 |---|---|---|---|
 | [Numbers](#numbers) | `ungrounded_figures` | `numbers`, `extract_numbers` | the corpus carries the same value, in any notation |
+| [Percentages](#percentages) | `ungrounded_percentages` | | a percentage or a printed fraction in the corpus rounds to it |
+| [Arithmetic in prose](#arithmetic-in-prose) | `prose_arithmetic` | | the corpus prints the same value |
 | [Links](#links) | `ungrounded_urls`, `fabricated_urls` | `urls` | the corpus holds the link, or its path under no other host |
 | [Weekdays](#weekdays) | `misdated_weekdays` | | the weekday is the date's own |
 | [Email addresses](#email-addresses) | `ungrounded_emails` | `emails` | the corpus or the prompt carries it, case aside |
@@ -97,6 +99,8 @@ What to expect:
   rounds to them, such as 12,487.
 - **Ambiguous notations match either reading.** "1.250" is 1,250 in Berlin
   and 1.25 in Boston; either value in the corpus grounds it.
+- **A space groups only thousands.** "12 500" is one figure; "1,250,000
+  980,000", as a script prints two values, is two.
 
 `numbers(text)` iterates every reading of every number, and
 `extract_numbers(text)` collects them. Each reading gives its span, its
@@ -111,6 +115,61 @@ assert_eq!((first.text, &*first.integer), ("1.234,50", "1234"));
 assert_eq!((first.fraction.as_deref(), first.currency), (Some("50"), true));
 assert_eq!(first.sign, Sign::Minus);
 ```
+
+### Percentages
+
+`ungrounded_percentages(reply, corpus)` returns the percentages the reply
+states that the corpus does not carry: a ratio worked out in prose, where the
+base is the step that slips.
+
+```rust
+use figures_parser::ungrounded_percentages;
+
+let corpus = "Sign-ups $19.16 per lead, Add2Slack $13.43; overall_rate = 0.1429";
+let reply = "Overall 14.3% converted, and Sign-ups costs 30% more per lead.";
+assert_eq!(ungrounded_percentages(reply, corpus), ["30%"]);
+```
+
+What to expect:
+
+- **A printed value grounds what rounds to it.** "42.67%" grounds "42.7%"
+  and "43%", not "42.6%". A fraction a script printed grounds its percentage:
+  "0.1429" grounds "14.3%".
+- **A bare number never grounds a percentage.** "leads: 30" does not ground
+  "30%"; it may be either operand of the division.
+- **The size is compared.** "fell 30%" is grounded by "-29.9%".
+- **None and all pass.** 0% and 100% are read off a count, with no division.
+- **Every sign and word is read:** "12,5 %", "٥٠٪", "１２％", "12 percent",
+  "12 pour cent", "12 Prozent".
+
+### Arithmetic in prose
+
+`prose_arithmetic(reply, message, corpus)` returns, when the message gave
+four values or more, the figures the reply states that the corpus does not
+print: a sum or an average worked out in the reply rather than in a script.
+The corpus is the whole turn, message included.
+
+```rust
+use figures_parser::prose_arithmetic;
+
+let message = "Q1 12,500, Q2 14,200, Q3 16,100, Q4 18,500: total and average?";
+let reply = "Total 61,300, average 15,325 over the 4 quarters.";
+assert_eq!(prose_arithmetic(reply, message, message), ["61,300", "15,325"]);
+
+// Once a script printed them, they pass.
+let corpus = format!("{message}\ntotal=61300 mean=15325.0");
+assert!(prose_arithmetic(reply, message, &corpus).is_empty());
+```
+
+What to expect:
+
+- **Fewer than four values, nothing is checked.** "10 + 20 + 5" is left to
+  the model.
+- **Any figure past ten is held**, and any decimal or negative one. A count
+  of ten or less, a year, and the pieces of a date or a time are not.
+- **A value must be printed as one.** Trailing zeros aside ("15,325.0" is
+  15325), the corpus has to print the same value: a group of a thousands run
+  ("524" of "$1,524") or a piece of a time does not ground it.
 
 ### Links
 
@@ -244,6 +303,8 @@ npm install @mio-xyz/figures-parser
 const fp = require("@mio-xyz/figures-parser");
 
 fp.ungroundedFigures(reply, corpus);             // ["48,200"]
+fp.ungroundedPercentages(reply, corpus);         // ["30%"]
+fp.proseArithmetic(reply, message, corpus);      // ["61,300"]
 fp.ungroundedUrls(reply, corpus, prompt);        // also fabricatedUrls
 fp.misdatedWeekdays(reply, "2026-10-09");
 fp.ungroundedEmails(reply, corpus, prompt);

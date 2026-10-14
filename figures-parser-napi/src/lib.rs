@@ -236,6 +236,22 @@ pub fn ungrounded_figures(reply: String, corpus: String) -> Vec<String> {
     figures_parser::ungrounded_figures(&reply, &corpus)
 }
 
+/// Percentages in `reply` that no percentage or printed fraction in `corpus`
+/// carries at the places the reply wrote.
+#[napi(catch_unwind)]
+#[must_use]
+pub fn ungrounded_percentages(reply: String, corpus: String) -> Vec<String> {
+    figures_parser::ungrounded_percentages(&reply, &corpus)
+}
+
+/// Figures `reply` worked out in prose that `corpus` does not carry, when
+/// `message` gave four or more values; empty when it gave fewer.
+#[napi(catch_unwind)]
+#[must_use]
+pub fn prose_arithmetic(reply: String, message: String, corpus: String) -> Vec<String> {
+    figures_parser::prose_arithmetic(&reply, &message, &corpus)
+}
+
 /// The parts of `reply` that neither `corpus` nor `prompt` grounds.
 ///
 /// `corpus` is the thread, the request and the run's tool results. The parts

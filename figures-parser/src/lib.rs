@@ -9,7 +9,7 @@
 //!
 //! | Kind | Reader | Comparison |
 //! |---|---|---|
-//! | Numbers | [`numbers`], [`extract_numbers`] | [`ungrounded_figures`] |
+//! | Numbers | [`numbers`], [`extract_numbers`] | [`ungrounded_figures`], [`ungrounded_percentages`], [`prose_arithmetic`] |
 //! | Links | [`urls`] | [`ungrounded_urls`], [`fabricated_urls`] |
 //! | Weekdays beside dates | | [`misdated_weekdays`] |
 //! | Email addresses | [`emails`] | [`ungrounded_emails`] |
@@ -61,7 +61,10 @@ pub use email::{Email, emails, ungrounded_emails};
 pub use id::{Identifier, identifiers, ungrounded_identifiers, unseen_tokens};
 pub use jiff::civil::Date;
 pub use kind::{Kind, UnknownKind};
-pub use number::{Figure, Number, Reading, Sign, extract_numbers, numbers, ungrounded_figures};
+pub use number::{
+    Figure, Number, Reading, Sign, extract_numbers, numbers, prose_arithmetic, ungrounded_figures,
+    ungrounded_percentages,
+};
 pub use url::{Url, fabricated_urls, ungrounded_urls, urls};
 
 /// The README's examples, run as doc tests so they stay true.

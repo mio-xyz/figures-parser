@@ -27,6 +27,34 @@ it stands; a contribution that closes one should remove it here.
 - Approximation in words ("about 12,500", "roughly", "environ", "約") or after
   the figure ("12,500-ish", "12,500 or so") is not read, so such a figure is
   held to its exact value.
+- Three-digit values a plain space lists ("120 340 560") read as one
+  thousands figure, as French writes 120,340,560; the corpus still grounds
+  each of them.
+- A corpus grounds by its digit tokens as printed, before its numbers in
+  words are read: "2 million three hundred thousand" in a corpus grounds
+  2,000,000 as well as 2,300,000. A reply writing it is held to 2,300,000.
+- "half a hundred thousand" is not read, since a hundred does not follow a
+  half; "a hundred thousand" is read from it, as an idiom.
+
+## Percentages
+
+- A percent sign before the figure, as Turkish and Basque write it ("%50"),
+  is not read, nor a percentage in words ("twelve percent"), a per mille
+  ("‰") or percentage points ("12 pp").
+- Only a fraction under one with two places or more grounds a percentage:
+  "1.25" does not ground "125%", nor ".1429" "14.3%".
+- A space-grouped figure before a percentage reads as one ("3 118.380 %" is
+  3,118.38%), as French and SI write it.
+
+## Arithmetic in prose
+
+- A plain-space thousands run counts once per group as operands ("12 500"
+  counts twice), since a list is written the same way, while a reply's is
+  read as one figure.
+- An unsigned result is grounded by the same value printed negative, as a
+  figure is, since a reply may put the sign in words.
+- A result written in words below a hundred is not read, as no number in
+  words below a hundred is.
 
 ## Links
 
