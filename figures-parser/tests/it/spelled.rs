@@ -404,3 +404,227 @@ fn names_digits_and_words_in_the_order_the_reply_wrote_them() {
         ["12,500", "twenty thousand", "99,999"]
     );
 }
+
+/// The numbers `text` states, digits or words: as written, and their value.
+fn stated(text: &str) -> Vec<(String, String)> {
+    extract_numbers(text)
+        .into_iter()
+        .filter(|n| !n.derived)
+        .map(|n| (n.text.to_owned(), n.integer.into_owned()))
+        .collect()
+}
+
+#[test]
+fn digits_lead_only_into_a_hundred_a_scale_a_half_or_a_point() {
+    for (text, read) in [
+        (
+            "On June 30 two hundred thousand people marched",
+            vec![("30", "30"), ("two hundred thousand", "200000")],
+        ),
+        (
+            "Since April 10 two million users",
+            vec![("10", "10"), ("two million", "2000000")],
+        ),
+        (
+            "the 10 two-million-dollar homes",
+            vec![("10", "10"), ("two-million", "2000000")],
+        ),
+        (
+            "at 10:30 two hundred thousand",
+            vec![
+                ("10", "10"),
+                ("30", "30"),
+                ("two hundred thousand", "200000"),
+            ],
+        ),
+        (
+            "2 and a half million",
+            vec![("2 and a half million", "2500000")],
+        ),
+    ] {
+        let read: Vec<_> = read
+            .into_iter()
+            .map(|(w, v)| (w.to_owned(), v.to_owned()))
+            .collect();
+        assert_eq!(stated(text), read, "{text}");
+    }
+    assert_eq!(
+        ungrounded_figures("the 10 two-million-dollar homes", "2,000,000"),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn a_phrase_that_breaks_restarts_after_its_last_complete_prefix() {
+    let reply = "costs between 5 and a hundred thousand dollars";
+    assert_eq!(
+        spelled(reply),
+        [("a hundred thousand".to_owned(), "100000".to_owned())]
+    );
+    assert_eq!(
+        ungrounded_figures(reply, "range 5 to 100"),
+        Vec::<String>::new()
+    );
+    for (text, value) in [
+        ("At one point two hundred thousand people", "200000"),
+        ("one point five hundred thousand", "500000"),
+    ] {
+        assert_eq!(
+            spelled(text),
+            [(
+                text.trim_start_matches("At one point ")
+                    .trim_start_matches("one point ")
+                    .trim_end_matches(" people")
+                    .to_owned(),
+                value.to_owned()
+            )],
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn a_number_word_in_a_compound_is_no_part_of_a_number() {
+    let reply = "We sold 5 million two-bedroom units";
+    assert_eq!(
+        stated(reply),
+        [("5 million".to_owned(), "5000000".to_owned())]
+    );
+    assert_eq!(
+        ungrounded_figures(reply, "units: 5,000,000"),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        spelled("a forty-foot thousand-seat hall and twenty-five thousand fans"),
+        [("twenty-five thousand".to_owned(), "25000".to_owned())]
+    );
+}
+
+#[test]
+fn reads_a_fraction_written_in_two_digit_words() {
+    for (text, value) in [
+        ("deux virgule vingt-cinq millions", "2250000"),
+        ("zwei Komma fünfundzwanzig Millionen", "2250000"),
+        ("dos coma veinticinco millones", "2250000"),
+        ("one point twenty five million", "1250000"),
+        ("un virgule soixante-dix millions", "1700000"),
+        ("one point zero five million", "1050000"),
+        ("zero point five million", "500000"),
+        ("null Komma fünf Millionen", "500000"),
+    ] {
+        assert_eq!(
+            spelled(text),
+            [(text.to_owned(), value.to_owned())],
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn a_half_ends_the_number_as_a_decimal_does() {
+    let reply = "We hit two and a half million three years ago.";
+    assert_eq!(
+        spelled(reply),
+        [("two and a half million".to_owned(), "2500000".to_owned())]
+    );
+    assert_eq!(
+        ungrounded_figures(reply, "users: 2,500,000"),
+        Vec::<String>::new()
+    );
+    for (text, written, value) in [
+        ("half a million two years ago", "half a million", "500000"),
+        (
+            "zweieinhalb Millionen drei Jahre",
+            "zweieinhalb Millionen",
+            "2500000",
+        ),
+        ("two million three years ago", "two million", "2000000"),
+        ("three thousand twenty", "three thousand twenty", "3020"),
+        (
+            "two million three hundred",
+            "two million three hundred",
+            "2000300",
+        ),
+    ] {
+        assert_eq!(
+            spelled(text),
+            [(written.to_owned(), value.to_owned())],
+            "{text}"
+        );
+    }
+    assert_eq!(
+        stated("2 and a half million three years ago"),
+        [
+            ("2 and a half million".to_owned(), "2500000".to_owned()),
+            ("three".to_owned(), "3".to_owned())
+        ][..1]
+    );
+}
+
+#[test]
+fn a_half_opened_by_an_article_is_a_count() {
+    for reply in [
+        "we reached a half million users",
+        "we reached half a million users",
+    ] {
+        assert_eq!(
+            ungrounded_figures(reply, "users: 480,000"),
+            Vec::<String>::new(),
+            "{reply}"
+        );
+        assert_eq!(
+            ungrounded_figures(reply, "users: 380,000").len(),
+            1,
+            "{reply}"
+        );
+    }
+    assert_eq!(
+        ungrounded_figures("thanks a million", ""),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn digits_lead_the_words_where_the_scanner_reads_them_as_a_figure() {
+    for text in ["x_2 and a half million", "売上2 and a half million"] {
+        assert_eq!(
+            stated(text),
+            [("2 and a half million".to_owned(), "2500000".to_owned())],
+            "{text}"
+        );
+    }
+    assert_eq!(
+        stated("p2 and a half million"),
+        [("a half million".to_owned(), "500000".to_owned())]
+    );
+}
+
+#[test]
+fn reads_a_fraction_written_in_digits_after_the_point() {
+    for (text, value) in [
+        ("2 point 5 million", "2500000"),
+        ("2 point 25 million", "2250000"),
+        ("1 point 05 million", "1050000"),
+    ] {
+        assert_eq!(
+            stated(text),
+            [(text.to_owned(), value.to_owned())],
+            "{text}"
+        );
+    }
+    assert_eq!(
+        ungrounded_figures("Revenue hit 2 point 5 million.", "revenue: 2,500,000"),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn zero_opens_only_a_decimal() {
+    assert_eq!(
+        spelled("zero hundred thousand"),
+        [("hundred thousand".to_owned(), "100000".to_owned())]
+    );
+    for text in ["twenty zero thousand", "cero mil"] {
+        assert_eq!(spelled(text), [], "{text}");
+    }
+}

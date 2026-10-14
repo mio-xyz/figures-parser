@@ -1,14 +1,18 @@
 //! The number kind: digits in any script, grouped or decimal, and what a
 //! reading of one is held to.
 
+mod arithmetic;
 pub mod digits;
 mod ground;
+mod percent;
 mod readings;
 mod scale;
 pub mod scan;
 mod spelled;
 
+pub use arithmetic::prose_arithmetic;
 pub use ground::ungrounded_figures;
+pub use percent::ungrounded_percentages;
 
 use std::borrow::Cow;
 use std::collections::VecDeque;
@@ -154,7 +158,7 @@ pub struct Numbers<'a> {
     /// The numeric tokens not yet read.
     tokens: Peekable<Tokens<'a>>,
     /// The numbers written in words not yet read.
-    words: Peekable<SpelledNumbers<'a>>,
+    words: Words<'a>,
     /// The digits a reading joins, converts or scales.
     scratch: Scratch,
     /// The current token's readings not yet yielded.
@@ -176,7 +180,7 @@ pub fn numbers(text: &str) -> Numbers<'_> {
     Numbers {
         text,
         tokens: tokens(text).peekable(),
-        words: spelled(text).peekable(),
+        words: Words::new(text),
         scratch: Scratch::new(),
         pending: VecDeque::new(),
     }
@@ -191,28 +195,77 @@ impl<'a> Iterator for Numbers<'a> {
                 return Some(number);
             }
             let token_start = self.tokens.peek().map(|token| token.start);
-            if let Some(number) = self
-                .words
-                .next_if(|n| token_start.is_none_or(|start| n.span.start < start))
-            {
+            if let Some(number) = self.words.before(token_start) {
                 return Some(self.scratch.spelled(self.text, &number).into());
             }
             let token = self.tokens.next()?;
-            if let Some(number) = self.words.next_if(|n| n.span.start == token.start)
-                && continues(&number, &token)
-            {
-                return Some(self.scratch.spelled(self.text, &number).into());
+            match self.words.at(&token) {
+                Standing::For(number) => {
+                    return Some(self.scratch.spelled(self.text, &number).into());
+                }
+                Standing::Covered => {}
+                Standing::Alone => {
+                    token.for_each_reading(&mut self.scratch, |r| self.pending.push_back(r.into()));
+                }
             }
-            token.for_each_reading(&mut self.scratch, |r| self.pending.push_back(r.into()));
         }
     }
 }
 
-/// Whether `number`, written in words after the digits of `token`, goes on
-/// past what the token reads ("2 million three hundred thousand"), and so
-/// stands for it; one that ends with it ("3 mil millones") repeats it.
-const fn continues(number: &Spelled, token: &Token<'_>) -> bool {
-    number.span.end > token.start + token.written.len()
+/// The numbers written in words in a text, paired with its numeric tokens.
+#[derive(Debug)]
+struct Words<'a> {
+    /// The numbers not yet given out.
+    numbers: Peekable<SpelledNumbers<'a>>,
+    /// The byte the last number given out ends at.
+    covered: usize,
+}
+
+/// What a numeric token stands as beside the numbers in words.
+enum Standing {
+    /// On its own.
+    Alone,
+    /// Inside a number in words already given out ("5 million" of "2 point
+    /// 5 million").
+    Covered,
+    /// At the start of a number in words that goes on past what the token
+    /// reads ("2 million three hundred thousand"), which stands for it; one
+    /// that ends with the token ("3 mil millones") repeats it, and is
+    /// dropped.
+    For(Spelled),
+}
+
+impl<'a> Words<'a> {
+    /// The numbers `text` writes in words.
+    fn new(text: &'a str) -> Self {
+        Self {
+            numbers: spelled(text).peekable(),
+            covered: 0,
+        }
+    }
+
+    /// The next number, when it starts before byte `at`; any, for None.
+    fn before(&mut self, at: Option<usize>) -> Option<Spelled> {
+        let number = self
+            .numbers
+            .next_if(|n| at.is_none_or(|at| n.span.start < at))?;
+        self.covered = number.span.end;
+        Some(number)
+    }
+
+    /// What `token` stands as.
+    fn at(&mut self, token: &Token<'_>) -> Standing {
+        if token.start < self.covered {
+            return Standing::Covered;
+        }
+        match self.numbers.next_if(|n| n.span.start == token.start) {
+            Some(number) if number.span.end > token.end() => {
+                self.covered = number.span.end;
+                Standing::For(number)
+            }
+            _ => Standing::Alone,
+        }
+    }
 }
 
 /// Calls `f` with every reading of `text` in order of appearance: those of
@@ -223,20 +276,18 @@ pub(crate) fn for_each_reading_in<'a>(
     scratch: &mut Scratch,
     mut f: impl FnMut(Reading<'a, '_>),
 ) {
-    let mut words = spelled(text).peekable();
+    let mut words = Words::new(text);
     for token in tokens {
-        while let Some(number) = words.next_if(|n| n.span.start < token.start) {
+        while let Some(number) = words.before(Some(token.start)) {
             f(scratch.spelled(text, &number));
         }
-        if let Some(number) = words.next_if(|n| n.span.start == token.start)
-            && continues(&number, &token)
-        {
-            f(scratch.spelled(text, &number));
-            continue;
+        match words.at(&token) {
+            Standing::For(number) => f(scratch.spelled(text, &number)),
+            Standing::Covered => {}
+            Standing::Alone => token.for_each_reading(scratch, &mut f),
         }
-        token.for_each_reading(scratch, &mut f);
     }
-    for number in words {
+    while let Some(number) = words.before(None) {
         f(scratch.spelled(text, &number));
     }
 }
@@ -308,6 +359,15 @@ pub enum Value {
         /// The fractional digits in ASCII.
         fraction: String,
     },
+    /// A result worked out in prose, grounded only by a printed value equal
+    /// to it, a fraction's trailing zeros aside ("15,325.0" is 15325).
+    Exact {
+        /// The integer part in ASCII digits.
+        integer: String,
+        /// The fractional digits in ASCII, trailing zeros cut; empty for a
+        /// whole number.
+        fraction: String,
+    },
 }
 
 /// The values that round to an approximate figure: those whose digits,
@@ -327,7 +387,9 @@ impl Key {
     #[must_use]
     pub fn integer(&self) -> &str {
         match &self.value {
-            Value::Integer(integer) | Value::Decimal { integer, .. } => integer,
+            Value::Integer(integer)
+            | Value::Decimal { integer, .. }
+            | Value::Exact { integer, .. } => integer,
         }
     }
 
@@ -372,6 +434,10 @@ impl Value {
                     && reading
                         .fraction
                         .is_some_and(|printed| printed.starts_with(fraction.as_str()))
+            }
+            Self::Exact { integer, fraction } => {
+                integer == reading.integer
+                    && reading.fraction.unwrap_or_default().trim_end_matches('0') == fraction
             }
         }
     }
@@ -438,7 +504,7 @@ impl Around {
 
 /// `integer.fraction` times `10^scale`, the fraction cut or padded with zeros
 /// to `scale` places; None past `u128`. Both parts are ASCII digits.
-fn scaled(integer: &str, fraction: Option<&str>, scale: u32) -> Option<u128> {
+pub(super) fn scaled(integer: &str, fraction: Option<&str>, scale: u32) -> Option<u128> {
     let mut value = integer.parse::<u128>().ok()?;
     let mut places = fraction.unwrap_or_default().bytes();
     for _ in 0..scale {
@@ -479,13 +545,54 @@ impl Reading<'_, '_> {
             }
             Value::Integer(self.integer.to_owned())
         };
-        Some(Key {
+        Some(self.key(value))
+    }
+
+    /// The key a reply states with this reading as a result it worked out
+    /// itself, or None when it is not one: a derived reading, a whole number
+    /// of ten or less, which is a count ("3 options"), or a year ("2026"). A
+    /// decimal or a negative is always one, "-0" aside. Its value is matched
+    /// exactly.
+    #[must_use]
+    pub fn result(&self) -> Option<Key> {
+        if self.derived {
+            return None;
+        }
+        let count = || self.integer.parse::<u128>().is_ok_and(|n| n <= 10);
+        let year = || {
+            !self.grouped
+                && self.integer.len() == 4
+                && self
+                    .integer
+                    .parse::<u16>()
+                    .is_ok_and(|n| (1900..=2100).contains(&n))
+        };
+        let negative = self.sign == Sign::Minus && !self.integer.bytes().all(|b| b == b'0');
+        if self.fraction.is_none() && !negative && (count() || year()) {
+            return None;
+        }
+        Some(
+            self.key(Value::Exact {
+                integer: self.integer.to_owned(),
+                fraction: self
+                    .fraction
+                    .unwrap_or_default()
+                    .trim_end_matches('0')
+                    .to_owned(),
+            }),
+        )
+    }
+
+    /// The key this reading states with `value`: its sign as stated, and for
+    /// an approximate reading the values that round to it.
+    fn key(&self, value: Value) -> Key {
+        Key {
             value,
             sign: self.sign.stated(),
             around: self
                 .approximate
                 .then(|| Around::of(self.integer, self.fraction))
                 .flatten(),
-        })
+        }
     }
 }

@@ -16,6 +16,10 @@ pub struct Scale {
     /// The byte it ends at, past the sections written after a Han
     /// multiplier ("5000万" in "3億5000万").
     pub end: usize,
+    /// What those sections add to the scaled digits; 0 without them. The
+    /// sections stay below the head's multiplier, so what fits a `u128`
+    /// with the head fits here, and the rest is dropped with its head.
+    pub rest: u64,
 }
 
 /// When an abbreviation is read as a scale.
@@ -107,96 +111,154 @@ const fn han_magnitude(c: char) -> Option<(u32, bool)> {
     }
 }
 
+/// The Han multipliers glued after a figure's digits: a small one (十, 百,
+/// 千), if any, then the large ones (万, 億, 兆).
+#[derive(Debug, Clone, Copy)]
+struct Multipliers {
+    /// The power of the small one; 0 without one.
+    small: u32,
+    /// The powers of the large ones added; 0 without one.
+    large: u32,
+    /// The byte they end at.
+    end: usize,
+}
+
+impl Multipliers {
+    /// The power of ten they multiply by together.
+    const fn magnitude(&self) -> u32 {
+        self.small.saturating_add(self.large)
+    }
+}
+
 /// The Han multipliers glued after the digits `digits` ("1.2万", "3億",
-/// "5千万", "2万亿"), and, after digits alone, the sections of digits and
-/// smaller multipliers written after them ("3億5000万", "1億2345万6789").
+/// "5千万", "2万亿"), and, after digits alone, the sections written after
+/// them ("3億5000万", "1億2345万6789", "1千200万"). The sections are kept
+/// only when the whole fits the integer type the readings add them in.
 fn han_scale(text: &str, digits: Range<usize>) -> Option<Scale> {
-    let (magnitude, _, end) = han_head(text, digits)?;
-    Some(Scale { magnitude, end })
-}
-
-/// The power of the Han multipliers after the digits `digits`, what the
-/// sections after them add, and the byte those end at; no sections after a
-/// head that is not digits alone.
-fn han_head(text: &str, digits: Range<usize>) -> Option<(u32, u128, usize)> {
-    let (magnitude, at) = han_multipliers(text, digits.end)?;
-    let whole = text
-        .get(digits)
-        .is_some_and(|head| head.chars().all(|c| digit_value(c).is_some()));
-    let (rest, end) = if whole {
-        han_sections(text, at, magnitude)
-    } else {
-        (0, at)
+    let head = han_multipliers(text, digits.end)?;
+    let plain = Scale {
+        magnitude: head.magnitude(),
+        end: head.end,
+        rest: 0,
     };
-    Some((magnitude, rest, end))
-}
-
-/// What the sections a scaled figure writes after its Han multiplier add to
-/// it ("5000万" in "3億5000万"), its digits being `written`'s first
-/// `head_len` bytes; 0 without them.
-pub(super) fn han_rest(written: &str, head_len: usize) -> u128 {
-    han_head(written, 0..head_len).map_or(0, |(_, rest, _)| rest)
+    let whole = text
+        .get(digits.clone())
+        .is_some_and(|run| run.chars().all(|c| digit_value(c).is_some()));
+    let Some((rest, lift, end)) = whole.then(|| han_sections(text, head)).flatten() else {
+        return Some(plain);
+    };
+    let magnitude = head.magnitude().saturating_add(lift);
+    let fits = section_digits(text, digits.start)
+        .and_then(|(value, ..)| 10_u128.checked_pow(magnitude)?.checked_mul(value))
+        .and_then(|value| value.checked_add(rest))
+        .is_some();
+    match u64::try_from(rest) {
+        Ok(rest) if fits => Some(Scale {
+            magnitude,
+            end,
+            rest,
+        }),
+        _ => Some(plain),
+    }
 }
 
 /// The Han multipliers glued after byte `end`: the small one, if any, then
-/// the large ones; their powers added, and the byte they end at.
-fn han_multipliers(text: &str, end: usize) -> Option<(u32, usize)> {
-    let mut magnitude = 0_u32;
-    let mut at = end;
-    let mut large_seen = false;
-    while let Some(c) = char_at(text, at) {
+/// the large ones.
+fn han_multipliers(text: &str, end: usize) -> Option<Multipliers> {
+    let mut found = Multipliers {
+        small: 0,
+        large: 0,
+        end,
+    };
+    while let Some(c) = char_at(text, found.end) {
         let Some((power, large)) = han_magnitude(c) else {
             break;
         };
-        if !large && (large_seen || magnitude > 0) {
+        if large {
+            found.large = found.large.saturating_add(power);
+        } else if found.magnitude() > 0 {
             break;
+        } else {
+            found.small = power;
         }
-        large_seen |= large;
-        magnitude = magnitude.saturating_add(power);
-        at = at.saturating_add(c.len_utf8());
+        found.end = found.end.saturating_add(c.len_utf8());
     }
-    (magnitude > 0).then_some((magnitude, at))
+    (found.magnitude() > 0).then_some(found)
 }
 
-/// The sections written from byte `at` after a Han multiplier of power
-/// `power`: digits, each run with smaller multipliers than the one before
-/// it, and at the end a run of digits alone after 万 or a smaller one
-/// ("2万5000", "1億2345万6789"). Each must stay below the multiplier before
-/// it. A last run of one digit is not read, since "3万5" is spoken shorthand
-/// for 35,000, nor one after a larger multiplier, whose places a text fills
-/// through 万 ("3億5000" is short for "3億5000万"). Returns what the sections
-/// add and the byte they end at.
-fn han_sections(text: &str, mut at: usize, mut power: u32) -> (u128, usize) {
+/// The sections written after the multipliers `head` of whole digits: runs
+/// of digits, each with multipliers below the one before it, and at the end
+/// a run of digits alone of two digits or more ("2万5000", "1億2345万6789"),
+/// since "3万5" is spoken shorthand for 35,000. A section after 億 or 兆
+/// that stops short of the myriad is such shorthand too, and fills the
+/// place a text writes through 万: "3億5千" and "3億5000" are 3億5000万. A
+/// large multiplier after small ones multiplies all before it: "1千200万" is
+/// 1,200万. Returns what the sections add to the scaled digits, the power
+/// that multiplier adds to the head's, and the byte the sections end at;
+/// None without one.
+fn han_sections(text: &str, head: Multipliers) -> Option<(u128, u32, usize)> {
+    let pow = |power: u32| 10_u128.checked_pow(power);
     let mut added = 0_u128;
+    let mut lift = 0_u32;
+    let mut at = head.end;
+    let mut power = head.magnitude();
+    let mut large = head.large;
     while let Some((value, digits, digits_end)) = section_digits(text, at) {
-        let section = match han_multipliers(text, digits_end) {
-            Some((magnitude, end)) if magnitude < power => {
-                let section = 10_u128
-                    .checked_pow(magnitude)
-                    .and_then(|scale| value.checked_mul(scale));
-                section.map(|section| (section, magnitude, end))
-            }
+        let found = han_multipliers(text, digits_end);
+        // The places below the last large multiplier that a section short
+        // of the myriad leaves unwritten.
+        let short = large.saturating_sub(4);
+        if let Some(m) = found
+            && m.large > 0
+            && large == 0
+        {
+            let group = pow(m.small)
+                .and_then(|scale| value.checked_mul(scale))
+                .filter(|&group| pow(power).is_some_and(|limit| group < limit));
+            let Some(lifted) = group
+                .and_then(|group| added.checked_add(group))
+                .and_then(|group| pow(m.large)?.checked_mul(group))
+            else {
+                break;
+            };
+            added = lifted;
+            lift = m.large;
+            power = m.large;
+            large = m.large;
+            at = m.end;
+            continue;
+        }
+        let section = match found {
+            Some(m) if m.magnitude() < power && (m.large > 0 || short == 0) => pow(m.magnitude())
+                .and_then(|scale| value.checked_mul(scale))
+                .map(|section| (section, m.magnitude(), m.large, m.end)),
+            Some(m) if m.large == 0 && m.magnitude() < power => pow(m.small.saturating_add(short))
+                .and_then(|scale| value.checked_mul(scale))
+                .map(|section| (section, 0, large, m.end)),
             Some(_) => None,
-            None => (digits >= 2 && power <= 4 && !continues_figure(text, digits_end))
-                .then_some((value, 0, digits_end)),
+            None => (digits >= 2 && !continues_figure(text, digits_end))
+                .then(|| pow(short).and_then(|scale| value.checked_mul(scale)))
+                .flatten()
+                .map(|section| (section, 0, large, digits_end)),
         };
-        let Some((section, magnitude, end)) = section else {
+        let Some((section, next_power, next_large, end)) = section else {
             break;
         };
-        let below = 10_u128
-            .checked_pow(power)
-            .is_some_and(|limit| section < limit);
-        let Some(sum) = added.checked_add(section).filter(|_| below) else {
+        let Some(sum) = pow(power)
+            .filter(|&limit| section < limit)
+            .and_then(|_| added.checked_add(section))
+        else {
             break;
         };
         added = sum;
         at = end;
-        power = magnitude;
+        power = next_power;
+        large = next_large;
         if power == 0 {
             break;
         }
     }
-    (added, at)
+    (at > head.end).then_some((added, lift, at))
 }
 
 /// The digits written from byte `at`, a comma allowed before each group of
@@ -239,7 +301,7 @@ fn grouped_after(text: &str, at: usize) -> bool {
 
 /// Whether the figure goes on at byte `end`: a word letter, or a symbol
 /// before another digit ("2万5000.5", "2万5000kg").
-fn continues_figure(text: &str, end: usize) -> bool {
+pub(super) fn continues_figure(text: &str, end: usize) -> bool {
     char_at(text, end).is_some_and(|c| {
         is_boundary(c)
             || (is_symbol(c)
@@ -390,6 +452,7 @@ pub(super) fn scale_after(text: &str, start: usize, end: usize, next: char) -> O
         return Some(millions.unwrap_or(Scale {
             magnitude,
             end: word_stop,
+            rest: 0,
         }));
     }
     let (magnitude, needs) = abbreviation(word)?;
@@ -403,6 +466,7 @@ pub(super) fn scale_after(text: &str, start: usize, end: usize, next: char) -> O
     reads.then_some(Scale {
         magnitude,
         end: word_stop,
+        rest: 0,
     })
 }
 
@@ -415,5 +479,6 @@ fn thousand_million(text: &str, end: usize) -> Option<Scale> {
     Some(Scale {
         magnitude: lookup(THOUSAND_MILLION, text.get(start..stop)?)?,
         end: stop,
+        rest: 0,
     })
 }

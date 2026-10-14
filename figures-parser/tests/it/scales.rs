@@ -192,10 +192,8 @@ fn ends_the_sections_where_they_stop_fitting_below_the_multiplier() {
         ("2万5000.5", "2万", "20000"),
         ("2万5000kg", "2万", "20000"),
         ("3万〜5万", "3万", "30000"),
-        ("3億5000", "3億", "300000000"),
         ("1.2万25", "1.2万", "12000"),
         ("1,250万5000", "1,250万", "12500000"),
-        ("5千万3000", "5千万", "50000000"),
     ] {
         assert_eq!(
             first(text),
@@ -218,5 +216,63 @@ fn grounds_a_han_figure_written_in_sections_as_one_value() {
     assert_eq!(
         ungrounded_figures("売上高は3億5000万円でした。", "revenue: 300,000,000"),
         ["3億5000万"]
+    );
+}
+
+#[test]
+fn a_small_multiplier_before_a_large_one_scales_the_whole() {
+    for (text, written, integer) in [
+        ("売上1千200万円", "1千200万", "12000000"),
+        ("2千500億円", "2千500億", "250000000000"),
+        ("3千5百万円", "3千5百万", "35000000"),
+        ("1千2百50万", "1千2百50万", "12500000"),
+        ("1千200万3000", "1千200万3000", "12003000"),
+        ("5千万3000", "5千万3000", "50003000"),
+        ("1億2千万3000", "1億2千万3000", "120003000"),
+    ] {
+        assert_eq!(
+            first(text),
+            Some((written.to_owned(), integer.to_owned(), None, true)),
+            "{text}"
+        );
+    }
+    assert_eq!(
+        ungrounded_figures("Revenue 1千200万円", "revenue: 12000000"),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn a_section_short_of_the_myriad_after_a_hundred_million_fills_it() {
+    for (text, written, integer) in [
+        ("3億5千", "3億5千", "350000000"),
+        ("3億5000", "3億5000", "350000000"),
+        ("1兆2千", "1兆2千", "1200000000000"),
+        ("1兆2000", "1兆2000", "1200000000000"),
+        ("3億5千2百", "3億5千", "350000000"),
+    ] {
+        assert_eq!(
+            first(text),
+            Some((written.to_owned(), integer.to_owned(), None, true)),
+            "{text}"
+        );
+    }
+    assert_eq!(
+        ungrounded_figures("3億5千円", "revenue: 350,000,000"),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn a_han_figure_past_the_integer_type_keeps_its_head() {
+    let text = "12345678901234567890123456789012345678万5000";
+    assert_eq!(
+        first(text),
+        Some((
+            "12345678901234567890123456789012345678万".to_owned(),
+            "123456789012345678901234567890123456780000".to_owned(),
+            None,
+            true
+        ))
     );
 }

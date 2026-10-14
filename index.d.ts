@@ -125,6 +125,12 @@ export interface NumberValue {
 }
 
 /**
+ * Figures `reply` worked out in prose that `corpus` does not carry, when
+ * `message` gave four or more values; empty when it gave fewer.
+ */
+export declare function proseArithmetic(reply: string, message: string, corpus: string): Array<string>
+
+/**
  * The durations in `reply`, once each, whose length neither `corpus` nor
  * `prompt` carries, written out or as an API gives it.
  */
@@ -145,6 +151,12 @@ export declare function ungroundedFigures(reply: string, corpus: string): Array<
  * `corpus` carries another of its prefix.
  */
 export declare function ungroundedIdentifiers(reply: string, corpus: string, prompt?: string | undefined | null): Array<string>
+
+/**
+ * Percentages in `reply` that no percentage or printed fraction in `corpus`
+ * carries at the places the reply wrote.
+ */
+export declare function ungroundedPercentages(reply: string, corpus: string): Array<string>
 
 /**
  * The parts of `reply` that neither `corpus` nor `prompt` grounds.

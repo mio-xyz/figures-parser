@@ -33,9 +33,40 @@ pub const fn is_symbol(c: char) -> bool {
     )
 }
 
+/// Whether the digits at `start` of `text` continue the word that `prev`,
+/// the character before them, ends ("p1789368220119"): a word letter or a
+/// digit, but not an Arabic proclitic standing as a word of its own.
+#[inline]
+pub(super) fn continues_word(text: &str, start: usize, prev: char) -> bool {
+    is_boundary(prev) && (prev.is_ascii() || !is_proclitic(text, start, prev))
+}
+
 /// Whether `c` is a decimal digit of any script.
-fn is_digit(c: char) -> bool {
+pub(super) fn is_digit(c: char) -> bool {
     digit_value(c).is_some()
+}
+
+/// Whether `c` joins the pieces of a date, a time or a range ("2026-10-01",
+/// "12:30", "10/2026", "10-12").
+pub(super) const fn joins_pieces(c: char) -> bool {
+    matches!(c, '-' | '/' | ':')
+}
+
+/// Whether the digits at `start` of `text` follow the piece of a date or a
+/// time: a joiner with a digit before it ("2026-10-05 837").
+fn after_piece(text: &str, start: usize) -> bool {
+    char_before(text, start).is_some_and(|p| {
+        joins_pieces(p)
+            && char_before(text, start.saturating_sub(p.len_utf8())).is_some_and(is_digit)
+    })
+}
+
+/// Where the digit run ending at byte `end` of `text` starts.
+pub(super) fn digits_start(text: &str, mut end: usize) -> usize {
+    while let Some(c) = char_before(text, end).filter(|&c| is_digit(c)) {
+        end = end.saturating_sub(c.len_utf8());
+    }
+    end
 }
 
 /// Whether `c` ends a token: another digit, or a letter of a word.
@@ -47,6 +78,25 @@ pub(super) fn is_boundary(c: char) -> bool {
         return true;
     }
     is_letter(c) && !is_unspaced_script(c)
+}
+
+/// Whether `prev`, the letter right before the digits at `start` of `text`,
+/// is an Arabic conjunction or preposition glued to them as Arabic writes it
+/// ("و٣٤٠", and 340; "ب١٢٠", for 120; "وب٥٠٠", and for 500), standing as a
+/// word of its own: the digits are then a number, not part of a word.
+fn is_proclitic(text: &str, start: usize, prev: char) -> bool {
+    let is_conjunction = |c: char| matches!(c, '\u{648}' | '\u{641}');
+    if !(is_conjunction(prev) || matches!(prev, '\u{628}' | '\u{644}' | '\u{643}')) {
+        return false;
+    }
+    let at = start.saturating_sub(prev.len_utf8());
+    match char_before(text, at) {
+        Some(c) if is_conjunction(c) => {
+            !char_before(text, at.saturating_sub(c.len_utf8())).is_some_and(is_letter)
+        }
+        Some(c) => !is_letter(c),
+        None => true,
+    }
 }
 
 /// Whether `c` is a currency sign.
@@ -118,7 +168,7 @@ fn before_marks(text: &str, mut at: usize) -> usize {
 }
 
 /// The byte just past the bidi marks right after `at`.
-fn after_marks(text: &str, mut at: usize) -> usize {
+pub(super) fn after_marks(text: &str, mut at: usize) -> usize {
     while let Some(c) = char_at(text, at).filter(|&c| is_bidi_mark(c)) {
         at = at.saturating_add(c.len_utf8());
     }
@@ -327,6 +377,9 @@ pub struct Token<'a> {
     /// The power of ten a scale word after the digits multiplies it by
     /// ("1.2 million", "12.5K"); 0 without one.
     pub magnitude: u32,
+    /// What the sections written after a Han multiplier add to the scaled
+    /// digits ("5000万" in "3億5000万"); 0 without them.
+    pub(super) rest: u64,
     /// The token through its scale word ("1.2 million"), and through the
     /// sections after a Han multiplier ("3億5000万"); the same as `text`
     /// without one.
@@ -364,6 +417,9 @@ pub struct Tokens<'a> {
 /// from other digits and from the letters of a word: the inside of an id
 /// ("p1789368220119"), a version ("v3.1") or a unit suffix ("12.5K") is not
 /// one. A dash is not a symbol, so a date ("2026-11-05") is read as its parts.
+/// A plain space joins groups only into thousands ("12 500", "1 128 616,50"),
+/// so figures a space sets side by side stay apart ("1,250,000 980,000",
+/// "2026 25%").
 #[must_use]
 pub const fn tokens(text: &str) -> Tokens<'_> {
     Tokens {
@@ -440,7 +496,7 @@ impl<'a> Iterator for Tokens<'a> {
             let start = self.next_digit(self.pos)?;
             let prev = char_before(text, start);
             // Digits that continue a word ("p1789368220119") are not a token.
-            if prev.is_some_and(is_boundary) {
+            if prev.is_some_and(|p| continues_word(text, start, p)) {
                 self.pos = self.digits_end(start);
                 continue;
             }
@@ -448,13 +504,35 @@ impl<'a> Iterator for Tokens<'a> {
             let mut next = char_at(text, end);
             // Where the last joining symbol stands, once there is one.
             let mut last_symbol: Option<usize> = None;
+            // Up to four code points of a group, enough to tell three.
+            let len = |from: usize, to: usize| {
+                text.get(from..to).map_or(0, |g| g.chars().take(4).count())
+            };
+            // Whether a plain space may open thousands grouping: a lead of up
+            // to three digits that is no piece of a date or a time.
+            let lead_end = end;
+            let spaced_lead = || len(start, lead_end) <= 3 && !after_piece(text, start);
+            // Whether every symbol so far is a plain space joining groups of
+            // three, so one may still join the next.
+            let mut spaced_thousands = true;
             // Extend over `symbol digits+` while a single symbol joins two groups.
             while let Some(s) = next
                 && is_symbol(s)
                 && char_at(text, end + s.len_utf8()).is_some_and(is_digit)
             {
+                if s == ' ' && !(spaced_thousands && spaced_lead()) {
+                    break;
+                }
+                let group_end = self.digits_end(end + s.len_utf8());
+                if s == ' ' {
+                    if len(end + 1, group_end) != 3 {
+                        break;
+                    }
+                } else {
+                    spaced_thousands = false;
+                }
                 last_symbol = Some(end);
-                end = self.digits_end(end + s.len_utf8());
+                end = group_end;
                 next = char_at(text, end);
             }
             self.pos = end;
@@ -497,6 +575,7 @@ impl<'a> Iterator for Tokens<'a> {
                 sign: prefix.sign,
                 approximate: prefix.approximate,
                 magnitude: scale.map_or(0, |scale| scale.magnitude),
+                rest: scale.map_or(0, |scale| scale.rest),
                 written,
                 full: if prefix.from == start {
                     written

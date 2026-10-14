@@ -10,8 +10,8 @@ use figures_parser::number::scan::{Scratch, tokens};
 use figures_parser::utf16::{Utf16Cursor, units};
 use figures_parser::{
     Date, durations, emails, extract_numbers, fabricated_urls, identifiers, misdated_weekdays,
-    numbers, ungrounded_durations, ungrounded_emails, ungrounded_figures, ungrounded_identifiers,
-    ungrounded_urls, unseen_tokens, urls,
+    numbers, prose_arithmetic, ungrounded_durations, ungrounded_emails, ungrounded_figures,
+    ungrounded_identifiers, ungrounded_percentages, ungrounded_urls, unseen_tokens, urls,
 };
 
 /// Calls every entry point on the three texts, and returns a sum the
@@ -45,6 +45,10 @@ fn exercise(reply: &str, corpus: &str, prompt: &str) -> usize {
         + misdated_weekdays(corpus, today_for(corpus)).len();
     n + ungrounded_figures(reply, corpus).len()
         + ungrounded_figures(corpus, reply).len()
+        + ungrounded_percentages(reply, corpus).len()
+        + ungrounded_percentages(corpus, reply).len()
+        + prose_arithmetic(reply, prompt, corpus).len()
+        + prose_arithmetic(corpus, reply, prompt).len()
         + fabricated_urls(reply, corpus).len()
         + fabricated_urls(corpus, reply).len()
         + ungrounded_urls(reply, corpus, prompt).len()
@@ -83,7 +87,9 @@ fn check(reply: &str, corpus: &str, prompt: &str) {
 #[ignore = "slow: run with --ignored in the panic-check profile"]
 fn every_code_point_beside_a_figure_and_a_link() {
     for c in '\0'..=char::MAX {
-        let figure = format!("{c}1{c}2,500{c} {c}$9.99{c}USD 3{c}.{c}4 ١{c}٢ {c}");
+        let figure = format!(
+            "{c}1{c}2,500{c} {c}$9.99{c}USD 3{c}.{c}4 ١{c}٢ {c} 12{c}% 0{c},25 7 {c}percent و{c}٣ 1:{c}2 {c}"
+        );
         let dated = format!(
             "Fri{c} 26 Sep{c} lundi {c}29/09 9月{c}26日({c}) 星期{c}五 9月26日 mar. ago.{c} 11"
         );
@@ -274,6 +280,24 @@ const POOL: &[&str] = &[
     "v",
     "FY",
     "2026-11-05",
+    "%",
+    "٪",
+    "％",
+    "﹪",
+    " %",
+    " percent",
+    " per cent",
+    " pour cent",
+    "Prozent",
+    "0.1429",
+    "0,25",
+    "100%",
+    "و",
+    "وب",
+    "ل",
+    "12:30",
+    "10/2026",
+    "4 + ",
 ];
 
 /// A xorshift generator, seeded so a failure reproduces.

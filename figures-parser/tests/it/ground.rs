@@ -181,6 +181,19 @@ fn grounds_a_space_grouped_figure_by_a_table_that_printed_it_either_way() {
     );
 }
 
+// A script's print() sets values side by side with one space.
+#[test]
+fn figures_a_space_sets_side_by_side_are_read_apart() {
+    assert_eq!(
+        ungrounded_figures("Q2 was 980,000.", "Revenue 1,250,000 980,000"),
+        none()
+    );
+    assert_eq!(
+        ungrounded_figures("In 2026 125,000 users signed up.", "users: 120000"),
+        ["125,000"]
+    );
+}
+
 #[test]
 fn never_joins_groups_that_are_not_exact_thousands() {
     assert_eq!(

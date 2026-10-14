@@ -5,8 +5,9 @@ use std::hint::black_box;
 
 use figures_parser::number::scan::tokens;
 use figures_parser::{
-    Date, extract_numbers, misdated_weekdays, ungrounded_durations, ungrounded_emails,
-    ungrounded_figures, ungrounded_identifiers, ungrounded_urls, urls,
+    Date, extract_numbers, misdated_weekdays, prose_arithmetic, ungrounded_durations,
+    ungrounded_emails, ungrounded_figures, ungrounded_identifiers, ungrounded_percentages,
+    ungrounded_urls, urls,
 };
 
 /// The size every corpus is built to, in bytes.
@@ -51,7 +52,7 @@ pub struct Case {
 pub type Path<'c> = (&'static str, Box<dyn Fn() -> usize + 'c>);
 
 /// The hot paths both benches measure over `case`.
-pub fn paths(case: &Case) -> [Path<'_>; 11] {
+pub fn paths(case: &Case) -> [Path<'_>; 13] {
     let text = case.text.as_str();
     [
         ("tokens", Box::new(move || tokens(black_box(text)).count())),
@@ -91,6 +92,16 @@ pub fn paths(case: &Case) -> [Path<'_>; 11] {
         (
             "misdated_weekdays",
             Box::new(move || misdated_weekdays(black_box(text), Date::constant(2026, 10, 2)).len()),
+        ),
+        (
+            "ungrounded_percentages",
+            Box::new(move || ungrounded_percentages(PERCENT_REPLY, black_box(text)).len()),
+        ),
+        (
+            "prose_arithmetic",
+            Box::new(move || {
+                prose_arithmetic(UNGROUNDED_REPLY, ARITHMETIC_MESSAGE, black_box(text)).len()
+            }),
         ),
     ]
 }
@@ -135,6 +146,15 @@ const OTHER_REPLY: &str = "Mail zed.q@nowhere.example.org about 9f2e4c1a7b and C
 /// [`UNGROUNDED_REPLY`] with signs, so the corpus is read with its signs too.
 const SIGNED_REPLY: &str =
     "Revenue moved by -1,010,000, direct −26,171 and the rate -1.1785; +99,999 bytes.";
+
+/// A reply with percentages no corpus carries, so the comparison reads the
+/// whole corpus for each.
+const PERCENT_REPLY: &str =
+    "Conversion rose 14.3% and churn fell to 2.75%, a 31 % gap; 0,8 % elsewhere.";
+
+/// A message giving four values, so the reply is held to having printed what
+/// it works out of them.
+const ARITHMETIC_MESSAGE: &str = "Q1 12,500, Q2 14,200, Q3 16,100, Q4 18,500: total and average?";
 
 /// A reply with figures no corpus carries, so the comparison reads the whole corpus.
 const UNGROUNDED_REPLY: &str =

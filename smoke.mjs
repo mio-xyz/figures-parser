@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
-const { extract, ungroundedFigures, ungroundedUrls, fabricatedUrls, ungroundedEmails, misdatedWeekdays, ungroundedIdentifiers, unseenTokens, ungroundedDurations } = createRequire(import.meta.url)("./index.js");
+const { extract, ungroundedFigures, ungroundedPercentages, proseArithmetic, ungroundedUrls, fabricatedUrls, ungroundedEmails, misdatedWeekdays, ungroundedIdentifiers, unseenTokens, ungroundedDurations } = createRequire(import.meta.url)("./index.js");
 
 const entities = extract("Total $1,250 and ١٢", { kinds: ["number"] });
 const has = (text, integer) => entities.some((e) => e.text === text && e.value.integer === integer);
@@ -17,6 +17,9 @@ assert.deepEqual(ungroundedUrls("See [#87](https://acme.io/repo) and https://acm
 assert.deepEqual(ungroundedUrls("Fix in [PR 512](https://example.com).", "user text", "[TASK-1](https://example.com)"), ["https://example.com"]);
 assert.deepEqual(fabricatedUrls("https://acme.io/a and https://acme.io/b", "https://acme.io/a"), ["https://acme.io/b"]);
 assert.deepEqual(ungroundedFigures("ARR is 1,010,000.", "Total: 101000"), ["1,010,000"]);
+assert.deepEqual(ungroundedPercentages("Overall 14.3%, and 30% more per lead.", "overall_rate = 0.1429"), ["30%"]);
+assert.deepEqual(proseArithmetic("Total 61,300.", "Q1 12,500, Q2 14,200, Q3 16,100, Q4 18,500?", "Q1 12,500"), ["61,300"]);
+assert.deepEqual(proseArithmetic("35.", "10 + 20 + 5?", ""), []);
 assert.deepEqual(extract("mail ana@acme.io", { kinds: ["email"] }).map((e) => [e.kind, e.text]), [["email", "ana@acme.io"]]);
 assert.deepEqual(ungroundedEmails("ana@acme.io and ben@acme.io", "owner ana@acme.io"), ["ben@acme.io"]);
 assert.deepEqual(misdatedWeekdays("| Fri 26 Sep |", "2026-10-02"), ['"Fri 26 Sep" (2026-09-26 is a Saturday)']);

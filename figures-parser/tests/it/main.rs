@@ -10,6 +10,7 @@
 )]
 
 mod approximate;
+mod arithmetic;
 mod dates;
 mod digits;
 mod durations;
@@ -18,6 +19,7 @@ mod ground;
 mod ids;
 mod locales;
 mod panic_free;
+mod percentages;
 mod readings;
 mod scales;
 mod scan;
