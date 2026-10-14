@@ -1,6 +1,6 @@
 {
   "name": "@mio-xyz/figures-parser",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Check a piece of generated text against the sources it was written from: figures, links, dated weekdays, email addresses, identifiers and durations.",
   "license": "AGPL-3.0-only",
   "repository": {
