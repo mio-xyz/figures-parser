@@ -19,7 +19,7 @@ mod ground;
 mod ids;
 mod locales;
 mod panic_free;
-mod percentages;
+mod ratios;
 mod readings;
 mod scales;
 mod scan;

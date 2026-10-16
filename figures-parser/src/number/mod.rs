@@ -4,15 +4,15 @@
 mod arithmetic;
 pub mod digits;
 mod ground;
-mod percent;
+mod ratio;
 mod readings;
 mod scale;
 pub mod scan;
 mod spelled;
 
 pub use arithmetic::prose_arithmetic;
-pub use ground::ungrounded_figures;
-pub use percent::ungrounded_percentages;
+pub use ground::{Amounts, shares_amount, states_figure, ungrounded_figures};
+pub use ratio::ungrounded_ratios;
 
 use std::borrow::Cow;
 use std::collections::VecDeque;
@@ -321,8 +321,10 @@ pub fn extract_numbers(text: &str) -> Vec<Number<'_>> {
 }
 
 /// A bare digit run below this is usually the model's own arithmetic, which
-/// no tool result carries verbatim.
-const MIN_BARE_FIGURE: u128 = 10_000;
+/// no tool result carries verbatim; from here up one is an amount a print
+/// carries, where a print is looked at, and a code, a zip or an order number
+/// as often as an amount against the whole turn, where it is not held.
+pub(super) const MIN_BARE_FIGURE: u128 = 10_000;
 /// A figure written with a thousands separator ("8,220") is stated as a
 /// precise amount, so the separator lowers the floor to the smallest figure
 /// the notation can write.
@@ -516,11 +518,22 @@ pub(super) fn scaled(integer: &str, fraction: Option<&str>, scale: u32) -> Optio
 
 impl Reading<'_, '_> {
     /// The key a reply states with this reading, or None when it is not held
-    /// to it: a derived reading, or a figure under the floor its notation
-    /// sets. An approximate reading is also grounded by a value that rounds
-    /// to it.
+    /// to it: a derived reading, a figure under the floor its notation sets,
+    /// or a bare digit run, which is a code, a zip or an order number as
+    /// often as an amount ("541611", "40017731") and is never held to the
+    /// whole turn. A number written in words, with a scale word or after an
+    /// approximation mark is an amount, and is held from 10,000 up. An
+    /// approximate reading is also grounded by a value that rounds to it.
     #[must_use]
     pub fn stated(&self) -> Option<Key> {
+        self.stated_amount(false)
+    }
+
+    /// [`Reading::stated`], a bare digit run from 10,000 up held too when
+    /// `bare_runs`: against one print, such a run is the amount the print
+    /// carries.
+    #[must_use]
+    pub fn stated_amount(&self, bare_runs: bool) -> Option<Key> {
         if self.derived {
             return None;
         }
@@ -536,8 +549,10 @@ impl Reading<'_, '_> {
                 MIN_SEPARATED_FIGURE
             } else if self.currency {
                 MIN_CURRENCY_FIGURE
-            } else {
+            } else if bare_runs || self.approximate {
                 MIN_BARE_FIGURE
+            } else {
+                return None;
             };
             // An integer too long for u128 is far above every floor.
             if self.integer.parse::<u128>().is_ok_and(|n| n < floor) {

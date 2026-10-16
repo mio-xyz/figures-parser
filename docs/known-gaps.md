@@ -33,18 +33,32 @@ it stands; a contribution that closes one should remove it here.
 - A corpus grounds by its digit tokens as printed, before its numbers in
   words are read: "2 million three hundred thousand" in a corpus grounds
   2,000,000 as well as 2,300,000. A reply writing it is held to 2,300,000.
+- A round range is read only between two tokens a dash joins: "$200 to
+  $300" and "between 200 and 300" are checked bound by bound, and a bound
+  read with its own sign ("$200 -$300") is a signed figure, not a range.
+- A lone round figure of one significant digit is read at two, so "$3,000"
+  takes 2,950 to 3,049, while the same figure behind an approximation mark
+  ("~$3,000") is read at its own precision and takes 2,500 to 3,499. A short
+  decimal is held as its whole part ("$3,200.50" as 3,200) and so rounds a
+  printed 3,225 as well.
+- A bare digit run after an approximation mark ("~12500") is held, where
+  the same run without the mark is not; a mark in words ("about 12500") is
+  not read, so such a run passes.
 - "half a hundred thousand" is not read, since a hundred does not follow a
   half; "a hundred thousand" is read from it, as an idiom.
 
-## Percentages
+## Ratios
 
-- A percent sign before the figure, as Turkish and Basque write it ("%50"),
-  is not read, nor a percentage in words ("twelve percent"), a per mille
-  ("‰") or percentage points ("12 pp").
-- Only a fraction under one with two places or more grounds a percentage:
-  "1.25" does not ground "125%", nor ".1429" "14.3%".
+- A percentage in words ("twelve percent"), a per mille ("‰"), percentage
+  points ("12 pp") and a multiple in words ("three times") are not read.
+- A decimal written without its lead (".1429") is not read, so it grounds
+  nothing.
 - A space-grouped figure before a percentage reads as one ("3 118.380 %" is
   3,118.38%), as French and SI write it.
+- A ratio is reported as written, so a fullwidth or small percent sign
+  ("５０％", "50﹪") is not folded to "%" in what is named.
+- The person's numbers are read at most thirty at a time, and a ratio of
+  three of them (a share of a sum) is not derived.
 
 ## Arithmetic in prose
 
@@ -58,9 +72,13 @@ it stands; a contribution that closes one should remove it here.
 
 ## Links
 
-- A link without a scheme ("acme.io/x") is not read; a tool returns full
-  links.
+- A link without a scheme ("acme.io/x") is not read in a reply; a tool
+  returns full links. In a corpus one grounds the reply's schemed link.
 - A one-letter top-level domain is not a host (`https://a.b/c`).
+- A link's query is read as written: an encoded value in a thread link is
+  not decoded before it is looked for in the corpus.
+- A built link's host list is the caller's: with none given, only a known
+  shape's own host passes unprinted, and only at its root.
 
 ## Weekdays
 
@@ -92,7 +110,7 @@ it stands; a contribution that closes one should remove it here.
   same prefix, so an invented one under a prefix the corpus never uses
   passes.
 - Long mixed tokens are never checked, and ISO durations ("PT1H30M45S") and
-  Slack ids ("U01ABCDEF2") land among them.
+  chat user ids ("U01ABCDEF2") land among them.
 
 ## Durations
 

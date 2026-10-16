@@ -236,12 +236,41 @@ pub fn ungrounded_figures(reply: String, corpus: String) -> Vec<String> {
     figures_parser::ungrounded_figures(&reply, &corpus)
 }
 
-/// Percentages in `reply` that no percentage or printed fraction in `corpus`
-/// carries at the places the reply wrote.
+/// Ratios in `reply` (percentages and multiples) that neither `corpus` nor
+/// `said`, the person's own words, supports.
+///
+/// No printed ratio or decimal rounds to one at the places the reply wrote,
+/// and no number the person stated, nor plain arithmetic over two of them,
+/// gives it.
 #[napi(catch_unwind)]
 #[must_use]
-pub fn ungrounded_percentages(reply: String, corpus: String) -> Vec<String> {
-    figures_parser::ungrounded_percentages(&reply, &corpus)
+pub fn ungrounded_ratios(reply: String, corpus: String, said: Option<String>) -> Vec<String> {
+    figures_parser::ungrounded_ratios(&reply, &corpus, said.as_deref().unwrap_or_default())
+}
+
+/// Whether `reply` states an amount that `text` carries: a figure the gate
+/// holds, or a bare digit run from 10,000 up; never a ratio's figure.
+#[napi(catch_unwind)]
+#[must_use]
+pub fn shares_amount(reply: String, text: String) -> bool {
+    figures_parser::shares_amount(&reply, &text)
+}
+
+/// For each of `texts`, the amounts `reply` states that it carries, as the
+/// reply wrote them; the reply is read once.
+#[napi(catch_unwind)]
+#[must_use]
+pub fn amounts_shared_with(reply: String, texts: Vec<String>) -> Vec<Vec<String>> {
+    let amounts = figures_parser::Amounts::of(&reply);
+    texts.iter().map(|text| amounts.shared_with(text)).collect()
+}
+
+/// Whether `text` states `figure` ("19,851", "1,234.50"), however it groups
+/// it: the figure's whole part is matched.
+#[napi(catch_unwind)]
+#[must_use]
+pub fn states_figure(text: String, figure: String) -> bool {
+    figures_parser::states_figure(&text, &figure)
 }
 
 /// Figures `reply` worked out in prose that `corpus` does not carry, when
@@ -252,15 +281,100 @@ pub fn prose_arithmetic(reply: String, message: String, corpus: String) -> Vec<S
     figures_parser::prose_arithmetic(&reply, &message, &corpus)
 }
 
+/// The lowercased hosts the caller trusts pages on, as `&str`s.
+fn host_list(hosts: Option<&[String]>) -> Vec<&str> {
+    hosts
+        .unwrap_or_default()
+        .iter()
+        .map(String::as_str)
+        .collect()
+}
+
 /// The parts of `reply` that neither `corpus` nor `prompt` grounds.
 ///
-/// `corpus` is the thread, the request and the run's tool results. The parts
-/// are links, placeholder targets, items labelled on another item's link,
-/// and items named without the link a result carried.
+/// `corpus` is the thread, the request and the run's tool results; `hosts`
+/// the lowercased hosts the caller trusts pages on, where a page naming no
+/// item may be linked unprinted. The parts are links, placeholder targets,
+/// items labelled on a link that stands in for them, and items named without
+/// the link a result carried.
 #[napi(catch_unwind)]
 #[must_use]
-pub fn ungrounded_urls(reply: String, corpus: String, prompt: Option<String>) -> Vec<String> {
-    figures_parser::ungrounded_urls(&reply, &corpus, prompt.as_deref().unwrap_or_default())
+pub fn ungrounded_urls(
+    reply: String,
+    corpus: String,
+    prompt: Option<String>,
+    hosts: Option<Vec<String>>,
+) -> Vec<String> {
+    figures_parser::ungrounded_urls(
+        &reply,
+        &corpus,
+        prompt.as_deref().unwrap_or_default(),
+        &host_list(hosts.as_deref()),
+    )
+}
+
+/// What a reply's links fail on, kept apart by kind.
+#[napi(object)]
+pub struct LinkFindings {
+    /// Links no source printed.
+    pub unprinted: Vec<String>,
+    /// Link targets that are not URLs, each as written (`url` in `[PR 512](url)`).
+    pub placeholders: Vec<String>,
+    /// An item's label on a link that is not the item's own, as written.
+    pub misdirected: Vec<String>,
+    /// Items named without the link a source gave them, each with its links.
+    pub unlinked: Vec<String>,
+}
+
+/// The findings of `ungroundedUrls`, kept apart by kind so a caller names
+/// each in its own words.
+///
+/// A placeholder target is given as written, so a file the caller attached
+/// under that name can be named apart.
+#[napi(catch_unwind)]
+#[must_use]
+pub fn link_findings(
+    reply: String,
+    corpus: String,
+    prompt: Option<String>,
+    hosts: Option<Vec<String>>,
+) -> LinkFindings {
+    let found = figures_parser::link_findings(
+        &reply,
+        &corpus,
+        prompt.as_deref().unwrap_or_default(),
+        &host_list(hosts.as_deref()),
+    );
+    LinkFindings {
+        unprinted: found.unprinted,
+        placeholders: found.placeholders,
+        misdirected: found.misdirected,
+        unlinked: found.unlinked,
+    }
+}
+
+/// A reply with its link defects put right, and each repair as `from → to`.
+#[napi(object)]
+pub struct MendedReply {
+    /// The reply, mended.
+    pub text: String,
+    /// Each repair, as `from → to`, in the order made.
+    pub mends: Vec<String>,
+}
+
+/// `reply` with the link defects a rule can put right put right.
+///
+/// A Slack message link that kept its ts's dot loses it, and an item named
+/// without its link is linked where the reply first names it, when `corpus`
+/// gives that id one item's link.
+#[napi(catch_unwind)]
+#[must_use]
+pub fn mended_links(reply: String, corpus: String) -> MendedReply {
+    let mended = figures_parser::mended_links(&reply, &corpus);
+    MendedReply {
+        text: mended.text,
+        mends: mended.mends,
+    }
 }
 
 /// The weekday-and-date pairs in `reply` whose weekday is wrong for that date.
@@ -317,10 +431,14 @@ pub fn ungrounded_durations(reply: String, corpus: String, prompt: Option<String
 }
 
 /// The links in `reply`, once each, that `corpus` does not carry.
+///
+/// A link is carried verbatim, without a scheme, as a path under no other
+/// host, or built from printed ids on one of `hosts`, the lowercased hosts
+/// the caller trusts pages on.
 #[napi(catch_unwind)]
 #[must_use]
-pub fn fabricated_urls(reply: String, corpus: String) -> Vec<String> {
-    figures_parser::fabricated_urls(&reply, &corpus)
+pub fn fabricated_urls(reply: String, corpus: String, hosts: Option<Vec<String>>) -> Vec<String> {
+    figures_parser::fabricated_urls(&reply, &corpus, &host_list(hosts.as_deref()))
         .into_iter()
         .map(str::to_owned)
         .collect()

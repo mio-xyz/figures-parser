@@ -6,7 +6,7 @@ use std::hint::black_box;
 use figures_parser::number::scan::tokens;
 use figures_parser::{
     Date, extract_numbers, misdated_weekdays, prose_arithmetic, ungrounded_durations,
-    ungrounded_emails, ungrounded_figures, ungrounded_identifiers, ungrounded_percentages,
+    ungrounded_emails, ungrounded_figures, ungrounded_identifiers, ungrounded_ratios,
     ungrounded_urls, urls,
 };
 
@@ -75,7 +75,7 @@ pub fn paths(case: &Case) -> [Path<'_>; 13] {
         ("urls", Box::new(move || urls(black_box(text)).len())),
         (
             "ungrounded_urls",
-            Box::new(move || ungrounded_urls(LINK_REPLY, black_box(text), "").len()),
+            Box::new(move || ungrounded_urls(LINK_REPLY, black_box(text), "", &[]).len()),
         ),
         (
             "ungrounded_emails",
@@ -94,8 +94,8 @@ pub fn paths(case: &Case) -> [Path<'_>; 13] {
             Box::new(move || misdated_weekdays(black_box(text), Date::constant(2026, 10, 2)).len()),
         ),
         (
-            "ungrounded_percentages",
-            Box::new(move || ungrounded_percentages(PERCENT_REPLY, black_box(text)).len()),
+            "ungrounded_ratios",
+            Box::new(move || ungrounded_ratios(PERCENT_REPLY, black_box(text), "").len()),
         ),
         (
             "prose_arithmetic",

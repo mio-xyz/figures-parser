@@ -9,6 +9,12 @@
  */
 export declare const __napiBindingTarget: 'native' | 'wasm32-wasi' | 'wasm32-wasip1'
 
+/**
+ * For each of `texts`, the amounts `reply` states that it carries, as the
+ * reply wrote them; the reply is read once.
+ */
+export declare function amountsSharedWith(reply: string, texts: Array<string>): Array<Array<string>>
+
 /** One duration, with where it sits in the input. */
 export interface DurationEntity {
   /** The kind of figure. */
@@ -57,8 +63,14 @@ export interface ExtractOptions {
   kinds?: Array<string>
 }
 
-/** The links in `reply`, once each, that `corpus` does not carry. */
-export declare function fabricatedUrls(reply: string, corpus: string): Array<string>
+/**
+ * The links in `reply`, once each, that `corpus` does not carry.
+ *
+ * A link is carried verbatim, without a scheme, as a path under no other
+ * host, or built from printed ids on one of `hosts`, the lowercased hosts
+ * the caller trusts pages on.
+ */
+export declare function fabricatedUrls(reply: string, corpus: string, hosts?: Array<string> | undefined | null): Array<string>
 
 /** One identifier, with where it sits in the input. */
 export interface IdEntity {
@@ -72,6 +84,44 @@ export interface IdEntity {
   end: number
   /** Its shape. */
   shape: "uuid" | "hex" | "key" | "prefixed" | "token"
+}
+
+/**
+ * The findings of `ungroundedUrls`, kept apart by kind so a caller names
+ * each in its own words.
+ *
+ * A placeholder target is given as written, so a file the caller attached
+ * under that name can be named apart.
+ */
+export declare function linkFindings(reply: string, corpus: string, prompt?: string | undefined | null, hosts?: Array<string> | undefined | null): LinkFindings
+
+/** What a reply's links fail on, kept apart by kind. */
+export interface LinkFindings {
+  /** Links no source printed. */
+  unprinted: Array<string>
+  /** Link targets that are not URLs, each as written (`url` in `[PR 512](url)`). */
+  placeholders: Array<string>
+  /** An item's label on a link that is not the item's own, as written. */
+  misdirected: Array<string>
+  /** Items named without the link a source gave them, each with its links. */
+  unlinked: Array<string>
+}
+
+/**
+ * `reply` with the link defects a rule can put right put right.
+ *
+ * A Slack message link that kept its ts's dot loses it, and an item named
+ * without its link is linked where the reply first names it, when `corpus`
+ * gives that id one item's link.
+ */
+export declare function mendedLinks(reply: string, corpus: string): MendedReply
+
+/** A reply with its link defects put right, and each repair as `from → to`. */
+export interface MendedReply {
+  /** The reply, mended. */
+  text: string
+  /** Each repair, as `from → to`, in the order made. */
+  mends: Array<string>
 }
 
 /**
@@ -131,6 +181,18 @@ export interface NumberValue {
 export declare function proseArithmetic(reply: string, message: string, corpus: string): Array<string>
 
 /**
+ * Whether `reply` states an amount that `text` carries: a figure the gate
+ * holds, or a bare digit run from 10,000 up; never a ratio's figure.
+ */
+export declare function sharesAmount(reply: string, text: string): boolean
+
+/**
+ * Whether `text` states `figure` ("19,851", "1,234.50"), however it groups
+ * it: the figure's whole part is matched.
+ */
+export declare function statesFigure(text: string, figure: string): boolean
+
+/**
  * The durations in `reply`, once each, whose length neither `corpus` nor
  * `prompt` carries, written out or as an API gives it.
  */
@@ -153,19 +215,25 @@ export declare function ungroundedFigures(reply: string, corpus: string): Array<
 export declare function ungroundedIdentifiers(reply: string, corpus: string, prompt?: string | undefined | null): Array<string>
 
 /**
- * Percentages in `reply` that no percentage or printed fraction in `corpus`
- * carries at the places the reply wrote.
+ * Ratios in `reply` (percentages and multiples) that neither `corpus` nor
+ * `said`, the person's own words, supports.
+ *
+ * No printed ratio or decimal rounds to one at the places the reply wrote,
+ * and no number the person stated, nor plain arithmetic over two of them,
+ * gives it.
  */
-export declare function ungroundedPercentages(reply: string, corpus: string): Array<string>
+export declare function ungroundedRatios(reply: string, corpus: string, said?: string | undefined | null): Array<string>
 
 /**
  * The parts of `reply` that neither `corpus` nor `prompt` grounds.
  *
- * `corpus` is the thread, the request and the run's tool results. The parts
- * are links, placeholder targets, items labelled on another item's link,
- * and items named without the link a result carried.
+ * `corpus` is the thread, the request and the run's tool results; `hosts`
+ * the lowercased hosts the caller trusts pages on, where a page naming no
+ * item may be linked unprinted. The parts are links, placeholder targets,
+ * items labelled on a link that stands in for them, and items named without
+ * the link a result carried.
  */
-export declare function ungroundedUrls(reply: string, corpus: string, prompt?: string | undefined | null): Array<string>
+export declare function ungroundedUrls(reply: string, corpus: string, prompt?: string | undefined | null, hosts?: Array<string> | undefined | null): Array<string>
 
 /**
  * The long mixed tokens in `reply`, once each, that neither `corpus` nor

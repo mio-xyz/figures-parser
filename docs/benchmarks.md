@@ -51,7 +51,7 @@ comparison reads the whole corpus: the worst case.
 | `ungrounded_identifiers` | The identifier comparison, worst case. |
 | `ungrounded_durations` | The duration comparison, worst case. |
 | `misdated_weekdays` | The weekday check over the corpus as a reply. |
-| `ungrounded_percentages` | The percentage comparison, worst case. |
+| `ungrounded_ratios` | The ratio comparison, worst case. |
 | `prose_arithmetic` | The arithmetic comparison after a message of four values, worst case. |
 
 ## Allocations

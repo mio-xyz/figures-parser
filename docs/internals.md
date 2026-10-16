@@ -16,8 +16,8 @@ The library has one module per kind, each with a reader and a comparison:
 
 | Module | Reader | Comparison |
 |---|---|---|
-| `number` | `scan` (tokens), `readings`, `scale` (scale words), `spelled` (numbers in words), `digits` | `ground`, `percent`, `arithmetic` |
-| `url` | `scan` | `ground`, `items` (the items named beside links) |
+| `number` | `scan` (tokens), `readings`, `scale` (scale words), `spelled` (numbers in words), `digits` | `ground` (figures, and amounts against one print), `ratio`, `arithmetic` |
+| `url` | `scan` | `ground`, `items` (the items named beside links), `shapes` (links built from printed ids) |
 | `date` | `languages`, `names` (a port of chrono-node, and Arabic) | `calendar` |
 | `email` | `emails` | `ungrounded_emails` |
 | `id` | `identifiers` | `ungrounded_identifiers`, `unseen_tokens` |
@@ -225,26 +225,64 @@ the hash of their integer part, behind a mask of their integer lengths, and
 streams the corpus's readings through it. A corpus reading whose length is
 not in the mask costs one bit test. The walk reads the corpus without
 currency marks and without signs, since no floor applies to a corpus, and
-stops as soon as every claim is grounded.
+against letters, since a result that glues a unit on ("7,103MW") still
+printed the figure, and stops as soon as every claim is grounded. A corpus
+decimal whose fraction starts with five or more also grounds the whole
+above it ("327.76" grounds 328): the walk writes the incremented integer
+into a buffer the needles keep and looks it up like any reading, against
+exact whole keys only.
 
-### Percentages
+The reply is read with its links skipped, by span: a link's digits (a Slack
+ts, an id) are the link check's. A bare digit run is never a claim
+(`Reading::stated`), since a code or an order number is one as often as an
+amount; `Reading::stated_amount(true)` holds such a run from 10,000 up, for
+`Amounts`, which reads the reply's claims once and grounds a clone of them
+against each print (`shared_with`), ratios skipped as well.
 
-`number::percent` reads a percentage as a numeric token with a percent mark
-after it: a sign (`%`, the Arabic `٪`, the fullwidth `％`, the small `﹪`)
-after at most one space of the line and any bidi marks, or a percent word
-after one space ("percent", "per cent", "pour cent", "Prozent", "por ciento",
-"por cento", "per cento"). A letter or a digit right after the mark ends it
-("50%off", "12 percentage points", the "%25" of an encoded link). The reading
-that ends at the mark is the percentage: the whole token, or the last of
-numbers a run sets side by side; a group of a thousands run is none.
+Once the walk leaves a claim open, the reply's round ranges are read: two
+tokens with nothing but a dash between them (a currency mark and spaces
+aside), each a whole number of at most two significant digits, low to high.
+One corpus pass then marks each range a printed value falls inside, and the
+claims stated as exactly its bounds close.
 
-A reply's percentage is grounded by a corpus percentage, or by a fraction of
-two places or more a script printed for it ("0.1429" for "14.3%"), that
-rounds to it at the places the reply wrote: within half a unit of its last
-digit, both bounds included. The comparison is exact, in scaled integers. A
-bare number never grounds one, since it may be either operand of the
-division, and 0% and 100% are never held. Sizes are compared, so a sign on
-either side does not matter; the reply's sign is kept in what is reported.
+A claim still open after that, stated as a whole number of at most two
+significant digits ("$3,200", "45,000"), is then read at that precision: one
+more corpus pass rounds each printed value to the claim's unit (100 for a
+four-digit figure, halves up) and closes the claim the result equals, the
+claim's sign still held. A figure of one significant digit is read at two,
+so "3,000" takes 2,950 to 3,049 and never 2,500 to 3,499; a turn printing
+thousands of prices thus grounds few round figures by chance.
+
+### Ratios
+
+`number::ratio` reads a ratio as a numeric token with a percent mark after
+it: a sign (`%`, the Arabic `٪`, the fullwidth `％`, the small `﹪`) after at
+most one space of the line and any bidi marks, or a percent word after one
+space ("percent", "per cent", "pour cent", "Prozent", "por ciento", "por
+cento", "per cento"); or a multiplication sign glued after it (`x`, `X`,
+`×`), which the scanner leaves out of a word when no letter or digit follows
+it ("8.9x" is a figure and a sign, "1920x1080" and "0x1F" are words); or a
+percent sign before it, as Turkish and Basque write one, standing after
+nothing, whitespace or an opening bracket or quote ("%11", never a link's
+"%20"). A letter or a digit right after a mark ends it ("50%off", "12
+percentage points"). The reading against the mark is the ratio's figure: the
+whole token, or of numbers a run sets side by side the one against the mark;
+a group of a thousands run is none.
+
+A reply's ratio is grounded by a corpus ratio, or by a decimal a script
+printed, as is or a hundred times it ("0.1429" and "14.29" for "14.3%"),
+that rounds to it at the places the reply wrote: within half a unit of its
+last digit, both bounds included. A decimal is a token with one decimal
+symbol between two groups; one a comma may group as thousands ("19,850")
+grounds nothing, unless its lead is a zero, which no grouping writes
+("0,850"). The comparison is exact, in scaled integers. A bare whole number
+never grounds one, since it may be either operand of the division, and 0%
+and 100% are never held. The person's words (`said`) ground a ratio too: the
+numbers they stated, and for each pair the quotient and the change, each
+also in percent, compared in floating point with the same tolerance, over
+at most thirty numbers. Sizes are compared, so a sign on either side does
+not matter; the reply's sign is kept in what is reported, and one ratio is
+named once however its mark is written, by its figure's text.
 
 ### Arithmetic in prose
 
@@ -271,24 +309,67 @@ given what a reading states and which corpus readings ground.
 
 ## Links
 
-`url::scan::urls` finds http(s) links with the `linkify` crate. Slack's
-`<url|label>` wrapping is blanked in place first, so a link's span is its
+`url::scan::urls` finds http(s) links with the `linkify` crate. The
+`<url|label>` wrapping chat apps use is blanked in place first, so a link's span is its
 place in the text as given, and the markup and punctuation that close around
 a link are dropped.
 
-`fabricated_urls(reply, corpus)` grounds a link the corpus holds verbatim, or
-whose path the corpus holds without a host, as an API's `htmlPath` does, and
-puts under no other host.
+`fabricated_urls(reply, corpus, hosts)` grounds a link the corpus holds
+verbatim, or without its scheme where the occurrence stands apart from what
+precedes it (so "acme.io/org/repo" grounds the https link, and
+"x@acme.io/org/repo" or "foo.acme.io/org/repo" does not), or whose path the
+corpus holds without a host, as an API that gives a page's path without its
+host does, and puts under no other host. `url::shapes` then takes the links
+a reply may build rather than copy: a page naming no item on a host in
+`hosts` (the hosts the caller trusts such pages on; a host root, one segment
+without a digit, or one under `github.com/settings`), and three shapes built
+from ids the corpus prints standing apart from other letters and digits:
 
-`ungrounded_urls(reply, corpus, prompt)` adds four checks for a reply about
-to be sent:
+- `<workspace>.slack.com/archives/<channel>/p<16 digits>`, the workspace
+  host printed, the timestamp printed with its dot, a thread's `thread_ts`
+  and `cid` the only query;
+- `app.pipedrive.com/<deal|person|organization>/<id>`, or the same path on a
+  printed `<company>.pipedrive.com` host, with no query;
+- `facebook.com/ads/library/?view_all_page_id=<id>`, with the library's
+  other filters in the query.
+
+A shape's host passes unprinted at its root only, and no built link carries
+a fragment.
+
+`ungrounded_urls(reply, corpus, prompt, hosts)` adds four checks for a reply
+about to be sent:
 
 - a link on a reserved example domain that only the prompt carried, since a
   prompt's examples are not facts;
 - a link target that is not a URL, such as `[PR 512](url)`;
-- an item's label on a link that is not the item's own, such as `[#87]` on
-  the repository's root;
-- an item named without the link a result gave for it.
+- an item's label on a link that stands in for it: `[#87]` on the
+  repository's root, or on another number's page (`/pull/418`, `/418/files`),
+  read off the URL's last path segment (no digit, or all digits); a number
+  on a chat message link is that message's own; a key (`CORE-1710`) on any
+  link that does not hold it;
+- an item named in prose without the link a source gave for it, as "#87
+  (url)". The prose is the reply with its markdown links and its code
+  blanked (`items::code_spans` reads fences and code spans as CommonMark
+  does); an item is linked once any link of the reply holds its tail
+  (`/pull/N` or `/issues/N` for `#N`, `/KEY-N` for a key) under any label.
+  Its links come from the corpus and the prompt, one per item in the first
+  tail's form (`/pull/N` before `/issues/N`), never an API's (`api.` host or
+  `/api/` path), and an example-domain link only the prompt carried is no
+  item's; two items give "#12 (url or url)".
+
+`link_findings` is that check with the four kinds kept apart in a
+`LinkFindings`, whose `all()` is `ungrounded_urls`'s list; a placeholder
+target is kept as written there and parenthesised only in the list.
+
+`mended_links(reply, corpus)` repairs what a rule can: each link of the reply
+that `shapes::undotted_slack_link` reads as a message link in the first
+shape above with its timestamp's dot kept (`/archives/<channel>/p<10 digits>.<6 digits>`, the query
+and fragment as written) is replaced throughout, then the items the prose
+names without a link (the same walk as the unlinked check, over the corpus
+alone, since the prompt's examples are not links to write) are linked as
+`[id](url)` where the prose first names them, when the corpus gives the id
+exactly one item's link. The splices run from the last item back, so each
+earlier offset holds. Every repair is listed as `from → to`.
 
 ## Weekdays
 

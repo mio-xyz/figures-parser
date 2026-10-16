@@ -11,17 +11,19 @@ pub use super::readings::Scratch;
 use super::scale::{may_scale, scale_after};
 use crate::text::{char_at, char_before, is_letter, is_unspaced_script};
 
-/// A dot, a comma or the Arabic decimal sign may end a decimal; the others only ever group.
+/// A dot, a comma, the Arabic decimal sign or the fullwidth full stop may end
+/// a decimal; the others only ever group.
 pub(super) const fn is_decimal_symbol(c: char) -> bool {
-    matches!(c, '.' | ',' | '\u{66b}')
+    matches!(c, '.' | ',' | '\u{66b}' | '\u{ff0e}')
 }
 
 /// Whether `c` is a group or decimal symbol a CLDR locale prints.
 ///
 /// Comma, dot, the two apostrophes Swiss German uses, the three spaces
 /// French and Russian group with, the Arabic thousands and decimal signs,
-/// and the fullwidth comma. `tests/it/locales.rs` reads back the number each
-/// locale prints and fails when one prints a symbol missing here.
+/// and the fullwidth comma and full stop. `tests/it/locales.rs` reads back
+/// the number each locale prints and fails when one prints a symbol missing
+/// here.
 #[must_use]
 pub const fn is_symbol(c: char) -> bool {
     if c.is_ascii() {
@@ -29,7 +31,7 @@ pub const fn is_symbol(c: char) -> bool {
     }
     matches!(
         c,
-        '\u{2019}' | '\u{a0}' | '\u{202f}' | '\u{66c}' | '\u{66b}' | '\u{ff0c}'
+        '\u{2019}' | '\u{a0}' | '\u{202f}' | '\u{66c}' | '\u{66b}' | '\u{ff0c}' | '\u{ff0e}'
     )
 }
 
@@ -39,6 +41,15 @@ pub const fn is_symbol(c: char) -> bool {
 #[inline]
 pub(super) fn continues_word(text: &str, start: usize, prev: char) -> bool {
     is_boundary(prev) && (prev.is_ascii() || !is_proclitic(text, start, prev))
+}
+
+/// Whether the digits at `start` of `text` continue a number already read
+/// ("5" of "v2.5", whose "2" is part of the word): a decimal symbol with a
+/// digit before it stands right before them.
+#[inline]
+pub(super) fn continues_number(text: &str, start: usize, prev: char) -> bool {
+    is_decimal_symbol(prev)
+        && char_before(text, start.saturating_sub(prev.len_utf8())).is_some_and(is_digit)
 }
 
 /// Whether `c` is a decimal digit of any script.
@@ -67,6 +78,22 @@ pub(super) fn digits_start(text: &str, mut end: usize) -> usize {
         end = end.saturating_sub(c.len_utf8());
     }
     end
+}
+
+/// Whether `c` is a multiplication sign a multiple is written with ("8.9x",
+/// "3×", "1,250X"): the letter x in either case, or the sign.
+pub(super) const fn is_times_sign(c: char) -> bool {
+    matches!(c, 'x' | 'X' | '\u{d7}')
+}
+
+/// Whether the character `next` at byte `end` of `text` ends the word the
+/// digits before it are part of: a boundary, unless it is an x that no
+/// letter or digit follows, which multiplies the figure ("8.9x", "2026x")
+/// rather than naming a size ("1920x1080") or a hex literal ("0x1F").
+fn ends_word(text: &str, end: usize, next: char) -> bool {
+    is_boundary(next)
+        && (!is_times_sign(next)
+            || char_at(text, end.saturating_add(next.len_utf8())).is_some_and(is_boundary))
 }
 
 /// Whether `c` ends a token: another digit, or a letter of a word.
@@ -160,7 +187,7 @@ const fn is_approximation_mark(c: char) -> bool {
 }
 
 /// The byte the bidi marks right before `at` start at.
-fn before_marks(text: &str, mut at: usize) -> usize {
+pub(super) fn before_marks(text: &str, mut at: usize) -> usize {
     while let Some(c) = char_before(text, at).filter(|&c| is_bidi_mark(c)) {
         at = at.saturating_sub(c.len_utf8());
     }
@@ -178,7 +205,7 @@ pub(super) fn after_marks(text: &str, mut at: usize) -> usize {
 /// Where a currency mark right before byte `at` begins, with at most one
 /// space between: a sign with any capitals glued before it ("$", "US$",
 /// "R$"), or an ISO 4217 code ("USD ").
-fn currency_start(text: &str, end: usize) -> Option<usize> {
+pub(super) fn currency_start(text: &str, end: usize) -> Option<usize> {
     let before = text.get(..end)?;
     let at = before_marks(
         text,
@@ -409,6 +436,8 @@ pub struct Tokens<'a> {
     marks: bool,
     /// Whether a token reads the sign and the approximation mark before it.
     signs: bool,
+    /// Whether a run may end against a word letter ("7,103MW").
+    letters: bool,
 }
 
 /// The numeric tokens of `text`, in order.
@@ -427,6 +456,7 @@ pub const fn tokens(text: &str) -> Tokens<'_> {
         pos: 0,
         marks: true,
         signs: true,
+        letters: false,
     }
 }
 
@@ -447,6 +477,15 @@ impl Tokens<'_> {
     #[must_use]
     pub const fn without_signs(mut self) -> Self {
         self.signs = false;
+        self
+    }
+
+    /// These tokens with a run kept whole when a word letter ends it: for a
+    /// corpus, where a result that glues a unit on ("7,103MW") still printed
+    /// 7,103, and a token read more widely only ever lets a figure through.
+    #[must_use]
+    pub const fn against_letters(mut self) -> Self {
+        self.letters = true;
         self
     }
 
@@ -495,8 +534,11 @@ impl<'a> Iterator for Tokens<'a> {
         loop {
             let start = self.next_digit(self.pos)?;
             let prev = char_before(text, start);
-            // Digits that continue a word ("p1789368220119") are not a token.
-            if prev.is_some_and(|p| continues_word(text, start, p)) {
+            // Digits that continue a word ("p1789368220119") or a number
+            // already read ("v2.5") are not a token.
+            if prev
+                .is_some_and(|p| continues_word(text, start, p) || continues_number(text, start, p))
+            {
                 self.pos = self.digits_end(start);
                 continue;
             }
@@ -542,9 +584,9 @@ impl<'a> Iterator for Tokens<'a> {
                 None
             };
             // A run that ends against a word letter ("12.5kg") gives back its
-            // last group; a single group against a letter ("2026x") is part of
-            // that word and reads as nothing.
-            if scale.is_none() && next.is_some_and(is_boundary) {
+            // last group; a single group against a letter ("2026h") is part of
+            // that word and reads as nothing. A corpus keeps the run.
+            if scale.is_none() && !self.letters && next.is_some_and(|n| ends_word(text, end, n)) {
                 let Some(at) = last_symbol else {
                     continue;
                 };

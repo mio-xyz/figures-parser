@@ -13,7 +13,7 @@ hold and how the times are measured.
 | Check | Prose | Dumped table | Every script | Log of ids | Allocations per call |
 |---|---|---|---|---|---|
 | `ungrounded_figures` | 459 µs | 1.41 ms | 1.98 ms | 557 µs | 13 |
-| `ungrounded_percentages` | 349 µs | 1.00 ms | 986 µs | 619 µs | 10 |
+| `ungrounded_ratios` | 349 µs | 1.00 ms | 986 µs | 619 µs | 10 |
 | `prose_arithmetic` | 540 µs | 1.73 ms | 2.22 ms | 726 µs | 18 |
 | `ungrounded_urls` | 83 µs | 51 µs | 44 µs | 57 µs | 14 |
 | `ungrounded_emails` | 34 µs | 79 µs | 39 µs | 20 µs | 3 |
@@ -29,8 +29,8 @@ layout alone, so a smaller difference between two versions is noise.
 
 - **A grounded reply returns sooner.** The comparison stops once the corpus
   has carried every item.
-- **Percentages and arithmetic in prose read the corpus's figures as the
-  figure check does.** A reply without a percentage returns before the
+- **Ratios and arithmetic in prose read the corpus's figures as the
+  figure check does.** A reply without a ratio returns before the
   corpus is read, and so does a message that gave fewer than four values.
 - **Signs are free.** A corpus token's sign is read only beside a value the
   reply states, so a signed reply costs what an unsigned one does.

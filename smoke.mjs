@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
-const { extract, ungroundedFigures, ungroundedPercentages, proseArithmetic, ungroundedUrls, fabricatedUrls, ungroundedEmails, misdatedWeekdays, ungroundedIdentifiers, unseenTokens, ungroundedDurations } = createRequire(import.meta.url)("./index.js");
+const { extract, ungroundedFigures, ungroundedRatios, amountsSharedWith, sharesAmount, statesFigure, proseArithmetic, ungroundedUrls, linkFindings, mendedLinks, fabricatedUrls, ungroundedEmails, misdatedWeekdays, ungroundedIdentifiers, unseenTokens, ungroundedDurations } = createRequire(import.meta.url)("./index.js");
 
 const entities = extract("Total $1,250 and ١٢", { kinds: ["number"] });
 const has = (text, integer) => entities.some((e) => e.text === text && e.value.integer === integer);
@@ -16,8 +16,18 @@ assert.deepEqual(new Set(extract("Fee $1,250 at https://acme.io/x").map((e) => e
 assert.deepEqual(ungroundedUrls("See [#87](https://acme.io/repo) and https://acme.io/made-up.", "https://acme.io/repo"), ["https://acme.io/made-up", "[#87](https://acme.io/repo)"]);
 assert.deepEqual(ungroundedUrls("Fix in [PR 512](https://example.com).", "user text", "[TASK-1](https://example.com)"), ["https://example.com"]);
 assert.deepEqual(fabricatedUrls("https://acme.io/a and https://acme.io/b", "https://acme.io/a"), ["https://acme.io/b"]);
+assert.deepEqual(linkFindings("See [#87](https://acme.io/repo), [PR 512](url) and https://acme.io/made-up.", "https://acme.io/repo"), { unprinted: ["https://acme.io/made-up"], placeholders: ["url"], misdirected: ["[#87](https://acme.io/repo)"], unlinked: [] });
+assert.deepEqual(mendedLinks("Merged #429, see https://x.slack.com/archives/C1/p1791652457.074079.", "https://github.com/a/b/pull/429"), { text: "Merged [#429](https://github.com/a/b/pull/429), see https://x.slack.com/archives/C1/p1791652457074079.", mends: ["https://x.slack.com/archives/C1/p1791652457.074079 → https://x.slack.com/archives/C1/p1791652457074079", "#429 → https://github.com/a/b/pull/429"] });
+assert.deepEqual(fabricatedUrls("https://github.com/new and https://github.com/o/r", "github.com/o/r", ["github.com"]), []);
+assert.deepEqual(ungroundedUrls("Open: #12 and [#60](https://x.slack.com/archives/C1/p1791652457074079).", "https://github.com/a/one/issues/12 https://github.com/a/two/pull/12 https://x.slack.com/archives/C1/p1791652457074079", "", ["github.com"]), ["#12 (https://github.com/a/two/pull/12 or https://github.com/a/one/issues/12)"]);
 assert.deepEqual(ungroundedFigures("ARR is 1,010,000.", "Total: 101000"), ["1,010,000"]);
-assert.deepEqual(ungroundedPercentages("Overall 14.3%, and 30% more per lead.", "overall_rate = 0.1429"), ["30%"]);
+assert.deepEqual(ungroundedRatios("Overall 14.3%, and 30% more per lead, 8.9x.", "overall_rate = 0.1429"), ["30%", "8.9x"]);
+assert.deepEqual(ungroundedRatios("58% never activate", "", "1000 trials, 420 activated"), []);
+assert.deepEqual(ungroundedFigures("Codes 541611 and CPMs of $200-300.", "CPM=$244.49"), []);
+assert.deepEqual(ungroundedFigures("Rose to $3,200, over $3,000.", "max 3225.000000 close 3148.02"), ["3,000"]);
+assert.deepEqual(amountsSharedWith("2027 holds $19,850, Airbnb $729.", ["Total 19850", "Airbnb 729", "none"]), [["19,850"], ["729"], []]);
+assert.equal(sharesAmount("Which tab, 2026 or 2027?", "2026 tab"), false);
+assert.equal(statesFigure("the TOTAL row says 19851", "19,851"), true);
 assert.deepEqual(proseArithmetic("Total 61,300.", "Q1 12,500, Q2 14,200, Q3 16,100, Q4 18,500?", "Q1 12,500"), ["61,300"]);
 assert.deepEqual(proseArithmetic("35.", "10 + 20 + 5?", ""), []);
 assert.deepEqual(extract("mail ana@acme.io", { kinds: ["email"] }).map((e) => [e.kind, e.text]), [["email", "ana@acme.io"]]);

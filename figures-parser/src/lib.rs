@@ -9,8 +9,8 @@
 //!
 //! | Kind | Reader | Comparison |
 //! |---|---|---|
-//! | Numbers | [`numbers`], [`extract_numbers`] | [`ungrounded_figures`], [`ungrounded_percentages`], [`prose_arithmetic`] |
-//! | Links | [`urls`] | [`ungrounded_urls`], [`fabricated_urls`] |
+//! | Numbers | [`numbers`], [`extract_numbers`] | [`ungrounded_figures`], [`ungrounded_ratios`], [`prose_arithmetic`], [`Amounts`], [`states_figure`] |
+//! | Links | [`urls`] | [`ungrounded_urls`], [`link_findings`], [`fabricated_urls`], [`mended_links`] |
 //! | Weekdays beside dates | | [`misdated_weekdays`] |
 //! | Email addresses | [`emails`] | [`ungrounded_emails`] |
 //! | Identifiers | [`identifiers`] | [`ungrounded_identifiers`], [`unseen_tokens`] |
@@ -62,10 +62,12 @@ pub use id::{Identifier, identifiers, ungrounded_identifiers, unseen_tokens};
 pub use jiff::civil::Date;
 pub use kind::{Kind, UnknownKind};
 pub use number::{
-    Figure, Number, Reading, Sign, extract_numbers, numbers, prose_arithmetic, ungrounded_figures,
-    ungrounded_percentages,
+    Amounts, Figure, Number, Reading, Sign, extract_numbers, numbers, prose_arithmetic,
+    shares_amount, states_figure, ungrounded_figures, ungrounded_ratios,
 };
-pub use url::{Url, fabricated_urls, ungrounded_urls, urls};
+pub use url::{
+    LinkFindings, Mended, Url, fabricated_urls, link_findings, mended_links, ungrounded_urls, urls,
+};
 
 /// The README's examples, run as doc tests so they stay true.
 #[cfg(doctest)]
