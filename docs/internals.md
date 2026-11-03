@@ -16,7 +16,7 @@ The library has one module per kind, each with a reader and a comparison:
 
 | Module | Reader | Comparison |
 |---|---|---|
-| `number` | `scan` (tokens), `readings`, `scale` (scale words), `spelled` (numbers in words), `digits` | `ground` (figures, and amounts against one print), `ratio`, `arithmetic` |
+| `number` | `scan` (tokens), `readings`, `scale` (scale words), `spelled` (numbers in words), `digits` | `ground` (figures, and amounts against one print), `ratio`, `arithmetic`, `per_unit` |
 | `url` | `scan` | `ground`, `items` (the items named beside links), `shapes` (links built from printed ids) |
 | `date` | `languages`, `names` (a port of chrono-node, and Arabic), `clock` (its times of day) | `calendar`, `bare` (a weekday beside a bare day), `window` (rows under a date window) |
 | `email` | `emails` | `ungrounded_emails` |
@@ -99,6 +99,8 @@ yields both.
   arithmetic;
 - a thousands separator lowers the floor to 1,000, and a currency mark to
   100;
+- a scale word after the digits lowers it to 1,000, with or without a
+  currency, so a count written "3.2M teachers" or "4K" is held as "$8k" is;
 - a decimal with four fractional digits or more is always held, and is
   grounded by any corpus value that starts with the same digits ("1.1785" is
   carried by "1.17853");
@@ -122,14 +124,21 @@ reply costs no more than an unsigned one.
 
 ### Approximation
 
-A figure marked approximate, scaled or written in words is grounded by any
-corpus value that rounds to it at the precision it is written with: its last
-nonzero digit for a whole number, its last digit for a decimal. "~12,500"
-takes 12,450 to 12,549, "~12,000" takes 11,500 to 12,499, and "~1.1785"
-takes 1.17846. A power of ten with one significant digit takes from where a
-value rounds up to it, so "~10,000" takes 9,500 to 14,999. The range is added
-to the exact key, so a mark never grounds less than the bare figure. An
-approximate figure is reported as written, mark included.
+A figure scaled or written in words is grounded by any corpus value that
+rounds to it at the precision it is written with: its last nonzero digit for
+a whole number, its last digit for a decimal. "1.2 million" takes 1,150,000
+to 1,249,999. A power of ten with one significant digit takes from where a
+value rounds up to it, so "10 million" takes 9,500,000 to 14,999,999.
+
+A figure behind an approximation mark takes a whole unit of that digit on
+either side, both ends included, since a model writes "~3,440" for a 3,449 it
+cut as often as for one it rounded: "~12,500" takes 12,400 to 12,600,
+"~12,000" takes 11,000 to 13,000, "~3M" takes 2M to 4M and "~1.1785" takes
+1.1784 to 1.1786. The mark is read off the reading's full text, which opens
+with it.
+
+The range is added to the exact key, so a mark never grounds less than the
+bare figure. An approximate figure is reported as written, mark included.
 
 ### Scale words
 
@@ -140,11 +149,34 @@ in English, French, German, Spanish, Italian and Portuguese; the CLDR
 abbreviations are read with their case. A scaled figure is stated as rounded,
 so "$1.2 million" is grounded by 1,150,000 to 1,249,999.
 
-An abbreviation that also names a unit or a size reads as a scale only beside
-a currency: "$5m" and "€3B" scale, "5m" (minutes) and "7B" (a model's size)
-do not. "M" and "K" read glued to the digits, or after a space beside a
-currency ("5 M€"). "Mio" and "Bio" need their dot or a currency, since the
-bare letters are also a name.
+An abbreviation that also names a unit reads as a scale in a reply only
+beside a currency: "$5m" scales, "5m" (minutes), "5mm" and "5 mi" do not. The
+capitals "M", "K", "B" and "T", and "k", "b" and "tn", read glued to the
+digits ("3.2M", "7B", "2.8T"), and after a space only beside a currency ("5
+M€"), where a lone letter is otherwise a unit or a word ("500 m", "1750 N").
+"Mio" and "Bio" need their dot or a currency, since the bare letters are also
+a name. A long form reads glued to the digits too ("12million").
+
+The long forms of Dutch, Polish, Swedish, Turkish, Indonesian and Vietnamese
+("3 miljoen", "4 miliony", "5 milyar", "7 juta", "3 tỷ") are read with the
+others, and the scale words of other scripts after the digits, glued or after
+a space: Russian ("3 млн", "2 миллиарда"), Arabic, Persian, Hebrew, Hindi
+("2 लाख") and Thai, which glues them to the next word as well ("5ล้านคน"). A
+word after a thousand or a lakh can multiply it: "mil millones", "mila
+miliardi", "lakh crore". Each abbreviation reads at the one scale of the
+language that writes it so: "tn" is 10¹², though Swedish writes a thousand
+"tn".
+
+A corpus reads scale words loosely (`Tokens::loose_scales`): an abbreviation
+in any case and without the currency or the dot a reply needs ("38.08 M",
+"2,5 Mio", "took 5 m", "12 k rows"), and a name glued to the digits even when
+it runs into the next word, as a scraped page prints "43Kmembers" or
+"1.5bnviews", read as its longest name. Such a token yields its digits' own
+readings beside the scaled ones, since the letters may be a unit after all; a
+reading taken more widely only ever grounds more.
+
+Hangul writes the same multipliers (천, 만, 억, 조) and reads as Han does
+("3억5000만" is 350,000,000).
 
 After whole digits, a Han multiplier may be followed by sections of digits
 and smaller multipliers, which add to it: "3億5000万" is 350,000,000, and
@@ -320,6 +352,38 @@ the piece of a time, both of which the figure check accepts.
 
 The comparison is the figure check's own walk (`ground::ungrounded_by`),
 given what a reading states and which corpus readings ground.
+
+### Per-unit amounts
+
+`number::per_unit::mispaired_per_unit` splits the reply into clauses: lines,
+and sentences as Unicode's sentence rules end them (a full stop, a question
+or exclamation mark, closers and spaces after it, unless a comma, a colon, a
+semicolon, a dash or another end mark follows, and for a full stop unless a
+lower-case word, or a letter or digit glued to it, does), plus a break at
+every full stop before a space, since a segmenter runs on across one before
+a lower-case word ("$35 CPL. $984 lifetime"). A clause's figures are read
+with its links, ratios and scaled figures left out, a token's thousands
+reading taken over its decimal one; an amount is a figure behind a currency
+mark, above zero, and a count a whole figure of two or more without one.
+
+A clause with two amounts and a count holds its candidates: amounts of three
+significant digits or more, with a larger amount beside them, that no amount
+of the clause over one of its counts gives (the total cut to a whole last
+place, the quotient rounded to half of the per-unit amount's). The
+candidates and the questions they raise (is this amount, over this count, a
+printed quotient; and for each larger amount of the clause taken as its
+total, of what other printed amount) are set before the corpus is read, so
+a reply with none never reads it. The corpus is then read line by line, its
+digits as printed (no scale word), each figure met against every open
+question as it is read, so nothing of the corpus is kept: a line answers a
+question when it carries the count, a value the amount rounds, and a larger
+printed amount (behind a currency mark, or a decimal) whose quotient over
+the count is the amount, the first such being the one kept, and for a total
+other than the total's own value. An amount a line shows as a quotient
+itself is no clause's total. The values are compared in floating point, as
+the host's TypeScript does, and the worked quotient is printed as English
+prints an amount, rounding half up on the shortest decimal that reads back
+as the value.
 
 ## Links
 

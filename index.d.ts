@@ -159,6 +159,29 @@ export interface MendedReply {
  */
 export declare function misdatedWeekdays(reply: string, today: string): Array<string>
 
+/**
+ * A per-unit amount a reply pairs with a total and a count it is not the
+ * quotient of.
+ */
+export interface MispairedFigure {
+  /** The per-unit amount as written, its currency mark first ("$45.83"). */
+  perUnit: string
+  /** The clause's total over its count, worked out ("$74.74 / 2 = $37.37"). */
+  stated: string
+  /**
+   * The printed amount the per-unit one is that count's quotient of
+   * ("$91.65 / 2").
+   */
+  printed: string
+}
+
+/**
+ * Per-unit amounts in `reply` stated beside a total and a count they are
+ * not the quotient of, when a line of `corpus` shows them as another
+ * amount over that count.
+ */
+export declare function mispairedPerUnit(reply: string, corpus: string): Array<MispairedFigure>
+
 /** One reading of one number, with where it sits in the input. */
 export interface NumberEntity {
   /** The kind of figure. */

@@ -6,7 +6,7 @@ use std::ops::Range;
 
 use super::digits::digit_value;
 use super::scan::{is_boundary, is_inline_space, is_symbol, marked_after, marked_before};
-use crate::text::{char_at, is_letter, lookup};
+use crate::text::{char_at, is_letter, lookup, same_word};
 
 /// A scale written after a figure's digits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,7 +38,7 @@ enum Needs {
     DotOrCurrency,
 }
 
-/// The longest ASCII long form, in bytes ("milliarden").
+/// The longest long form, in bytes ("milliarden", "miliardów").
 const LONGEST_WORD: usize = 10;
 
 /// The power of ten a long form stands for, read after a space, its ASCII
@@ -48,14 +48,18 @@ const LONGEST_WORD: usize = 10;
 const fn ascii_word(lower: &[u8]) -> Option<u32> {
     let magnitude = match lower {
         b"hundred" => 2,
-        b"thousand" | b"mille" | b"tausend" | b"mil" | b"mila" => 3,
+        b"thousand" | b"mille" | b"tausend" | b"mil" | b"mila" | b"duizend" | b"tusen"
+        | b"ribu" => 3,
         b"lakh" | b"lakhs" => 5,
         b"million" | b"millions" | b"millionen" | b"millon" | b"millones" | b"milione"
-        | b"milioni" | b"milhao" | b"milhoes" => 6,
+        | b"milioni" | b"milhao" | b"milhoes" | b"miljoen" | b"miljon" | b"miljoner"
+        | b"milion" | b"miliony" | b"milyon" | b"juta" => 6,
         b"crore" | b"crores" => 7,
         b"billion" | b"milliard" | b"milliards" | b"milliarde" | b"milliarden" | b"miliardo"
-        | b"miliardi" | b"bilhao" | b"bilhoes" => 9,
-        b"trillion" | b"billionen" | b"billones" => 12,
+        | b"miliardi" | b"bilhao" | b"bilhoes" | b"miljard" | b"miljarder" | b"miliard"
+        | b"miliardy" | b"milyar" | b"miliar" => 9,
+        b"trillion" | b"billionen" | b"billones" | b"billions" | b"biljoen" | b"biljon"
+        | b"biljoner" | b"bilion" | b"biliony" | b"trilyon" | b"triliun" => 12,
         _ => return None,
     };
     Some(magnitude)
@@ -63,50 +67,132 @@ const fn ascii_word(lower: &[u8]) -> Option<u32> {
 
 /// The long forms with a letter outside ASCII, read case aside.
 const ACCENTED_WORDS: &[(&str, u32)] = &[
+    ("tysiąc", 3),
+    ("tysiące", 3),
+    ("tysięcy", 3),
+    ("nghìn", 3),
     ("millón", 6),
     ("milhão", 6),
     ("milhões", 6),
+    ("milionów", 6),
+    ("triệu", 6),
     ("bilhão", 9),
     ("bilhões", 9),
+    ("miliardów", 9),
+    ("tỷ", 9),
     ("billón", 12),
     ("bilião", 12),
     ("biliões", 12),
+    ("bilionów", 12),
+    ("trilhão", 12),
+    ("trilhões", 12),
 ];
 
-/// What Spanish and Portuguese write after "mil" for a thousand million.
-const THOUSAND_MILLION: &[(&str, u32)] = &[("millones", 9), ("milhões", 9), ("milhoes", 9)];
+/// The scale words of scripts other than Latin, read from their first
+/// letter on, glued to the digits or after a space. Thai writes them glued
+/// to the next word as well.
+const NON_LATIN_WORDS: &[(&str, u32)] = &[
+    ("тыс", 3),
+    ("тысяча", 3),
+    ("тысячи", 3),
+    ("тысяч", 3),
+    ("млн", 6),
+    ("миллион", 6),
+    ("миллиона", 6),
+    ("миллионов", 6),
+    ("млрд", 9),
+    ("миллиард", 9),
+    ("миллиарда", 9),
+    ("миллиардов", 9),
+    ("трлн", 12),
+    ("триллион", 12),
+    ("триллиона", 12),
+    ("триллионов", 12),
+    ("ألف", 3),
+    ("آلاف", 3),
+    ("مليون", 6),
+    ("ملايين", 6),
+    ("مليار", 9),
+    ("ترليون", 12),
+    ("هزار", 3),
+    ("میلیون", 6),
+    ("میلیارد", 9),
+    ("تریلیون", 12),
+    ("هزارمیلیارد", 12),
+    ("אלף", 3),
+    ("מיליון", 6),
+    ("מיליארד", 9),
+    ("טריליון", 12),
+    ("\u{939}\u{91c}\u{93c}\u{93e}\u{930}", 3),
+    ("\u{939}\u{95b}\u{93e}\u{930}", 3),
+    ("लाख", 5),
+    ("अरब", 9),
+    ("खरब", 11),
+    ("พัน", 3),
+    ("ล้าน", 6),
+    ("พันล้าน", 9),
+    ("ล้านล้าน", 12),
+];
+
+/// A word after a scale that multiplies it, by the scale it follows: what
+/// Spanish and Portuguese write after "mil" for a thousand million, Italian
+/// after "mila" for a thousand billion, and Indian English after "lakh".
+const COMPOUNDS: &[(u32, &str, u32)] = &[
+    (3, "millones", 9),
+    (3, "milhões", 9),
+    (3, "milhoes", 9),
+    (3, "miliardi", 12),
+    (5, "crore", 12),
+    (5, "crores", 12),
+];
 
 /// The power of ten an abbreviation stands for, read with its case, glued
 /// to the digits or after a space, and when it reads.
 fn abbreviation(word: &str) -> Option<(u32, Needs)> {
     let found = match word {
         "K" | "k" => (3, Needs::CurrencyWhenSpaced),
-        "Tsd" | "tsd" => (3, Needs::Nothing),
+        "Tsd" | "tsd" | "tys" => (3, Needs::Nothing),
         "M" => (6, Needs::CurrencyWhenSpaced),
         "MM" | "mm" | "m" | "Mn" | "mn" | "mi" => (6, Needs::Currency),
         "Mio" => (6, Needs::DotOrCurrency),
         "Mln" | "mln" => (6, Needs::Nothing),
         "Cr" | "cr" => (7, Needs::Currency),
-        "B" | "b" | "bi" | "Md" => (9, Needs::Currency),
+        "B" | "b" => (9, Needs::CurrencyWhenSpaced),
+        "bi" | "Md" => (9, Needs::Currency),
         "bn" | "Bn" | "BN" | "Mds" | "Mrd" | "Mld" | "mld" => (9, Needs::Nothing),
-        "T" => (12, Needs::Currency),
-        "tn" | "Tn" => (12, Needs::CurrencyWhenSpaced),
+        "T" | "tn" | "Tn" => (12, Needs::CurrencyWhenSpaced),
+        "Bln" | "bln" => (12, Needs::Nothing),
         "Bio" => (12, Needs::DotOrCurrency),
         _ => return None,
     };
     Some(found)
 }
 
-/// The power of ten a Han multiplier stands for: the small ones (十, 百,
-/// 千), which may lead a large one (万, 億, 亿, 兆) as in "5千万".
+/// The power of an abbreviation read in a corpus, its ASCII letters already
+/// lowercased: every one [`abbreviation`] reads, whatever its case.
+const fn loose_abbreviation(lower: &[u8]) -> Option<u32> {
+    let magnitude = match lower {
+        b"k" | b"tsd" | b"tys" => 3,
+        b"m" | b"mm" | b"mn" | b"mi" | b"mio" | b"mln" => 6,
+        b"cr" => 7,
+        b"b" | b"bi" | b"md" | b"bn" | b"mds" | b"mrd" | b"mld" => 9,
+        b"t" | b"tn" | b"bio" | b"bln" => 12,
+        _ => return None,
+    };
+    Some(magnitude)
+}
+
+/// The power of ten a Han or Hangul multiplier stands for: the small ones
+/// (十, 百, 千, 천), which may lead a large one (万, 億, 亿, 兆, 만, 억, 조)
+/// as in "5千万".
 const fn han_magnitude(c: char) -> Option<(u32, bool)> {
     match c {
         '十' => Some((1, false)),
         '百' => Some((2, false)),
-        '千' => Some((3, false)),
-        '万' | '萬' => Some((4, true)),
-        '億' | '亿' => Some((8, true)),
-        '兆' => Some((12, true)),
+        '千' | '천' => Some((3, false)),
+        '万' | '萬' | '만' => Some((4, true)),
+        '億' | '亿' | '억' => Some((8, true)),
+        '兆' | '조' => Some((12, true)),
         _ => None,
     }
 }
@@ -351,6 +437,13 @@ fn may_start_word(bytes: &[u8], at: usize) -> bool {
                 | b"mld"
                 | b"bil"
                 | b"bio"
+                | b"bln"
+                | b"tys"
+                | b"dui"
+                | b"tus"
+                | b"rib"
+                | b"jut"
+                | b"ngh"
         ),
         _ => false,
     }
@@ -360,35 +453,80 @@ fn may_start_word(bytes: &[u8], at: usize) -> bool {
 /// case aside; `| 0x20` lowercases an ASCII letter and maps no other byte
 /// onto one.
 const fn is_scale_initial(b: u8) -> bool {
-    matches!(b | 0x20, b'b' | b'c' | b'h' | b'k' | b'l' | b'm' | b't')
+    matches!(
+        b | 0x20,
+        b'b' | b'c' | b'd' | b'h' | b'j' | b'k' | b'l' | b'm' | b'n' | b'r' | b't'
+    )
 }
 
 /// Whether a scale may stand at byte `end`, glued or after one space, read
 /// from the bytes there: most figures are followed by nothing that may begin
-/// one and are settled by one byte, inline, without reading a word.
+/// one and are settled by one byte, inline, without reading a word. With
+/// `loose`, an ASCII letter glued to the digits that may begin a name is
+/// enough, since the name may run into the word after it.
 #[inline]
-pub(super) fn may_scale(text: &str, end: usize) -> bool {
+pub(super) fn may_scale(text: &str, end: usize, loose: bool) -> bool {
     let bytes = text.as_bytes();
-    let at = if bytes.get(end) == Some(&b' ') {
-        end.saturating_add(1)
-    } else {
-        end
-    };
+    let spaced = bytes.get(end) == Some(&b' ');
+    let at = if spaced { end.saturating_add(1) } else { end };
     match bytes.get(at) {
-        Some(&b) if b.is_ascii() => is_scale_initial(b) && may_start_word(bytes, at),
+        Some(&b) if b.is_ascii() => {
+            is_scale_initial(b) && ((loose && !spaced) || may_start_word(bytes, at))
+        }
         Some(_) => may_scale_unicode(text, end),
         None => false,
     }
 }
 
-/// [`may_scale`] where a byte outside ASCII follows: only a Han multiplier
-/// or a space within a line may begin a scale there.
+/// [`may_scale`] where a byte outside ASCII follows: a Han or Hangul
+/// multiplier, a scale word of another script, or a space within a line
+/// before one or before a Latin word.
 fn may_scale_unicode(text: &str, end: usize) -> bool {
     char_at(text, end).is_some_and(|c| {
-        han_magnitude(c).is_some()
-            || (is_inline_space(c)
-                && may_start_word(text.as_bytes(), end.saturating_add(c.len_utf8())))
+        if han_magnitude(c).is_some() || non_latin_word(text, end).is_some() {
+            return true;
+        }
+        let after = end.saturating_add(c.len_utf8());
+        is_inline_space(c)
+            && (may_start_word(text.as_bytes(), after) || non_latin_word(text, after).is_some())
     })
+}
+
+/// Whether `c` is the first letter of one of [`NON_LATIN_WORDS`], so most
+/// words of those scripts are turned away on one character.
+const fn is_non_latin_initial(c: char) -> bool {
+    matches!(
+        c,
+        'т' | 'м'
+            | 'أ'
+            | 'آ'
+            | 'م'
+            | 'ت'
+            | 'ه'
+            | 'א'
+            | 'מ'
+            | 'ט'
+            | 'ह'
+            | 'ल'
+            | 'अ'
+            | 'ख'
+            | 'พ'
+            | 'ล'
+    )
+}
+
+/// The scale word of another script that starts at byte `at`, the longest
+/// one, with the byte it ends at.
+fn non_latin_word(text: &str, at: usize) -> Option<(u32, usize)> {
+    let rest = text.get(at..)?;
+    if !rest.chars().next().is_some_and(is_non_latin_initial) {
+        return None;
+    }
+    NON_LATIN_WORDS
+        .iter()
+        .filter(|&&(word, _)| rest.starts_with(word))
+        .max_by_key(|&&(word, _)| word.len())
+        .map(|&(word, magnitude)| (magnitude, at.saturating_add(word.len())))
 }
 
 /// The end of the run of letters a word holds from byte `start`, by byte
@@ -424,10 +562,22 @@ fn word_magnitude(word: &str) -> Option<u32> {
 }
 
 /// The scale written after the digits `start..end`, `next` being the
-/// character at `end`: glued ("12.5K", "3bn", "1,2万"), or after one space
-/// ("1.2 million", "3 Mrd.", "12 k€"). A word reads only when nothing but a
-/// letterless character follows it.
-pub(super) fn scale_after(text: &str, start: usize, end: usize, next: char) -> Option<Scale> {
+/// character at `end`: glued ("12.5K", "3bn", "1,2万", "12million"), or after
+/// one space ("1.2 million", "3 Mrd.", "12 k€", "3 млн"). A word reads only
+/// when nothing but a letterless character follows it.
+///
+/// With `loose`, as a corpus is read, an abbreviation reads in any case and
+/// without the currency or the dot that tells it from a unit in a reply
+/// ("5 m", "38.08 Mio"), and a name glued to the digits may run into the next
+/// word, as a scraped page prints "43Kmembers": a reading taken more widely
+/// only ever grounds more.
+pub(super) fn scale_after(
+    text: &str,
+    start: usize,
+    end: usize,
+    next: char,
+    loose: bool,
+) -> Option<Scale> {
     if han_magnitude(next).is_some() {
         return han_scale(text, start..end);
     }
@@ -437,32 +587,49 @@ pub(super) fn scale_after(text: &str, start: usize, end: usize, next: char) -> O
     } else {
         end
     };
-    if !may_start_word(text.as_bytes(), word_start) {
+    let open_ended = loose && !spaced;
+    if let Some((magnitude, stop)) = non_latin_word(text, word_start) {
+        let ends = open_ended || !char_at(text, stop).is_some_and(is_boundary);
+        return ends.then_some(Scale {
+            magnitude,
+            end: stop,
+            rest: 0,
+        });
+    }
+    let bytes = text.as_bytes();
+    let initial = bytes.get(word_start).is_some_and(|&b| is_scale_initial(b));
+    if !(may_start_word(bytes, word_start) || (open_ended && initial)) {
         return None;
     }
     let word_stop = word_end(text, word_start);
+    let word = text.get(word_start..word_stop)?;
+    if open_ended {
+        return glued_name(text, word, word_start);
+    }
     if char_at(text, word_stop).is_some_and(is_boundary) {
         return None;
     }
-    let word = text.get(word_start..word_stop)?;
-    if spaced && let Some(magnitude) = word_magnitude(word) {
-        let millions = (magnitude == 3)
-            .then(|| thousand_million(text, word_stop))
-            .flatten();
-        return Some(millions.unwrap_or(Scale {
+    if let Some(magnitude) = word_magnitude(word) {
+        return Some(compound(text, word_stop, magnitude).unwrap_or(Scale {
             magnitude,
             end: word_stop,
             rest: 0,
         }));
     }
-    let (magnitude, needs) = abbreviation(word)?;
+    let (magnitude, needs) = abbreviation(word).or_else(|| {
+        loose
+            .then(|| lowercase_abbreviation(word))
+            .flatten()
+            .map(|magnitude| (magnitude, Needs::Nothing))
+    })?;
     let currency = || marked_before(text, start) || marked_after(text, word_stop);
-    let reads = match needs {
-        Needs::Nothing => true,
-        Needs::CurrencyWhenSpaced => !spaced || currency(),
-        Needs::Currency => currency(),
-        Needs::DotOrCurrency => text.as_bytes().get(word_stop) == Some(&b'.') || currency(),
-    };
+    let reads = loose
+        || match needs {
+            Needs::Nothing => true,
+            Needs::CurrencyWhenSpaced => !spaced || currency(),
+            Needs::Currency => currency(),
+            Needs::DotOrCurrency => bytes.get(word_stop) == Some(&b'.') || currency(),
+        };
     reads.then_some(Scale {
         magnitude,
         end: word_stop,
@@ -470,14 +637,61 @@ pub(super) fn scale_after(text: &str, start: usize, end: usize, next: char) -> O
     })
 }
 
-/// "mil millones", "mil milhões": a thousand million, when the millions
-/// follow the thousand that ends at byte `end`.
-fn thousand_million(text: &str, end: usize) -> Option<Scale> {
+/// [`loose_abbreviation`] for `word` as written.
+fn lowercase_abbreviation(word: &str) -> Option<u32> {
+    let mut lower = [0_u8; 3];
+    let lower = lower.get_mut(..word.len())?;
+    lower.copy_from_slice(word.as_bytes());
+    lower.make_ascii_lowercase();
+    loose_abbreviation(lower)
+}
+
+/// The longest name that starts `word`, a run of letters from byte `start`
+/// of `text` glued to the digits: a long form or an abbreviation, case
+/// aside. A long form that is the whole word may lead a compound, as a reply
+/// reads it.
+fn glued_name(text: &str, word: &str, start: usize) -> Option<Scale> {
+    word.char_indices()
+        .rev()
+        .map(|(at, c)| at.saturating_add(c.len_utf8()))
+        .filter(|&len| len <= LONGEST_WORD)
+        .find_map(|len| {
+            let name = word.get(..len)?;
+            let end = start.saturating_add(len);
+            if let Some(magnitude) = word_magnitude(name) {
+                let whole = (len == word.len())
+                    .then(|| compound(text, end, magnitude))
+                    .flatten();
+                return Some(whole.unwrap_or(Scale {
+                    magnitude,
+                    end,
+                    rest: 0,
+                }));
+            }
+            Some(Scale {
+                magnitude: lowercase_abbreviation(name)?,
+                end,
+                rest: 0,
+            })
+        })
+}
+
+/// The word after a scale that multiplies it ("mil millones", "5 lakh
+/// crore"), when one follows the scale of power `magnitude` ending at byte
+/// `end`.
+fn compound(text: &str, end: usize, magnitude: u32) -> Option<Scale> {
+    if !matches!(magnitude, 3 | 5) {
+        return None;
+    }
     let space = char_at(text, end).filter(|&c| is_inline_space(c))?;
     let start = end.saturating_add(space.len_utf8());
     let stop = word_end(text, start);
+    let word = text.get(start..stop)?;
+    let &(_, _, total) = COMPOUNDS
+        .iter()
+        .find(|&&(head, next, _)| head == magnitude && same_word(next, word))?;
     Some(Scale {
-        magnitude: lookup(THOUSAND_MILLION, text.get(start..stop)?)?,
+        magnitude: total,
         end: stop,
         rest: 0,
     })

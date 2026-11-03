@@ -9,7 +9,7 @@
 //!
 //! | Kind | Reader | Comparison |
 //! |---|---|---|
-//! | Numbers | [`numbers`], [`extract_numbers`] | [`ungrounded_figures`], [`ungrounded_ratios`], [`prose_arithmetic`], [`Amounts`], [`states_figure`] |
+//! | Numbers | [`numbers`], [`extract_numbers`] | [`ungrounded_figures`], [`ungrounded_ratios`], [`prose_arithmetic`], [`mispaired_per_unit`], [`Amounts`], [`states_figure`] |
 //! | Links | [`urls`] | [`ungrounded_urls`], [`link_findings`], [`fabricated_urls`], [`mended_links`], [`url_printed_in`] |
 //! | Weekdays beside dates | | [`misdated_weekdays`] |
 //! | Rows beside a date window | | [`rows_outside_window`] |
@@ -63,8 +63,8 @@ pub use id::{Identifier, identifiers, ungrounded_identifiers, unprinted_ids, uns
 pub use jiff::civil::Date;
 pub use kind::{Kind, UnknownKind};
 pub use number::{
-    Amounts, Figure, Number, Reading, Sign, extract_numbers, numbers, prose_arithmetic,
-    shares_amount, states_figure, ungrounded_figures, ungrounded_ratios,
+    Amounts, Figure, MispairedFigure, Number, Reading, Sign, extract_numbers, mispaired_per_unit,
+    numbers, prose_arithmetic, shares_amount, states_figure, ungrounded_figures, ungrounded_ratios,
 };
 pub use url::{
     LinkFindings, Mended, Url, fabricated_urls, link_findings, mended_links, ungrounded_urls,

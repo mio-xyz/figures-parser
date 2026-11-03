@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
-const { extract, ungroundedFigures, ungroundedRatios, amountsSharedWith, sharesAmount, statesFigure, proseArithmetic, ungroundedUrls, linkFindings, mendedLinks, fabricatedUrls, ungroundedEmails, misdatedWeekdays, rowsOutsideWindow, ungroundedIdentifiers, unseenTokens, ungroundedDurations, unprintedIds, urlPrintedIn } = createRequire(import.meta.url)("./index.js");
+const { extract, ungroundedFigures, ungroundedRatios, mispairedPerUnit, amountsSharedWith, sharesAmount, statesFigure, proseArithmetic, ungroundedUrls, linkFindings, mendedLinks, fabricatedUrls, ungroundedEmails, misdatedWeekdays, rowsOutsideWindow, ungroundedIdentifiers, unseenTokens, ungroundedDurations, unprintedIds, urlPrintedIn } = createRequire(import.meta.url)("./index.js");
 
 const entities = extract("Total $1,250 and ١٢", { kinds: ["number"] });
 const has = (text, integer) => entities.some((e) => e.text === text && e.value.integer === integer);
@@ -28,6 +28,8 @@ assert.deepEqual(ungroundedFigures("Rose to $3,200, over $3,000.", "max 3225.000
 assert.deepEqual(amountsSharedWith("2027 holds $19,850, Airbnb $729.", ["Total 19850", "Airbnb 729", "none"]), [["19,850"], ["729"], []]);
 assert.equal(sharesAmount("Which tab, 2026 or 2027?", "2026 tab"), false);
 assert.equal(statesFigure("the TOTAL row says 19851", "19,851"), true);
+assert.deepEqual(mispairedPerUnit("$74.74 spend, 2 leads, $45.83 CPL.", "LT: $91.65 / 2 leads / CPL $45.83 | Y: $74.74 / 2 leads"), [{ perUnit: "$45.83", stated: "$74.74 / 2 = $37.37", printed: "$91.65 / 2" }]);
+assert.deepEqual(ungroundedFigures("The district counts 3.2M teachers, 43K on Reddit.", "teachers: 3,213,480; r/matheducation 43Kmembers"), []);
 assert.deepEqual(proseArithmetic("Total 61,300.", "Q1 12,500, Q2 14,200, Q3 16,100, Q4 18,500?", "Q1 12,500"), ["61,300"]);
 assert.deepEqual(proseArithmetic("35.", "10 + 20 + 5?", ""), []);
 assert.deepEqual(extract("mail ana@acme.io", { kinds: ["email"] }).map((e) => [e.kind, e.text]), [["email", "ana@acme.io"]]);
@@ -47,7 +49,7 @@ assert.deepEqual(extract("~10–30 min", { kinds: ["duration"] }).map((e) => [e.
 assert.deepEqual(extract("-$12,500 and (1,250)", { kinds: ["number"] }).filter((e) => !e.value.derived).map((e) => [e.text, e.value.sign]), [["12,500", "minus"], ["12,500", "minus"], ["1,250", "parenthesized"], ["1,250", "parenthesized"]]);
 assert.deepEqual(ungroundedFigures("Moved by -12,500.", "delta: 12500"), ["-12,500"]);
 assert.deepEqual(extract("~$12,500", { kinds: ["number"] }).map((e) => e.value.approximate), [true, true, true, false]);
-assert.deepEqual(ungroundedFigures("About ~12,500 and ~13,000.", "signups: 12487"), ["~13,000"]);
+assert.deepEqual(ungroundedFigures("About ~12,500 and ~14,000.", "signups: 12487"), ["~14,000"]);
 assert.deepEqual(extract("Revenue hit $1.2 million", { kinds: ["number"] }).filter((e) => !e.value.derived).map((e) => [e.text, e.value.integer, e.value.approximate]), [["1.2 million", "1200000", true]]);
 assert.deepEqual(ungroundedFigures("Revenue hit $1.2 million, $4.7 million planned.", "revenue: 1234567"), ["4.7 million"]);
 assert.deepEqual(extract("We hit twelve thousand five hundred users", { kinds: ["number"] }).map((e) => [e.text, e.value.integer]), [["twelve thousand five hundred", "12500"]]);

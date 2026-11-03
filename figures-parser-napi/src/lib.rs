@@ -321,6 +321,35 @@ pub fn prose_arithmetic(reply: String, message: String, corpus: String) -> Vec<S
     figures_parser::prose_arithmetic(&reply, &message, &corpus)
 }
 
+/// A per-unit amount a reply pairs with a total and a count it is not the
+/// quotient of.
+#[napi(object)]
+pub struct MispairedFigure {
+    /// The per-unit amount as written, its currency mark first ("$45.83").
+    pub per_unit: String,
+    /// The clause's total over its count, worked out ("$74.74 / 2 = $37.37").
+    pub stated: String,
+    /// The printed amount the per-unit one is that count's quotient of
+    /// ("$91.65 / 2").
+    pub printed: String,
+}
+
+/// Per-unit amounts in `reply` stated beside a total and a count they are
+/// not the quotient of, when a line of `corpus` shows them as another
+/// amount over that count.
+#[napi(catch_unwind)]
+#[must_use]
+pub fn mispaired_per_unit(reply: String, corpus: String) -> Vec<MispairedFigure> {
+    figures_parser::mispaired_per_unit(&reply, &corpus)
+        .into_iter()
+        .map(|m| MispairedFigure {
+            per_unit: m.per_unit,
+            stated: m.stated,
+            printed: m.printed,
+        })
+        .collect()
+}
+
 /// The lowercased hosts the caller trusts pages on, as `&str`s.
 fn host_list(hosts: Option<&[String]>) -> Vec<&str> {
     hosts

@@ -784,6 +784,7 @@ module.exports.fabricatedUrls = nativeBinding.fabricatedUrls
 module.exports.linkFindings = nativeBinding.linkFindings
 module.exports.mendedLinks = nativeBinding.mendedLinks
 module.exports.misdatedWeekdays = nativeBinding.misdatedWeekdays
+module.exports.mispairedPerUnit = nativeBinding.mispairedPerUnit
 module.exports.proseArithmetic = nativeBinding.proseArithmetic
 module.exports.rowsOutsideWindow = nativeBinding.rowsOutsideWindow
 module.exports.sharesAmount = nativeBinding.sharesAmount

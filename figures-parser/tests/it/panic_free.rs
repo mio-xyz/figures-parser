@@ -10,9 +10,10 @@ use figures_parser::number::scan::{Scratch, tokens};
 use figures_parser::utf16::{Utf16Cursor, units};
 use figures_parser::{
     Date, durations, emails, extract_numbers, fabricated_urls, identifiers, link_findings,
-    mended_links, misdated_weekdays, numbers, prose_arithmetic, rows_outside_window,
-    ungrounded_durations, ungrounded_emails, ungrounded_figures, ungrounded_identifiers,
-    ungrounded_ratios, ungrounded_urls, unprinted_ids, unseen_tokens, url_printed_in, urls,
+    mended_links, misdated_weekdays, mispaired_per_unit, numbers, prose_arithmetic,
+    rows_outside_window, ungrounded_durations, ungrounded_emails, ungrounded_figures,
+    ungrounded_identifiers, ungrounded_ratios, ungrounded_urls, unprinted_ids, unseen_tokens,
+    url_printed_in, urls,
 };
 
 /// Calls every entry point on the three texts, and returns a sum the
@@ -21,7 +22,10 @@ fn exercise(reply: &str, corpus: &str, prompt: &str) -> usize {
     let mut n = 0;
     let mut scratch = Scratch::default();
     for text in [reply, corpus, prompt] {
-        n += tokens(text).count() + tokens(text).without_currency().count();
+        n += tokens(text).count()
+            + tokens(text).without_currency().count()
+            + tokens(text).against_letters().loose_scales().count()
+            + tokens(text).without_scales().count();
         for token in tokens(text) {
             token.for_each_reading(&mut scratch, |r| {
                 n += r.stated().map_or(0, |k| k.integer().len()) + usize::from(r.currency);
@@ -52,6 +56,8 @@ fn exercise(reply: &str, corpus: &str, prompt: &str) -> usize {
         + ungrounded_ratios(corpus, reply, "").len()
         + prose_arithmetic(reply, prompt, corpus).len()
         + prose_arithmetic(corpus, reply, prompt).len()
+        + mispaired_per_unit(reply, corpus).len()
+        + mispaired_per_unit(corpus, prompt).len()
         + fabricated_urls(reply, corpus, &[]).len()
         + fabricated_urls(corpus, reply, &["github.com"]).len()
         + ungrounded_urls(reply, corpus, prompt, &[]).len()
@@ -356,6 +362,29 @@ const POOL: &[&str] = &[
     "19-26 oct.",
     " to ",
     "Dec 28",
+    " млн",
+    "млрд",
+    "ล้าน",
+    "억",
+    "만",
+    "천",
+    " miljoen",
+    " mila miliardi",
+    " lakh crore",
+    "Kmembers",
+    "bn",
+    " M",
+    " m",
+    "B",
+    "T",
+    " tỷ",
+    " tysiące",
+    "हज़ार",
+    "$74.74 spend, 2 leads, $45.83 CPL",
+    "LT: $91.65 / 2 leads / CPL $45.83",
+    "?, ",
+    ". ",
+    ".)",
 ];
 
 /// A xorshift generator, seeded so a failure reproduces.

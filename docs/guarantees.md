@@ -51,12 +51,20 @@ so a change that adds one per token shows.
 
 The number, link and weekday readers replace TypeScript implementations, and
 were fuzzed against them with generated inputs: 150,000 for numbers, 120,000
-for links and 120,000 for weekdays. Every difference that remained is a
+for links and 120,000 for weekdays. The per-unit check was run beside its
+TypeScript original on 28,000 generated replies and prints, and agrees on
+all of them once a plain space between two figures sets them apart, as it
+does everywhere in the library. Every difference that remained is a
 deliberate one:
 
 - digit groups are counted in code points, so astral digits group;
 - a sign before a figure is part of its value;
 - a figure marked approximate is grounded by a value that rounds to it;
+- a scale abbreviation reads at the one scale of the language that writes it
+  so ("2tn" is never 2,000), and a lowercase "m" or "t" glued to the digits
+  reads as a scale only beside a currency ("took 5m" is minutes);
+- a figure is held on its own when a scaled figure beside it shares its
+  digits: "Paid $500 of a 500 k€ budget" still holds the $500;
 - a scale word after the digits multiplies the figure;
 - a reply's figure that fits two readings is grounded by either;
 - a number written in words is read;

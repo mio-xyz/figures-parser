@@ -58,6 +58,7 @@ comparison reads the whole corpus: the worst case.
 | `amounts/shared_with` | One print matched against amounts read once. |
 | `link_findings` | The link comparison by kind, worst case. |
 | `mended_links` | The link repair, with a dotted message link and an item to link. |
+| `mispaired_per_unit` | The per-unit check with a clause no printed line explains, so every line is read. |
 
 ## Allocations
 

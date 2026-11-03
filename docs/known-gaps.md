@@ -13,14 +13,28 @@ it stands; a contribution that closes one should remove it here.
   "point" between number words is read as a decimal point.
 - Han digits after Arabic ones ("3億五千万") read as two figures, "3億" and
   "五千万", and so do digits after a Han multiplier that follows a decimal
-  ("1.2万5000"). Korean multipliers are not read, so "3억 5천만" reads as 3
-  and 5.
+  ("1.2万5000"). Korean sections a space parts ("3억 5천만") read as two
+  figures, 300,000,000 and 50,000,000.
 - "billion" is read on the short scale, 10⁹, as English writes it; the
   French "billion" and the German "Billion" are 10¹², so "1 billion" in a
   French reply is read a thousand times too small. The plural forms that only
   those languages write ("Billionen", "billones") are read as 10¹².
-- A long scale word glued to the digits ("12million") is not read, nor is a
-  scale word after more than one space.
+- A scale word after more than one space is not read.
+- An abbreviation reads at one scale, the one the language that writes it so
+  gives it: "tn" and "bn" are 10¹² and 10⁹ as English reads them, "b" and
+  "m" are never a thousand or a billion, though Swedish writes a thousand
+  "tn" and Turkish "B", so "2tn" is not grounded by 2,000. The host's
+  TypeScript reads each name at every scale a locale gives it.
+- In a reply, a lowercase letter that also names a unit ("5m", "5t") reads as
+  a scale only beside a currency, so "took 5m" is not held; the host's
+  TypeScript holds it as 5 million. A multi-letter abbreviation that is also a
+  word or a unit ("2 Mio messages", "5 mn", "5 cr") needs its currency too.
+- The short forms of Indonesian, Vietnamese, Turkish and Indian English ("jt",
+  "rb", "tr", "n", "Mr", "l", "lcr") and Turkish "bin", an English word, are
+  not read, nor Vietnamese "nghìn tỷ".
+- A scaled figure whose digits also group ("1,250 M€") is grounded by either
+  reading, 1,250 million or 1.25 million, as any figure that fits two
+  readings is; the host's TypeScript holds it to the grouped one.
 - A sign written in words ("minus 12,500"), with an en dash ("–12,500"), after
   the figure ("12,500-") or as an accounting suffix ("12,500 CR") is not
   read, so such a figure holds the corpus to no sign.
@@ -46,6 +60,17 @@ it stands; a contribution that closes one should remove it here.
   not read, so such a run passes.
 - "half a hundred thousand" is not read, since a hundred does not follow a
   half; "a hundred thousand" is read from it, as an idiom.
+
+## Per-unit amounts
+
+- An amount is a figure with a currency mark before it ("$45.83", "USD
+  45.83"); one written with its mark after ("45,83 €") is read as a count.
+- A clause ends where Unicode's sentence rules end one, approximately: a full
+  stop glued to the next word ("lifetime.Next") ends none, and abbreviations
+  ("e.g. the") end one.
+- Three amounts and two counts in one clause are paired as any total over any
+  count, so a clause listing two windows side by side may pair across them.
+- A sum of printed amounts over a count is not derived.
 
 ## Ratios
 

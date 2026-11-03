@@ -222,7 +222,7 @@ fn dashed(text: &str, prev_end: usize, token: &Token<'_>) -> bool {
 
 /// The byte ranges of the links in `text`: a link's digits (a Slack ts, an
 /// id) are the link check's to judge, never a figure.
-fn link_spans(text: &str) -> Vec<Range<usize>> {
+pub(super) fn link_spans(text: &str) -> Vec<Range<usize>> {
     if !text.contains("://") {
         return Vec::new();
     }
@@ -230,7 +230,7 @@ fn link_spans(text: &str) -> Vec<Range<usize>> {
 }
 
 /// Whether byte `at` falls in one of `spans`.
-fn skipped(spans: &[Range<usize>], at: usize) -> bool {
+pub(super) fn skipped(spans: &[Range<usize>], at: usize) -> bool {
     spans.iter().any(|span| span.contains(&at))
 }
 
@@ -442,6 +442,7 @@ impl Needles {
         }
         for token in tokens(corpus)
             .against_letters()
+            .loose_scales()
             .without_currency()
             .without_signs()
         {
@@ -522,6 +523,7 @@ impl Needles {
         }
         for token in tokens(corpus)
             .against_letters()
+            .loose_scales()
             .without_currency()
             .without_signs()
         {
@@ -575,6 +577,7 @@ impl Needles {
         }
         for token in tokens(corpus)
             .against_letters()
+            .loose_scales()
             .without_currency()
             .without_signs()
         {

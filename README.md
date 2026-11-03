@@ -66,6 +66,7 @@ what a text states, with byte spans.
 | [Amounts against one print](#amounts-against-one-print) | `Amounts`, `shares_amount`, `states_figure` | | one print carries the amount |
 | [Ratios](#ratios) | `ungrounded_ratios` | | a ratio or a printed decimal rounds to it, or the person's numbers give it |
 | [Arithmetic in prose](#arithmetic-in-prose) | `prose_arithmetic` | | the corpus prints the same value |
+| [Per-unit amounts](#per-unit-amounts) | `mispaired_per_unit` | | the clause's own total over its count gives it, or no printed line shows it as another quotient |
 | [Links](#links) | `ungrounded_urls`, `fabricated_urls` | `urls` | the corpus holds the link, with or without its scheme, its path under no other host, or the ids it was built from |
 | [Addresses read](#addresses-read) | `url_printed_in` | | the text read holds the address, without its scheme or by its path |
 | [Weekdays](#weekdays) | `misdated_weekdays` | | the weekday is the date's own |
@@ -97,8 +98,9 @@ What to expect:
   [Amounts against one print](#amounts-against-one-print)). A thousands
   separator states an amount and is checked from 1,000 up, a currency mark
   from 100 up, and a decimal with four fractional digits or more always. A
-  number in words, with a scale word or after an approximation mark is an
-  amount too, checked from 10,000 up.
+  figure with a scale word ("3.2M teachers", "12k signups") is a count or an
+  amount, checked from 1,000 up with or without a currency. A number in words
+  or after an approximation mark is an amount too, checked from 10,000 up.
 - **A link's digits are the link check's.** A timestamp or an id inside a URL
   is no figure; a link's label ("[$206,000](…)") still is.
 - **A printed decimal grounds what it rounds to.** "327.76" grounds "328" as
@@ -114,9 +116,18 @@ What to expect:
   2,950 to 3,049 and not 3,148. "$3,250" states a value and is matched whole.
 - **Signs count.** "-12,500" needs a negative value in the corpus. An
   unsigned figure takes either sign, since prose often says "fell by 12,500".
-- **Rounded figures match what they round.** "~12,500", "≈ $12,500", "$1.2
-  million" and "twelve thousand five hundred" are grounded by any value that
-  rounds to them, such as 12,487.
+- **Rounded figures match what they round.** "$1.2 million" and "twelve
+  thousand five hundred" are grounded by any value that rounds to them, such
+  as 1,234,567 and 12,487. A figure behind an approximation mark ("~12,500",
+  "≈ $12,500", "~3M") is grounded within a whole unit of its last nonzero
+  digit, 12,400 to 12,600, since "~" is written as often before a figure cut
+  as before one rounded.
+- **A corpus's scale words are read widely.** "38.08 M", "2,5 Mio", "12 k
+  rows" and "43Kmembers" in a result print values in units, and ground
+  "$38M", "€2,5 Mio.", "$12,000" and "43K"; the digits keep their own reading
+  too. In a reply, a lone letter that also names a unit needs a currency or
+  must be glued on: "3.2M" and "7B" scale, "5m" (minutes) and "500 m" do
+  not.
 - **Ambiguous notations match either reading.** "1.250" is 1,250 in Berlin
   and 1.25 in Boston; either value in the corpus grounds it.
 - **A space groups only thousands.** "12 500" is one figure; "1,250,000
@@ -224,6 +235,41 @@ What to expect:
 - **A value must be printed as one.** Trailing zeros aside ("15,325.0" is
   15325), the corpus has to print the same value: a group of a thousands run
   ("524" of "$1,524") or a piece of a time does not ground it.
+
+### Per-unit amounts
+
+`mispaired_per_unit(reply, corpus)` returns the per-unit amounts a reply
+states beside a total and a count that do not give them, when a printed line
+shows the amount is another total over the same count: a cost per lead from
+the lifetime window set beside yesterday's spend and leads. Each finding
+names the amount, the quotient the clause's own figures give, and the print
+it came from.
+
+```rust
+use figures_parser::mispaired_per_unit;
+
+let printed = "LT: $91.65 / 2 leads / CPL $45.83 | Y: $74.74 / 2 leads";
+let found = mispaired_per_unit("$74.74 spend, 2 leads, $45.83 CPL.", printed);
+assert_eq!(
+    (found[0].per_unit.as_str(), found[0].stated.as_str(), found[0].printed.as_str()),
+    ("$45.83", "$74.74 / 2 = $37.37", "$91.65 / 2")
+);
+assert!(mispaired_per_unit("$74.74 spend, 2 leads, $37.37 CPL.", printed).is_empty());
+```
+
+What to expect:
+
+- **A clause is a sentence or a line** holding two amounts behind a currency
+  mark and a whole count of two or more.
+- **The print, not a word, shows a quotient.** No word list is read: the
+  amount is held only when one printed line carries it, the count, and a
+  larger amount that the count divides into it.
+- **Its own total and count clear it.** "$1,679 lifetime, 24 leads, $69.98
+  CPL" passes, the total being cut or rounded ("$1,680").
+- **Round amounts pass.** A per-unit amount of fewer than three significant
+  digits ("$100") is one some amount over some count lands on by chance.
+- **Two per-unit amounts side by side are two**, not a total and its
+  quotient.
 
 ### Links
 
@@ -465,6 +511,7 @@ fp.ungroundedFigures(reply, corpus);             // ["48,200"]
 fp.amountsSharedWith(reply, [print1, print2]);   // [["19,850"], []]; also sharesAmount, statesFigure
 fp.ungroundedRatios(reply, corpus, said);        // ["30%"]
 fp.proseArithmetic(reply, message, corpus);      // ["61,300"]
+fp.mispairedPerUnit(reply, corpus);              // [{ perUnit, stated, printed }]
 fp.ungroundedUrls(reply, corpus, prompt, hosts); // also fabricatedUrls, linkFindings
 fp.mendedLinks(reply, corpus); // { text, mends }
 fp.misdatedWeekdays(reply, "2026-10-09");
@@ -497,7 +544,7 @@ in one forward pass, as the binding does.
 
 | Kind | Languages and scripts |
 |---|---|
-| Numbers | Any language: digits of every script Unicode encodes, and the separators every CLDR locale prints, Indian grouping included. Scale words and numbers in words: English, French, German, Spanish, Italian, Portuguese, lakh and crore, and Han numerals. |
+| Numbers | Any language: digits of every script Unicode encodes, and the separators every CLDR locale prints, Indian grouping included. Scale words: English, French, German, Spanish, Italian, Portuguese, Dutch, Polish, Swedish, Turkish, Indonesian, Vietnamese, Russian, Arabic, Persian, Hebrew, Hindi, Thai, lakh and crore, and Han and Hangul multipliers. Numbers in words: English, French, German, Spanish, Italian, Portuguese and Han numerals. |
 | Links | Any language, internationalized domain names included. |
 | Weekdays and date windows | English, French, German, Spanish, Italian, Portuguese, Dutch, Swedish, Finnish, Russian, Ukrainian, Japanese, Chinese (simplified and traditional), Vietnamese and Arabic (the month names of every Arab country, Arabic-Indic digits). |
 | Email addresses | Any language, a local part outside ASCII included. |

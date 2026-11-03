@@ -137,6 +137,7 @@ impl Scratch {
             derived: number.idiom,
             sign,
             approximate: true,
+            scaled: false,
             full_text,
         }
     }
@@ -231,6 +232,7 @@ impl<'a> Token<'a> {
             derived: false,
             sign: self.sign,
             approximate: self.approximate || self.magnitude > 0,
+            scaled: self.magnitude > 0,
             full_text: self.full,
         }
     }
@@ -272,6 +274,12 @@ impl<'a> Token<'a> {
                 f(r);
                 return;
             }
+            if self.keeps_digits {
+                f(Reading {
+                    scaled: false,
+                    ..r.clone()
+                });
+            }
             let (integer, fraction) = scale_into(r.integer, r.fraction, self.magnitude, scaled);
             // The sections after a Han multiplier are read after whole digits
             // only, whose scaled value the scanner checked fits.
@@ -304,6 +312,7 @@ impl<'a> Token<'a> {
                 derived: r.derived,
                 sign: r.sign,
                 approximate: r.approximate,
+                scaled: r.scaled,
                 full_text: r.full_text,
             });
         });
@@ -365,6 +374,7 @@ impl<'a> Token<'a> {
                     derived: thousands,
                     sign: if leading { self.sign } else { Sign::Unsigned },
                     approximate: leading && self.approximate,
+                    scaled: false,
                     full_text: if leading {
                         self.full.get(..prefix_len + group.len()).unwrap_or(group)
                     } else {

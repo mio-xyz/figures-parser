@@ -386,6 +386,10 @@ pub(super) fn marked_after(text: &str, end: usize) -> bool {
 
 /// One numeric token, borrowed from the text it was found in.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag is a fact of its own about the token, not a state"
+)]
 pub struct Token<'a> {
     /// As written, symbols kept.
     pub text: &'a str,
@@ -407,6 +411,9 @@ pub struct Token<'a> {
     /// What the sections written after a Han multiplier add to the scaled
     /// digits ("5000万" in "3億5000万"); 0 without them.
     pub(super) rest: u64,
+    /// Whether its digits are read as written beside their scaled reading,
+    /// as a corpus keeps them: a scale read loosely may be a unit ("5 m").
+    pub(super) keeps_digits: bool,
     /// The token through its scale word ("1.2 million"), and through the
     /// sections after a Han multiplier ("3億5000万"); the same as `text`
     /// without one.
@@ -427,6 +434,10 @@ impl Token<'_> {
 
 /// The numeric tokens of a text, found as they are asked for.
 #[derive(Debug, Clone)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag is an option of the scan, set on its own by a builder method"
+)]
 pub struct Tokens<'a> {
     /// The scanned text.
     text: &'a str,
@@ -438,6 +449,11 @@ pub struct Tokens<'a> {
     signs: bool,
     /// Whether a run may end against a word letter ("7,103MW").
     letters: bool,
+    /// Whether scale words are read as a corpus reads them, beside the
+    /// digits' own reading.
+    loose: bool,
+    /// Whether scale words are read at all.
+    scales: bool,
 }
 
 /// The numeric tokens of `text`, in order.
@@ -457,6 +473,8 @@ pub const fn tokens(text: &str) -> Tokens<'_> {
         marks: true,
         signs: true,
         letters: false,
+        loose: false,
+        scales: true,
     }
 }
 
@@ -486,6 +504,26 @@ impl Tokens<'_> {
     #[must_use]
     pub const fn against_letters(mut self) -> Self {
         self.letters = true;
+        self
+    }
+
+    /// These tokens with scale words read loosely, as a corpus prints them:
+    /// an abbreviation in any case and without the currency that tells it
+    /// from a unit in a reply ("5 m", "38.08 Mio"), and a name glued to the
+    /// digits even when it runs into a word ("43Kmembers"). A token with
+    /// such a scale also yields its digits' own readings, since the letters
+    /// may be a unit after all.
+    #[must_use]
+    pub const fn loose_scales(mut self) -> Self {
+        self.loose = true;
+        self
+    }
+
+    /// These tokens with no scale word read, so each is its digits as
+    /// printed: "1.2 million" is 1.2.
+    #[must_use]
+    pub const fn without_scales(mut self) -> Self {
+        self.scales = false;
         self
     }
 
@@ -578,8 +616,8 @@ impl<'a> Iterator for Tokens<'a> {
                 next = char_at(text, end);
             }
             self.pos = end;
-            let scale = if may_scale(text, end) {
-                next.and_then(|n| scale_after(text, start, end, n))
+            let scale = if self.scales && may_scale(text, end, self.loose) {
+                next.and_then(|n| scale_after(text, start, end, n, self.loose))
             } else {
                 None
             };
@@ -617,6 +655,7 @@ impl<'a> Iterator for Tokens<'a> {
                 sign: prefix.sign,
                 approximate: prefix.approximate,
                 magnitude: scale.map_or(0, |scale| scale.magnitude),
+                keeps_digits: self.loose && scale.is_some(),
                 rest: scale.map_or(0, |scale| scale.rest),
                 written,
                 full: if prefix.from == start {
