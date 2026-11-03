@@ -6,6 +6,7 @@ use std::ops::Range;
 
 use rustc_hash::FxBuildHasher;
 
+use super::digits::digit_value;
 use super::ratio::ratios;
 use super::scan::{Scratch, Token, currency_start, tokens};
 use super::spelled::spelled;
@@ -23,6 +24,38 @@ struct Claim<'r> {
     span: Range<usize>,
     /// Whether the corpus has not yet carried it.
     open: bool,
+}
+
+/// The claims of a reply and what a corpus walk closes among them: the
+/// part of a reading that a walk mutates, kept apart from the keys so a
+/// reply read once is walked against many prints.
+#[derive(Clone, Default)]
+struct Claims<'r> {
+    /// Every stated figure, in the reply's order.
+    list: Vec<Claim<'r>>,
+    /// How many the corpus has not yet carried, so the walk stops as soon
+    /// as it reaches none.
+    open: usize,
+    /// The whole a printed decimal rounds up to, written here per reading
+    /// so the walk allocates nothing.
+    rounded: String,
+}
+
+impl Claims<'_> {
+    /// Whether claim `index` is still open.
+    fn is_open(&self, index: usize) -> bool {
+        self.list.get(index).is_some_and(|claim| claim.open)
+    }
+
+    /// Closes claim `index` when it is open.
+    fn close(&mut self, index: usize) {
+        if let Some(claim) = self.list.get_mut(index)
+            && claim.open
+        {
+            claim.open = false;
+            self.open -= 1;
+        }
+    }
 }
 
 /// One key a claim may be grounded by.
@@ -201,13 +234,11 @@ fn skipped(spans: &[Range<usize>], at: usize) -> bool {
     spans.iter().any(|span| span.contains(&at))
 }
 
-/// The figures a reply states, their keys sorted by their integer's hash so
-/// a corpus reading is compared only against the few that share its own
-/// integer.
+/// The keys of the figures a reply states, sorted by their integer's hash
+/// so a corpus reading is compared only against the few that share its own
+/// integer. Read once with its [`Claims`], and never written after.
 #[derive(Clone, Default)]
-struct Needles<'r> {
-    /// Every stated figure, in the reply's order.
-    claims: Vec<Claim<'r>>,
+struct Needles {
     /// The exact keys: in the reply's order while it is read, by hash once
     /// [`Needles::seal`] has run.
     all: Vec<Needle>,
@@ -219,48 +250,73 @@ struct Needles<'r> {
     lengths: u64,
     /// A bit per integer length that may ground an approximate key.
     around_lengths: u64,
-    /// How many claims the corpus has not yet carried, so the corpus walk
-    /// stops as soon as it reaches none.
-    open: usize,
-    /// The whole a printed decimal rounds up to, written here per reading
-    /// so the walk allocates nothing.
-    rounded: String,
+    /// The fewest integer digits any key may be grounded by, so a corpus
+    /// token with fewer digits than that is passed over unread.
+    fewest: usize,
+    /// The same over the keys a bare digit run may ground: a whole number
+    /// or an approximate one. A precise decimal needs a token with a symbol.
+    fewest_whole: usize,
 }
 
-impl<'r> Needles<'r> {
+/// How many digits `text` holds, in any script, and whether a symbol stands
+/// among them.
+fn digits_and_symbol(text: &str) -> (usize, bool) {
+    if text.is_ascii() {
+        let digits = text.bytes().filter(u8::is_ascii_digit).count();
+        return (digits, digits < text.len());
+    }
+    let mut digits = 0_usize;
+    let mut symbol = false;
+    for c in text.chars() {
+        if digit_value(c).is_some() {
+            digits = digits.saturating_add(1);
+        } else {
+            symbol = true;
+        }
+    }
+    (digits, symbol)
+}
+
+impl Needles {
     /// The figures `reply` states outside `skip`, each held to the key
-    /// `stated` gives its readings, sealed for the corpus walk.
-    fn read(
+    /// `stated` gives its readings, sealed for the corpus walk, with their
+    /// claims all open.
+    fn read<'r>(
         reply: &'r str,
         skip: &[Range<usize>],
         scratch: &mut Scratch,
         stated: impl Fn(&Reading<'_, '_>) -> Option<Key>,
-    ) -> Self {
-        let mut needles = Self::default();
+    ) -> (Self, Claims<'r>) {
+        let mut needles = Self {
+            fewest: usize::MAX,
+            fewest_whole: usize::MAX,
+            ..Self::default()
+        };
+        let mut claims = Claims::default();
         for_each_reading_in(reply, tokens(reply), scratch, |r| {
             if !skipped(skip, r.span.start)
                 && let Some(key) = stated(&r)
             {
-                needles.add(key, r.full_text, r.span);
+                needles.add(&mut claims, key, r.full_text, r.span);
             }
         });
         needles.seal();
-        needles
+        (needles, claims)
     }
 
     /// Adds a stated reading: to the claim before it when it is another
     /// reading of the same written figure, else as a claim of its own.
-    fn add(&mut self, key: Key, text: &'r str, span: Range<usize>) {
-        let same_figure = self.claims.last().is_some_and(|last| last.span == span);
+    fn add<'r>(&mut self, claims: &mut Claims<'r>, key: Key, text: &'r str, span: Range<usize>) {
+        let same_figure = claims.list.last().is_some_and(|last| last.span == span);
         if !same_figure {
-            self.claims.push(Claim {
+            claims.list.push(Claim {
                 text,
                 span,
                 open: true,
             });
-            self.open += 1;
+            claims.open += 1;
         }
-        let claim = self.claims.len().saturating_sub(1);
+        let claim = claims.list.len().saturating_sub(1);
         let (list, lengths, hash) = if key.around.is_some() {
             (&mut self.around, &mut self.around_lengths, 0)
         } else {
@@ -269,7 +325,15 @@ impl<'r> Needles<'r> {
         if list.iter().any(|n| n.claim == claim && n.key == key) {
             return;
         }
-        for len in key.integer_lengths() {
+        let lengths_of_key = key.integer_lengths();
+        self.fewest = self.fewest.min(*lengths_of_key.start());
+        let whole = key.around.is_some()
+            || matches!(&key.value, Value::Integer(_))
+            || matches!(&key.value, Value::Exact { fraction, .. } if fraction.is_empty());
+        if whole {
+            self.fewest_whole = self.fewest_whole.min(*lengths_of_key.start());
+        }
+        for len in lengths_of_key {
             *lengths |= length_bit(len);
         }
         list.push(Needle { key, claim, hash });
@@ -287,12 +351,17 @@ impl<'r> Needles<'r> {
     /// caller reads the sign, which few readings need, and calls again with
     /// it.
     #[inline]
-    fn ground(&mut self, reading: &Reading<'_, '_>, sign: Option<Sign>) -> bool {
+    fn ground(
+        &self,
+        claims: &mut Claims<'_>,
+        reading: &Reading<'_, '_>,
+        sign: Option<Sign>,
+    ) -> bool {
         let bit = length_bit(reading.integer.len());
         let mut wants_sign = (self.lengths | self.around_lengths) & bit != 0
-            && self.ground_length(reading, sign, bit, false);
+            && self.ground_length(claims, reading, sign, bit, false);
         if rounds_up(reading) {
-            let mut rounded = std::mem::take(&mut self.rounded);
+            let mut rounded = std::mem::take(&mut claims.rounded);
             if increment(reading.integer, &mut rounded) {
                 let rounded_bit = length_bit(rounded.len());
                 if self.lengths & rounded_bit != 0 {
@@ -301,10 +370,10 @@ impl<'r> Needles<'r> {
                         fraction: None,
                         ..reading.clone()
                     };
-                    wants_sign |= self.ground_length(&whole, sign, rounded_bit, true);
+                    wants_sign |= self.ground_length(claims, &whole, sign, rounded_bit, true);
                 }
             }
-            self.rounded = rounded;
+            claims.rounded = rounded;
         }
         wants_sign
     }
@@ -323,7 +392,8 @@ impl<'r> Needles<'r> {
     /// needle states. With `whole_only`, the reading is a rounded whole,
     /// which grounds an exact whole figure and nothing else.
     fn ground_length(
-        &mut self,
+        &self,
+        claims: &mut Claims<'_>,
         reading: &Reading<'_, '_>,
         sign: Option<Sign>,
         bit: u64,
@@ -334,12 +404,12 @@ impl<'r> Needles<'r> {
             if whole_only && !matches!(needle.key.value, Value::Integer(_)) {
                 return;
             }
-            let Some(claim) = self.claims.get_mut(needle.claim) else {
+            let Some(claim) = claims.list.get_mut(needle.claim) else {
                 return;
             };
             match needle.meet(claim, reading, sign) {
                 Met::Nothing => {}
-                Met::Closed => self.open -= 1,
+                Met::Closed => claims.open -= 1,
                 Met::WantsSign => wants_sign = true,
             }
         };
@@ -361,12 +431,13 @@ impl<'r> Needles<'r> {
     /// accepts carry. The corpus is read only until everything is found, its
     /// numbers in words last, since they are rare in one.
     fn ground_in(
-        &mut self,
+        &self,
+        claims: &mut Claims<'_>,
         corpus: &str,
         scratch: &mut Scratch,
         grounds: impl Fn(&Reading<'_, '_>) -> bool,
     ) {
-        if self.open == 0 {
+        if claims.open == 0 {
             return;
         }
         for token in tokens(corpus)
@@ -374,12 +445,26 @@ impl<'r> Needles<'r> {
             .without_currency()
             .without_signs()
         {
+            // A reading's integer part has at most the token's digits, one
+            // more when a decimal rounds up, and a bare run grounds no
+            // precise decimal: a shorter token is left unread.
+            if token.magnitude == 0 {
+                let (digits, symbol) = digits_and_symbol(token.text);
+                let fewest = if symbol {
+                    self.fewest
+                } else {
+                    self.fewest_whole
+                };
+                if digits.saturating_add(1) < fewest {
+                    continue;
+                }
+            }
             token.for_each_reading(scratch, |r| {
-                if self.may_ground(&r) && grounds(&r) && self.ground(&r, None) {
-                    self.ground(&r, Some(token.sign_of(&r, corpus)));
+                if self.may_ground(&r) && grounds(&r) && self.ground(claims, &r, None) {
+                    self.ground(claims, &r, Some(token.sign_of(&r, corpus)));
                 }
             });
-            if self.open == 0 {
+            if claims.open == 0 {
                 return;
             }
         }
@@ -387,9 +472,9 @@ impl<'r> Needles<'r> {
             let reading = scratch.spelled(corpus, &number);
             let sign = reading.sign;
             if grounds(&reading) {
-                self.ground(&reading, Some(sign));
+                self.ground(claims, &reading, Some(sign));
             }
-            if self.open == 0 {
+            if claims.open == 0 {
                 return;
             }
         }
@@ -399,13 +484,15 @@ impl<'r> Needles<'r> {
     /// `skip`, when a figure `corpus` prints falls inside it: "$200-300"
     /// brackets a printed 244.49 rather than stating 200 or 300.
     fn ground_brackets(
-        &mut self,
+        &self,
+        claims: &mut Claims<'_>,
         reply: &str,
         skip: &[Range<usize>],
         corpus: &str,
         scratch: &mut Scratch,
     ) {
-        let mut ranges: Vec<(u128, u128)> = Vec::new();
+        // Each range's bounds, and whether a printed value fell inside it.
+        let mut ranges: Vec<(u128, u128, bool)> = Vec::new();
         let mut previous: Option<(Option<u128>, usize)> = None;
         for token in tokens(reply) {
             if skipped(skip, token.start) {
@@ -426,14 +513,13 @@ impl<'r> Needles<'r> {
                 && low < high
                 && dashed(reply, prev_end, &token)
             {
-                ranges.push((low, high));
+                ranges.push((low, high, false));
             }
             previous = Some((value, token.end()));
         }
         if ranges.is_empty() {
             return;
         }
-        let mut hit = vec![false; ranges.len()];
         for token in tokens(corpus)
             .against_letters()
             .without_currency()
@@ -444,17 +530,19 @@ impl<'r> Needles<'r> {
                     return;
                 };
                 let whole = r.fraction.is_none_or(|f| f.bytes().all(|b| b == b'0'));
-                for (inside, &(low, high)) in hit.iter_mut().zip(&ranges) {
-                    *inside |= value >= low && (value < high || (value == high && whole));
+                for (low, high, inside) in &mut ranges {
+                    *inside |= value >= *low && (value < *high || (value == *high && whole));
                 }
             });
-            if hit.iter().all(|&inside| inside) {
+            if ranges.iter().all(|&(_, _, inside)| inside) {
                 break;
             }
         }
-        for (&(low, high), _) in ranges.iter().zip(&hit).filter(|(_, inside)| **inside) {
-            self.close_whole(low);
-            self.close_whole(high);
+        for &(low, high, inside) in &ranges {
+            if inside {
+                self.close_whole(claims, low);
+                self.close_whole(claims, high);
+            }
         }
     }
 
@@ -465,14 +553,12 @@ impl<'r> Needles<'r> {
     /// 2,950 to 3,049, never for everything from 2,500 to 3,499, and a
     /// turn printing thousands of prices still grounds few round figures.
     /// A signed figure is held to its sign.
-    fn ground_rounded(&mut self, corpus: &str, scratch: &mut Scratch) {
-        let Self {
-            claims, all, open, ..
-        } = self;
-        let mut wanted: Vec<Rounded> = all
+    fn ground_rounded(&self, claims: &mut Claims<'_>, corpus: &str, scratch: &mut Scratch) {
+        let mut wanted: Vec<Rounded> = self
+            .all
             .iter()
             .enumerate()
-            .filter(|(_, n)| claims.get(n.claim).is_some_and(|claim| claim.open))
+            .filter(|(_, n)| claims.is_open(n.claim))
             .filter_map(|(needle, n)| {
                 let Value::Integer(integer) = &n.key.value else {
                     return None;
@@ -495,13 +581,10 @@ impl<'r> Needles<'r> {
             token.for_each_reading(scratch, |r| {
                 let mut sign: Option<Sign> = None;
                 wanted.retain(|target| {
-                    let Some(needle) = all.get(target.needle) else {
+                    let Some(needle) = self.all.get(target.needle) else {
                         return false;
                     };
-                    let Some(claim) = claims.get_mut(needle.claim) else {
-                        return false;
-                    };
-                    if !claim.open {
+                    if !claims.is_open(needle.claim) {
                         return false;
                     }
                     if rounded_to(&r, target.unit) != Some(target.value) {
@@ -511,8 +594,7 @@ impl<'r> Needles<'r> {
                     if !needle.key.sign.carried_by(read) {
                         return true;
                     }
-                    claim.open = false;
-                    *open -= 1;
+                    claims.close(needle.claim);
                     false
                 });
             });
@@ -523,25 +605,19 @@ impl<'r> Needles<'r> {
     }
 
     /// Closes every open claim stated as exactly the whole number `value`.
-    fn close_whole(&mut self, value: u128) {
-        let Self {
-            claims, all, open, ..
-        } = self;
-        for needle in all.iter() {
+    fn close_whole(&self, claims: &mut Claims<'_>, value: u128) {
+        for needle in &self.all {
             if let Value::Integer(integer) = &needle.key.value
                 && integer.parse::<u128>().ok() == Some(value)
-                && let Some(claim) = claims.get_mut(needle.claim)
-                && claim.open
             {
-                claim.open = false;
-                *open -= 1;
+                claims.close(needle.claim);
             }
         }
     }
 
     /// The open claims' texts, in the order the reply stated them; a figure
     /// stated again, with the same keys, is named once.
-    fn texts(&self) -> Vec<String> {
+    fn texts(&self, claims: &Claims<'_>) -> Vec<String> {
         let keys = |claim: usize| {
             self.all
                 .iter()
@@ -550,9 +626,10 @@ impl<'r> Needles<'r> {
                 .map(|n| &n.key)
         };
         let mut out = Vec::new();
-        for (i, claim) in self.claims.iter().enumerate() {
+        for (i, claim) in claims.list.iter().enumerate() {
             let repeated = || {
-                self.claims
+                claims
+                    .list
                     .iter()
                     .take(i)
                     .enumerate()
@@ -564,18 +641,17 @@ impl<'r> Needles<'r> {
         }
         out
     }
+}
 
-    /// The closed claims' texts, once each, in the order the reply stated
-    /// them.
-    fn shared(&self) -> Vec<String> {
-        let mut out: Vec<String> = Vec::new();
-        for claim in self.claims.iter().filter(|claim| !claim.open) {
-            if !out.iter().any(|text| text == claim.text) {
-                out.push(claim.text.to_owned());
-            }
+/// The closed claims' texts, once each, in the order the reply stated them.
+fn shared<'r>(claims: &Claims<'r>) -> Vec<&'r str> {
+    let mut out: Vec<&str> = Vec::new();
+    for claim in claims.list.iter().filter(|claim| !claim.open) {
+        if !out.contains(&claim.text) {
+            out.push(claim.text);
         }
-        out
     }
+    out
 }
 
 /// Figures in `reply` that `corpus` does not carry, as the reply wrote them.
@@ -620,21 +696,21 @@ impl<'r> Needles<'r> {
 pub fn ungrounded_figures(reply: &str, corpus: &str) -> Vec<String> {
     let skip = link_spans(reply);
     let mut scratch = Scratch::default();
-    let mut needles = Needles::read(reply, &skip, &mut scratch, |r| r.stated());
+    let (needles, mut claims) = Needles::read(reply, &skip, &mut scratch, |r| r.stated());
     // Most replies state no large figure at all, and the corpus is the whole
     // turn: it is read only once there is something to look for, and only
     // until everything is found.
-    if needles.open == 0 {
+    if claims.open == 0 {
         return Vec::new();
     }
-    needles.ground_in(corpus, &mut scratch, |_| true);
-    if needles.open > 0 {
-        needles.ground_brackets(reply, &skip, corpus, &mut scratch);
+    needles.ground_in(&mut claims, corpus, &mut scratch, |_| true);
+    if claims.open > 0 {
+        needles.ground_brackets(&mut claims, reply, &skip, corpus, &mut scratch);
     }
-    if needles.open > 0 {
-        needles.ground_rounded(corpus, &mut scratch);
+    if claims.open > 0 {
+        needles.ground_rounded(&mut claims, corpus, &mut scratch);
     }
-    needles.texts()
+    needles.texts(&claims)
 }
 
 /// The figures in `reply` that `corpus` does not carry, a reading being held
@@ -647,12 +723,12 @@ pub(super) fn ungrounded_by(
     grounds: impl Fn(&Reading<'_, '_>) -> bool,
 ) -> Vec<String> {
     let mut scratch = Scratch::default();
-    let mut needles = Needles::read(reply, &[], &mut scratch, stated);
-    if needles.open == 0 {
+    let (needles, mut claims) = Needles::read(reply, &[], &mut scratch, stated);
+    if claims.open == 0 {
         return Vec::new();
     }
-    needles.ground_in(corpus, &mut scratch, grounds);
-    needles.texts()
+    needles.ground_in(&mut claims, corpus, &mut scratch, grounds);
+    needles.texts(&claims)
 }
 
 /// The amounts a reply states, read once, to match against one print at a
@@ -673,8 +749,10 @@ pub(super) fn ungrounded_by(
 /// ```
 #[derive(Clone)]
 pub struct Amounts<'r> {
+    /// The reply's amounts' keys.
+    needles: Needles,
     /// The reply's amounts, none yet grounded.
-    needles: Needles<'r>,
+    claims: Claims<'r>,
 }
 
 impl<'r> Amounts<'r> {
@@ -684,27 +762,29 @@ impl<'r> Amounts<'r> {
         let mut skip = link_spans(reply);
         skip.extend(ratios(reply).map(|ratio| ratio.span));
         let mut scratch = Scratch::default();
-        let needles = Needles::read(reply, &skip, &mut scratch, |r| r.stated_amount(true));
-        Self { needles }
+        let (needles, claims) =
+            Needles::read(reply, &skip, &mut scratch, |r| r.stated_amount(true));
+        Self { needles, claims }
     }
 
     /// Whether the reply states no amount.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
-        self.needles.open == 0
+        self.claims.open == 0
     }
 
     /// The reply's amounts that `text` carries, once each, as the reply
     /// wrote them.
     #[must_use]
-    pub fn shared_with(&self, text: &str) -> Vec<String> {
+    pub fn shared_with(&self, text: &str) -> Vec<&'r str> {
         if self.is_empty() {
             return Vec::new();
         }
-        let mut needles = self.needles.clone();
+        let mut claims = self.claims.clone();
         let mut scratch = Scratch::default();
-        needles.ground_in(text, &mut scratch, |_| true);
-        needles.shared()
+        self.needles
+            .ground_in(&mut claims, text, &mut scratch, |_| true);
+        shared(&claims)
     }
 }
 

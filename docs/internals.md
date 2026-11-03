@@ -227,6 +227,11 @@ not in the mask costs one bit test. The walk reads the corpus without
 currency marks and without signs, since no floor applies to a corpus, and
 against letters, since a result that glues a unit on ("7,103MW") still
 printed the figure, and stops as soon as every claim is grounded. A corpus
+token is passed over before its readings are computed when it has too few
+digits for the shortest key: a reading's integer part has at most the
+token's digits, one more when a decimal rounds up, and a bare run (no
+symbol) grounds no precise decimal, so it is held to the shortest whole or
+approximate key. A corpus
 decimal whose fraction starts with five or more also grounds the whole
 above it ("327.76" grounds 328): the walk writes the incremented integer
 into a buffer the needles keep and looks it up like any reading, against
@@ -236,8 +241,10 @@ The reply is read with its links skipped, by span: a link's digits (a Slack
 ts, an id) are the link check's. A bare digit run is never a claim
 (`Reading::stated`), since a code or an order number is one as often as an
 amount; `Reading::stated_amount(true)` holds such a run from 10,000 up, for
-`Amounts`, which reads the reply's claims once and grounds a clone of them
-against each print (`shared_with`), ratios skipped as well.
+`Amounts`, which reads the reply once and grounds a clone of its claims, one
+vector, against each print (`shared_with`), ratios skipped as well. The keys
+stay apart from the claims for that: `Needles` holds what a walk reads,
+`Claims` what it closes.
 
 Once the walk leaves a claim open, the reply's round ranges are read: two
 tokens with nothing but a dash between them (a currency mark and spaces
@@ -275,12 +282,19 @@ that rounds to it at the places the reply wrote: within half a unit of its
 last digit, both bounds included. A decimal is a token with one decimal
 symbol between two groups; one a comma may group as thousands ("19,850")
 grounds nothing, unless its lead is a zero, which no grouping writes
-("0,850"). The comparison is exact, in scaled integers. A bare whole number
+("0,850"). The comparison is exact, in scaled integers, and runs only where
+it can succeed: a decimal whose integer part has a digit count no claim's
+can round to, as is or a hundred times it, is passed over unread, and a
+claim whose whole part is more than one away from the printed value's is
+skipped before the exact comparison. The mark readers turn most tokens
+away on one byte: a percent mark, a times sign, a space before a sign or
+a bidi mark each start with one of a few bytes. A bare whole number
 never grounds one, since it may be either operand of the division, and 0%
 and 100% are never held. The person's words (`said`) ground a ratio too: the
 numbers they stated, and for each pair the quotient and the change, each
 also in percent, compared in floating point with the same tolerance, over
-at most thirty numbers. Sizes are compared, so a sign on either side does
+at most thirty numbers. The numbers are read once; the pairs are tried per
+stated ratio and never stored. Sizes are compared, so a sign on either side does
 not matter; the reply's sign is kept in what is reported, and one ratio is
 named once however its mark is written, by its figure's text.
 

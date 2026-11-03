@@ -262,7 +262,16 @@ pub fn shares_amount(reply: String, text: String) -> bool {
 #[must_use]
 pub fn amounts_shared_with(reply: String, texts: Vec<String>) -> Vec<Vec<String>> {
     let amounts = figures_parser::Amounts::of(&reply);
-    texts.iter().map(|text| amounts.shared_with(text)).collect()
+    texts
+        .iter()
+        .map(|text| {
+            amounts
+                .shared_with(text)
+                .into_iter()
+                .map(str::to_owned)
+                .collect()
+        })
+        .collect()
 }
 
 /// Whether `text` states `figure` ("19,851", "1,234.50"), however it groups
@@ -346,9 +355,9 @@ pub fn link_findings(
         &host_list(hosts.as_deref()),
     );
     LinkFindings {
-        unprinted: found.unprinted,
-        placeholders: found.placeholders,
-        misdirected: found.misdirected,
+        unprinted: found.unprinted.into_iter().map(str::to_owned).collect(),
+        placeholders: found.placeholders.into_iter().map(str::to_owned).collect(),
+        misdirected: found.misdirected.into_iter().map(str::to_owned).collect(),
         unlinked: found.unlinked,
     }
 }

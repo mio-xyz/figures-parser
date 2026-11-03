@@ -1,6 +1,8 @@
 //! The link gate's comparison: which of a reply's links, and which of the
 //! items it names, the turn's corpus does not carry.
 
+use std::borrow::Cow;
+
 use super::items::{
     IdentifierLink, bare_identifiers, code_spans, identifier_links, is_api_link, markdown_links,
     placeholder_targets, url_with_fragment, urls_with_fragment,
@@ -196,23 +198,23 @@ fn stands_in_for_number(url: &str) -> bool {
 }
 
 /// What a reply's links fail on, kept apart by kind so a caller names each
-/// in its own words; [`link_findings`] reads them.
+/// in its own words; [`link_findings`] reads them, borrowed from the reply.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct LinkFindings {
+pub struct LinkFindings<'r> {
     /// Links no source printed.
-    pub unprinted: Vec<String>,
+    pub unprinted: Vec<&'r str>,
     /// Link targets that are not URLs, each as written (`url` in
     /// `[PR 512](url)`); a file the caller attached under that name is one
     /// to name apart.
-    pub placeholders: Vec<String>,
+    pub placeholders: Vec<&'r str>,
     /// An item's label on a link that is not the item's own, as written.
-    pub misdirected: Vec<String>,
+    pub misdirected: Vec<&'r str>,
     /// Items named without the link a source gave them, each with its links
     /// ("#87 (url)", "#12 (url or url)").
     pub unlinked: Vec<String>,
 }
 
-impl LinkFindings {
+impl LinkFindings<'_> {
     /// Whether no link fails.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
@@ -226,10 +228,23 @@ impl LinkFindings {
     /// target in parentheses (`(url)`).
     #[must_use]
     pub fn all(&self) -> Vec<String> {
-        let mut out = self.unprinted.clone();
-        out.extend(self.placeholders.iter().map(|target| format!("({target})")));
-        out.extend(self.misdirected.iter().cloned());
+        let mut out = self.listed();
         out.extend(self.unlinked.iter().cloned());
+        out
+    }
+
+    /// The first three kinds as [`LinkFindings::all`] lists them, with room
+    /// for the fourth.
+    fn listed(&self) -> Vec<String> {
+        let mut out = Vec::with_capacity(
+            self.unprinted.len()
+                + self.placeholders.len()
+                + self.misdirected.len()
+                + self.unlinked.len(),
+        );
+        out.extend(self.unprinted.iter().map(|url| (*url).to_owned()));
+        out.extend(self.placeholders.iter().map(|target| format!("({target})")));
+        out.extend(self.misdirected.iter().map(|link| (*link).to_owned()));
         out
     }
 }
@@ -245,7 +260,7 @@ impl LinkFindings {
 ///   copied from an example;
 /// - an item's label on a link that stands in for it (`[#429](…/repo)`,
 ///   `[#429](…/pull/418)`); a number linked to a thing of another kind, such
-///   as a Slack message, is that thing's own;
+///   as a chat message, is that thing's own;
 /// - an item named in prose, outside code, without a link although a source
 ///   carried its page's URL (`…/pull/N` before `…/issues/N`, never an API's),
 ///   each with that URL, or with each item's when the id names several
@@ -263,22 +278,27 @@ impl LinkFindings {
 /// assert!(findings.unlinked.is_empty());
 /// ```
 #[must_use]
-pub fn link_findings(reply: &str, corpus: &str, prompt: &str, hosts: &[&str]) -> LinkFindings {
+pub fn link_findings<'r>(
+    reply: &'r str,
+    corpus: &str,
+    prompt: &str,
+    hosts: &[&str],
+) -> LinkFindings<'r> {
     let mut seen: Vec<&str> = Vec::new();
     for url in urls(reply) {
         if !seen.contains(&url.text) {
             seen.push(url.text);
         }
     }
-    let mut unprinted: Vec<String> = seen
+    let mut unprinted: Vec<&str> = seen
         .iter()
-        .filter(|url| !grounded(url, corpus, hosts) && !prompt.contains(**url))
-        .map(|url| (*url).to_owned())
+        .copied()
+        .filter(|url| !grounded(url, corpus, hosts) && !prompt.contains(url))
         .collect();
     unprinted.extend(
         seen.iter()
-            .filter(|url| is_example_host(url) && prompt.contains(**url) && !corpus.contains(**url))
-            .map(|url| (*url).to_owned()),
+            .copied()
+            .filter(|url| is_example_host(url) && prompt.contains(url) && !corpus.contains(url)),
     );
     let links = identifier_links(reply);
     let misdirected = links
@@ -289,7 +309,7 @@ pub fn link_findings(reply: &str, corpus: &str, prompt: &str, hosts: &[&str]) ->
                 |number| !link.url.contains(number) && stands_in_for_number(link.url),
             )
         })
-        .map(|link| link.whole.to_owned())
+        .map(|link| link.whole)
         .collect();
     // The URL goes into the finding: a script that fetched the item may never
     // have printed it. An example-domain link the corpus never carried is the
@@ -307,10 +327,7 @@ pub fn link_findings(reply: &str, corpus: &str, prompt: &str, hosts: &[&str]) ->
         .collect();
     LinkFindings {
         unprinted,
-        placeholders: placeholder_targets(reply)
-            .into_iter()
-            .map(str::to_owned)
-            .collect(),
+        placeholders: placeholder_targets(reply),
         misdirected,
         unlinked,
     }
@@ -333,7 +350,10 @@ pub fn link_findings(reply: &str, corpus: &str, prompt: &str, hosts: &[&str]) ->
 /// ```
 #[must_use]
 pub fn ungrounded_urls(reply: &str, corpus: &str, prompt: &str, hosts: &[&str]) -> Vec<String> {
-    link_findings(reply, corpus, prompt, hosts).all()
+    let findings = link_findings(reply, corpus, prompt, hosts);
+    let mut out = findings.listed();
+    out.extend(findings.unlinked);
+    out
 }
 
 /// A reply with the link defects a rule can put right put right, and each
@@ -367,7 +387,7 @@ pub struct Mended {
 pub fn mended_links(reply: &str, corpus: &str) -> Mended {
     let mut mends = Vec::new();
     let mut seen: Vec<&str> = Vec::new();
-    let mut text = reply.to_owned();
+    let mut text = Cow::Borrowed(reply);
     for url in urls(reply) {
         if seen.contains(&url.text) {
             continue;
@@ -375,30 +395,48 @@ pub fn mended_links(reply: &str, corpus: &str) -> Mended {
         seen.push(url.text);
         if let Some(undotted) = undotted_slack_link(url.text) {
             mends.push(format!("{} → {undotted}", url.text));
-            text = text.replace(url.text, &undotted);
+            text = Cow::Owned(text.replace(url.text, &undotted));
         }
     }
     let links = identifier_links(&text);
-    let mut linked: Vec<(usize, &str, &str)> = unlinked_items(&text, &links, &[corpus])
+    // Where each item to link stands, how long its id is, and its one link.
+    let mut linked: Vec<(usize, usize, &str)> = unlinked_items(&text, &links, &[corpus])
         .into_iter()
         .filter_map(|item| match item.urls.as_slice() {
-            [url] => Some((item.at, item.id, *url)),
+            [url] => Some((item.at, item.id.len(), *url)),
             _ => None,
         })
         .collect();
-    for &(_, id, url) in &linked {
+    if linked.is_empty() {
+        return Mended {
+            text: text.into_owned(),
+            mends,
+        };
+    }
+    linked.sort_by_key(|&(at, ..)| at);
+    let added: usize = linked
+        .iter()
+        .map(|&(_, _, url)| url.len().saturating_add(4))
+        .sum();
+    let mut spliced = String::with_capacity(text.len().saturating_add(added));
+    let mut last = 0;
+    for (at, len, url) in linked {
+        let Some(end) = at.checked_add(len) else {
+            continue;
+        };
+        let (Some(before), Some(id)) = (text.get(last..at), text.get(at..end)) else {
+            continue;
+        };
         mends.push(format!("{id} → {url}"));
+        spliced.push_str(before);
+        spliced.push('[');
+        spliced.push_str(id);
+        spliced.push_str("](");
+        spliced.push_str(url);
+        spliced.push(')');
+        last = end;
     }
-    // Spliced from the last back, so each earlier offset still holds.
-    linked.sort_by_key(|&(at, ..)| std::cmp::Reverse(at));
-    let mut spliced = text.clone();
-    for (at, id, url) in linked {
-        if let Some(end) = at.checked_add(id.len())
-            && spliced.get(at..end) == Some(id)
-        {
-            spliced.replace_range(at..end, &format!("[{id}]({url})"));
-        }
-    }
+    spliced.push_str(text.get(last..).unwrap_or_default());
     Mended {
         text: spliced,
         mends,
@@ -425,9 +463,13 @@ fn unlinked_items<'r, 's>(
     links: &[IdentifierLink<'_>],
     sources: &[&'s str],
 ) -> Vec<Unlinked<'r, 's>> {
-    let markdown = markdown_links(reply);
-    let mut blanked = markdown.clone();
+    // The markdown links first, then the code: the prose is what is left.
+    let mut blanked = markdown_links(reply);
+    let markdown_end = blanked.len();
     blanked.extend(code_spans(reply));
+    let markdown = blanked.get(..markdown_end).unwrap_or_default();
+    let mut tail = String::new();
+    let mut items: Vec<(&str, &str)> = Vec::new();
     let mut out = Vec::new();
     for (at, id) in bare_identifiers(reply, &blanked) {
         if links.iter().any(|link| link.label == id) {
@@ -435,26 +477,27 @@ fn unlinked_items<'r, 's>(
         }
         // The page's tail before the API's: "/pull/N" before "/issues/N",
         // which GitHub opens as the same number.
-        let fragments: Vec<String> = id.strip_prefix('#').map_or_else(
-            || vec![format!("/{id}")],
-            |n| vec![format!("/pull/{n}"), format!("/issues/{n}")],
-        );
-        let linked_by_url = fragments.iter().any(|f| {
-            markdown
+        let (heads, number): (&[&str], &str) = id
+            .strip_prefix('#')
+            .map_or((&["/"], id), |number| (&["/pull/", "/issues/"], number));
+        let mut linked_by_url = false;
+        items.clear();
+        for head in heads {
+            tail.clear();
+            tail.push_str(head);
+            tail.push_str(number);
+            linked_by_url |= markdown
                 .iter()
                 .filter_map(|link| reply.get(link.clone()))
-                .any(|link| url_with_fragment(link, f).is_some())
-        });
-        if linked_by_url {
-            continue;
-        }
-        // One link per item, in the first fragment's form.
-        let mut items: Vec<(&str, &str)> = Vec::new();
-        for fragment in &fragments {
+                .any(|link| url_with_fragment(link, &tail).is_some());
+            if linked_by_url {
+                break;
+            }
+            // One link per item, in the first tail's form.
             for source in sources {
-                for url in urls_with_fragment(source, fragment) {
+                for url in urls_with_fragment(source, &tail) {
                     let item = url
-                        .get(..url.len().saturating_sub(fragment.len()))
+                        .get(..url.len().saturating_sub(tail.len()))
                         .unwrap_or(url);
                     if !is_api_link(url) && !items.iter().any(|&(seen, _)| seen == item) {
                         items.push((item, url));
@@ -462,11 +505,11 @@ fn unlinked_items<'r, 's>(
                 }
             }
         }
-        if !items.is_empty() {
+        if !linked_by_url && !items.is_empty() {
             out.push(Unlinked {
                 id,
                 at,
-                urls: items.into_iter().map(|(_, url)| url).collect(),
+                urls: items.iter().map(|&(_, url)| url).collect(),
             });
         }
     }

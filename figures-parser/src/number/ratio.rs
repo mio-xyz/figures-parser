@@ -80,6 +80,10 @@ fn percent_after(text: &str, end: usize) -> Option<usize> {
 /// continues past it, which makes it a size ("1920x1080") or a hex literal
 /// ("0x1F"); a space before it makes it a product ("3 x 4").
 fn times_after(text: &str, end: usize) -> Option<usize> {
+    // Every times sign starts with one of these bytes.
+    if !matches!(text.as_bytes().get(end), Some(b'x' | b'X' | 0x80..)) {
+        return None;
+    }
     let sign = char_at(text, end).filter(|&c| is_times_sign(c))?;
     let mark_end = end.saturating_add(sign.len_utf8());
     (!char_at(text, mark_end).is_some_and(is_boundary)).then_some(mark_end)
@@ -101,6 +105,13 @@ const fn opens(c: char) -> bool {
 /// or an opening bracket or quote before the sign, so the "%20" of an
 /// encoded link is none.
 fn percent_before(text: &str, start: usize) -> Option<usize> {
+    // A sign, a space before one, or a bidi mark ends in one of these bytes.
+    if !matches!(
+        start.checked_sub(1).and_then(|i| text.as_bytes().get(i)),
+        Some(b'%' | b' ' | b'\t' | 0x80..)
+    ) {
+        return None;
+    }
     let at = before_marks(text, start);
     let at = match char_before(text, at) {
         Some(c) if is_inline_space(c) => at.saturating_sub(c.len_utf8()),
@@ -138,50 +149,53 @@ pub(super) struct Ratio<'a> {
 
 impl Ratio<'_> {
     /// Whether `r`, a reading of this ratio's token, is the figure its mark
-    /// marks: the whole token, or of the numbers a run sets side by side the
-    /// one against the mark. A group of a thousands run ("4" of
-    /// "4,552,788%") is none.
+    /// marks.
     const fn is_figure(&self, r: &Reading<'_, '_>) -> bool {
-        !r.derived
-            && if self.sign_first {
-                r.span.start == self.token.start
-            } else {
-                r.span.end == self.token.end()
-            }
+        figure_of(&self.token, self.sign_first, r)
     }
 }
 
-/// The ratio `token`, found in `text`, is the figure of, if any: a token
-/// without a scale word, with a percent mark after it, a multiplication sign
-/// glued after it, or a percent sign before it.
-fn ratio_of<'a>(text: &'a str, token: Token<'a>) -> Option<Ratio<'a>> {
+/// Whether `r`, a reading of `token`, is the figure a mark marks, the mark
+/// standing first when `sign_first`: the whole token, or of the numbers a
+/// run sets side by side the one against the mark. A group of a thousands
+/// run ("4" of "4,552,788%") is none.
+const fn figure_of(token: &Token<'_>, sign_first: bool, r: &Reading<'_, '_>) -> bool {
+    !r.derived
+        && if sign_first {
+            r.span.start == token.start
+        } else {
+            r.span.end == token.end()
+        }
+}
+
+/// The mark `token`, found in `text`, carries as a ratio's figure, if any:
+/// the ratio's span, its mark, and whether the mark stands first. A token
+/// with a scale word carries none; one with a percent mark after it, a
+/// multiplication sign glued after it, or a percent sign before it does.
+fn mark_of(text: &str, token: &Token<'_>) -> Option<(Range<usize>, Mark, bool)> {
     if token.magnitude > 0 {
         return None;
     }
     let end = token.end();
     let full_start = end.saturating_sub(token.full.len());
     if let Some(mark_end) = percent_after(text, end) {
-        return Some(Ratio {
-            token,
-            span: full_start..mark_end,
-            mark: Mark::Percent,
-            sign_first: false,
-        });
+        return Some((full_start..mark_end, Mark::Percent, false));
     }
     if let Some(mark_end) = times_after(text, end) {
-        return Some(Ratio {
-            token,
-            span: full_start..mark_end,
-            mark: Mark::Times,
-            sign_first: false,
-        });
+        return Some((full_start..mark_end, Mark::Times, false));
     }
     let mark_start = percent_before(text, full_start)?;
+    Some((mark_start..end, Mark::Percent, true))
+}
+
+/// The ratio `token`, found in `text`, is the figure of, if any.
+fn ratio_of<'a>(text: &'a str, token: Token<'a>) -> Option<Ratio<'a>> {
+    let (span, mark, sign_first) = mark_of(text, &token)?;
     Some(Ratio {
         token,
-        span: mark_start..end,
-        mark: Mark::Percent,
-        sign_first: true,
+        span,
+        mark,
+        sign_first,
     })
 }
 
@@ -196,6 +210,9 @@ struct Stated {
     value: u128,
     /// How many decimal places the reply wrote.
     places: u32,
+    /// The whole part: 42 for "42.7". A value that rounds to the reading
+    /// has a whole part within one of it.
+    whole: u128,
 }
 
 impl Stated {
@@ -203,7 +220,23 @@ impl Stated {
     fn of(integer: &str, fraction: &str) -> Option<Self> {
         let places = u32::try_from(fraction.len()).ok()?;
         let value = scaled(integer, Some(fraction), places)?;
-        Some(Self { value, places })
+        let whole = integer.parse().ok()?;
+        Some(Self {
+            value,
+            places,
+            whole,
+        })
+    }
+
+    /// How many digits the integer part has: 2 for "42.7", 1 for "0.5".
+    fn integer_len(&self) -> usize {
+        let digits = self
+            .value
+            .checked_ilog10()
+            .map_or(1, |log| log.saturating_add(1));
+        usize::try_from(digits.saturating_sub(self.places))
+            .unwrap_or(usize::MAX)
+            .max(1)
     }
 
     /// None or all, which a count shows without a division.
@@ -248,12 +281,16 @@ impl Stated {
 
     /// Whether a value worked out of the person's numbers rounds to this one
     /// at the places it is written with.
+    #[expect(
+        clippy::as_conversions,
+        clippy::cast_precision_loss,
+        reason = "a ratio's digits fit a float's mantissa; one that does not is compared loosely"
+    )]
     fn near(&self, value: f64) -> bool {
         let places = i32::try_from(self.places).unwrap_or(i32::MAX);
         let tolerance = 0.5_f64.mul_add(10_f64.powi(-places), 1e-9);
-        format!("{}e-{}", self.value, self.places)
-            .parse::<f64>()
-            .is_ok_and(|stated| (stated - value).abs() <= tolerance)
+        let stated = self.value as f64 / 10_f64.powi(places);
+        (stated - value).abs() <= tolerance
     }
 }
 
@@ -271,34 +308,90 @@ struct Claim<'r> {
     readings: Vec<Stated>,
 }
 
-/// Whether `token` is a decimal a result printed ("8.857", "0,113"): one
-/// decimal symbol between two digit groups. Money keeps its grouping
-/// ("1,234.50") and is none.
-fn is_plain_decimal(token: &Token<'_>) -> bool {
-    let mut symbols = token.text.chars().filter(|&c| is_symbol(c));
-    match (symbols.next(), symbols.next()) {
-        (Some(symbol), None) => is_decimal_symbol(symbol),
-        _ => false,
+/// How many digits stand before the one decimal symbol of `text` when it
+/// is a decimal a result printed ("8.857", "0,113"): one decimal symbol
+/// between two digit groups. Money keeps its grouping ("1,234.50") and is
+/// none.
+fn decimal_lead(text: &str) -> Option<usize> {
+    // Most corpora are ASCII, where a byte is a char and the only symbols
+    // are the dot, the comma and the apostrophe.
+    if text.is_ascii() {
+        let mut lead = 0_usize;
+        let mut symbol = None;
+        for &b in text.as_bytes() {
+            if b.is_ascii_digit() {
+                if symbol.is_none() {
+                    lead = lead.saturating_add(1);
+                }
+            } else if symbol.is_some() {
+                return None;
+            } else {
+                symbol = Some(b);
+            }
+        }
+        return symbol.filter(|&b| matches!(b, b'.' | b',')).map(|_| lead);
     }
+    let mut lead = 0_usize;
+    let mut symbol = None;
+    for c in text.chars() {
+        if is_symbol(c) {
+            if symbol.is_some() {
+                return None;
+            }
+            symbol = Some(c);
+        } else if symbol.is_none() {
+            lead = lead.saturating_add(1);
+        }
+    }
+    symbol.filter(|&c| is_decimal_symbol(c)).map(|_| lead)
 }
 
-/// Drops the claims a printed value, `integer.fraction` times `10^shift`,
-/// carries.
-fn retain(claims: &mut Vec<Claim<'_>>, integer: &str, fraction: &str, shift: u32) {
+/// Drops the claims a printed ratio, `integer.fraction`, carries.
+fn retain(claims: &mut Vec<Claim<'_>>, integer: &str, fraction: &str) {
     claims.retain(|claim| {
         !claim
             .readings
             .iter()
-            .any(|stated| stated.carried_by(integer, fraction, shift))
+            .any(|stated| stated.carried_by(integer, fraction, 0))
     });
 }
 
-/// The ratios plain arithmetic over two of the numbers `said` states gives
-/// (a share, a multiple, a rise or a drop), each also as a percentage, and
-/// the numbers themselves: the arithmetic over a few numbers the person
-/// supplied that is left to prose.
-fn said_ratios(said: &str) -> Vec<f64> {
-    let mut numbers: Vec<f64> = Vec::new();
+/// Drops the claims a printed decimal, `integer.fraction`, carries as it is
+/// or a hundred times it. The whole parts are compared first: a value that
+/// rounds to a reading has a whole part within one of the reading's, and
+/// most printed decimals fail that before the exact comparison runs.
+fn retain_decimal(claims: &mut Vec<Claim<'_>>, integer: &str, fraction: &str) {
+    let whole: Option<u128> = integer.parse().ok();
+    let hundredfold = scaled(integer, Some(fraction), 2);
+    let near = |printed: Option<u128>, stated: &Stated| {
+        printed.is_some_and(|p| p.abs_diff(stated.whole) <= 1)
+    };
+    claims.retain(|claim| {
+        !claim.readings.iter().any(|stated| {
+            (near(whole, stated) && stated.carried_by(integer, fraction, 0))
+                || (near(hundredfold, stated) && stated.carried_by(integer, fraction, 2))
+        })
+    });
+}
+
+/// A bit per digit count of the integer part a printed value may have and
+/// still round to a reading of `claims`: the reading's own, one fewer or one
+/// more, since the two differ by half a unit at most.
+fn integer_lengths(claims: &[Claim<'_>]) -> u64 {
+    let mut mask = 0_u64;
+    for stated in claims.iter().flat_map(|claim| claim.readings.iter()) {
+        let len = stated.integer_len();
+        for l in len.saturating_sub(1)..=len.saturating_add(1) {
+            mask |= 1 << l.min(63);
+        }
+    }
+    mask
+}
+
+/// The numbers `said` states, in every reading ("1.250" is 1250 and 1.25),
+/// once each, the first [`MAX_SAID_NUMBERS`] of them.
+fn said_numbers(said: &str) -> Vec<f64> {
+    let mut numbers: Vec<f64> = Vec::with_capacity(MAX_SAID_NUMBERS);
     let mut scratch = Scratch::default();
     let mut written = String::new();
     let read = tokens(said)
@@ -321,19 +414,21 @@ fn said_ratios(said: &str) -> Vec<f64> {
             numbers.push(value);
         }
     });
-    let mut out = numbers.clone();
-    for &a in &numbers {
-        for &b in &numbers {
-            if b == 0.0 {
-                continue;
-            }
-            for ratio in [a / b, (a / b - 1.0).abs()] {
-                out.push(ratio);
-                out.push(ratio * 100.0);
-            }
-        }
-    }
-    out
+    numbers
+}
+
+/// Whether one of `numbers`, the person's own, carries `stated`: as it is,
+/// or through the plain arithmetic over two of them that is left to prose
+/// (a share, a multiple, a rise or a drop), each also as a percentage.
+fn said_carries(numbers: &[f64], stated: &Stated) -> bool {
+    numbers.iter().any(|&n| stated.near(n))
+        || numbers.iter().any(|&a| {
+            numbers.iter().filter(|&&b| b != 0.0).any(|&b| {
+                [a / b, (a / b - 1.0).abs()]
+                    .into_iter()
+                    .any(|ratio| stated.near(ratio) || stated.near(ratio * 100.0))
+            })
+        })
 }
 
 /// Ratios in `reply` that neither `corpus` nor `said` supports, once each,
@@ -408,6 +503,7 @@ pub fn ungrounded_ratios(reply: &str, corpus: &str, said: &str) -> Vec<String> {
     if claims.is_empty() {
         return Vec::new();
     }
+    let lengths = integer_lengths(&claims);
     for token in tokens(corpus)
         .against_letters()
         .without_currency()
@@ -416,17 +512,28 @@ pub fn ungrounded_ratios(reply: &str, corpus: &str, said: &str) -> Vec<String> {
         if token.magnitude > 0 {
             continue;
         }
-        if let Some(ratio) = ratio_of(corpus, token.clone()) {
+        if let Some((_, _, sign_first)) = mark_of(corpus, &token) {
             token.for_each_reading(&mut scratch, |r| {
-                if ratio.is_figure(&r) {
-                    retain(&mut claims, r.integer, r.fraction.unwrap_or_default(), 0);
+                if figure_of(&token, sign_first, &r) {
+                    retain(&mut claims, r.integer, r.fraction.unwrap_or_default());
                 }
             });
-        } else if is_plain_decimal(&token) {
+        } else if let Some(lead) = decimal_lead(token.text) {
             // A comma that may group thousands does ("19,850"), though no
             // grouping writes a zero lead ("0,850"); a dot is a script's
             // decimal point.
             let zero_lead = token.text.chars().next().and_then(digit_value) == Some(0);
+            // Read as is, the integer part keeps its digits; a hundred times
+            // it, two more, or one or two from a zero lead. A decimal whose
+            // integer part fits no claim either way is left unread.
+            let shifted = if zero_lead {
+                0b110
+            } else {
+                1_u64 << lead.saturating_add(2).min(63)
+            };
+            if lengths & ((1_u64 << lead.min(63)) | shifted) == 0 {
+                continue;
+            }
             let mut grouped_comma = false;
             token.for_each_reading(&mut scratch, |r| {
                 if r.derived {
@@ -436,8 +543,7 @@ pub fn ungrounded_ratios(reply: &str, corpus: &str, said: &str) -> Vec<String> {
                 if let Some(fraction) = r.fraction
                     && !grouped_comma
                 {
-                    retain(&mut claims, r.integer, fraction, 0);
-                    retain(&mut claims, r.integer, fraction, 2);
+                    retain_decimal(&mut claims, r.integer, fraction);
                 }
             });
         }
@@ -446,12 +552,12 @@ pub fn ungrounded_ratios(reply: &str, corpus: &str, said: &str) -> Vec<String> {
         }
     }
     if !said.is_empty() {
-        let printed = said_ratios(said);
+        let numbers = said_numbers(said);
         claims.retain(|claim| {
             !claim
                 .readings
                 .iter()
-                .any(|stated| printed.iter().any(|&value| stated.near(value)))
+                .any(|stated| said_carries(&numbers, stated))
         });
     }
     claims.into_iter().map(|claim| claim.text).collect()
