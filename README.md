@@ -75,9 +75,9 @@ what a text states, with byte spans.
 | [Identifiers](#identifiers) | `ungrounded_identifiers`, `unprinted_ids` | `identifiers` | the corpus or the prompt carries it |
 | [Durations](#durations) | `ungrounded_durations` | `durations` | the corpus carries the same length, in any form |
 | [Pages](#pages) | `ungrounded_on_page`, `PageHolds` | | the corpus carries its figures, ratios and ids |
-
 | [Memory](#memory) | `memory_grounding` | `grounding_tokens` | (counts the dossier lines it draws on: two of a line's words and half of them, or three in a row) |
 | [A reply's form](#a-replys-form) | `speaker_prefix`, `memory_claim`, `silent_signal` | | (reads a speaker prefix, a claim to have saved to memory, and the marker that delivers nothing) |
+| [A turn's checks](#a-turns-checks) | `ground_reply`, `ground_message`, `ground_page`, `internal_names`, `scrub_memory_layout`, `sheet_findings` | | every check the text is held to passes |
 
 ### Numbers
 
@@ -308,8 +308,8 @@ use figures_parser::{ListedFigure, SheetRun, sheet_findings, stated_figures};
 let read: Vec<_> = stated_figures("$74.74 spend, 2 leads").iter().map(|f| f.value).collect();
 assert_eq!(read, [74.74, 2.0]);
 
-let listed = [ListedFigure { figure: "19,851".into(), name: "row 6 TOTAL".into() }];
-let run = SheetRun { stdout: "total | 19,850", lists_rows: true, listed: &listed, ..SheetRun::default() };
+let listed = [ListedFigure { figure: "19,851", name: "row 6 TOTAL" }];
+let run = SheetRun { stdout: "total | 19,850", lists_its_rows: true, listed: &listed, ..SheetRun::default() };
 assert_eq!(sheet_findings("2027 holds $19,850.", &[run]).unstated, listed);
 ```
 
@@ -585,6 +585,61 @@ assert!(holds.hold("mockup.png", &claims));
 assert!(!holds.hold("mockup.png", &claims));
 ```
 
+### A turn's checks
+
+`ground_message(text, turn)` runs every check a sent message is held to, in
+one call: its links mended and its memory layout put in plain words, then
+links, figures, ids, ratios, per-unit amounts, sheet amounts, weekdays, date
+windows and the agent's own internals, each finding keyed by its kind.
+`ground_reply` is the same for a reply before it is delivered, and
+`ground_page(text, corpus, said, pixel_only)` holds a page to its figures,
+ratios and ids.
+
+```rust
+use figures_parser::{MemoryLayout, Turn, ground_message};
+
+let turn = Turn {
+    corpus: "revenue 194,718",
+    prompt: "",
+    said: "",
+    today: "2026-10-20".parse().unwrap(),
+    pixel_only: false,
+    hosts: &[],
+    attached: &|_| false,
+    layout: &MemoryLayout::default(),
+    internals: None,
+    vouching: "",
+    runs: &[],
+};
+let keys: Vec<String> = ground_message("Revenue of $188,027.", &turn)
+    .findings.iter().map(|f| f.key()).collect();
+assert_eq!(keys, ["figure:188,027"]);
+```
+
+The parts run alone too. `internal_names(reply, said, vocabulary, vouching)`
+returns the names of the agent's machinery a reply shows that no person
+wrote: its tools (`web_search`, or `learn` written as a call), its memory
+files, the directories and variables its code runs under.
+`scrub_memory_layout(reply, said, layout)` puts the memory paths, file names
+and tool names in plain words. `sheet_findings(reply, runs)` returns the rows a
+checking helper listed that the reply leaves unstated and the amounts it took
+off a sheet with no such helper (see [Readers for other checks](#readers-for-other-checks)).
+
+```rust
+use figures_parser::{Vocabulary, internal_names};
+
+let vocabulary = Vocabulary {
+    names: &["web_search", "learn"],
+    files: &["workspace.md"],
+    roots: &["/memory/"],
+    fixed: &[],
+};
+assert_eq!(
+    internal_names("I'll learn the API, then call web_search.", "", &vocabulary, ""),
+    ["web_search"]
+);
+```
+
 ## From Node
 
 `@mio-xyz/figures-parser` is a Node binding (Node-API 9, Node 22 or later)
@@ -620,13 +675,17 @@ fp.statedFigures(clause);                        // also printedFigures, numeric
 fp.ungroundedUrls(reply, corpus, prompt, hosts); // also fabricatedUrls, linkFindings
 fp.mendedLinks(reply, corpus); // { text, mends }; also undottedSlackLink, builtFromCorpus
 fp.unopenedLinks(message, opened);               // also placeholderTargets, urlPrintedIn
-fp.memoryGrounding(reply, dossiers);             // { preloadedLines, groundedLines, grounded }
+fp.memoryGrounding(reply, notes);                // { preloadedLines, groundedLines, grounded }
 fp.misdatedWeekdays(reply, "2026-10-09");
 fp.ungroundedEmails(reply, corpus, prompt);
 fp.ungroundedIdentifiers(reply, corpus, prompt); // also unseenTokens
 fp.ungroundedDurations(reply, corpus, prompt);
 fp.ungroundedOnPage(text, corpus, said);
 new fp.PageHolds().hold("mockup.png", claims); // true: hold the page back
+
+fp.groundMessage(text, { corpus, today: "2026-10-20", layout, vocabulary }, attached); // { ok, text, mends, findings }
+fp.groundReply(text, turn, attached); fp.groundPage(text, corpus, said);
+fp.internalNames(reply, said, vocabulary, vouching); fp.scrubMemoryLayout(reply, said, layout);
 
 // Every item with its place in the input; kinds: number, url, email, id, duration.
 fp.extract("Fee $1,250 at https://acme.io/x", { kinds: ["number", "url"] });

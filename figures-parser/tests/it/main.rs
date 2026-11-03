@@ -18,6 +18,7 @@ mod emails;
 mod ground;
 mod host;
 mod ids;
+mod internals;
 mod locales;
 mod pages;
 
@@ -31,5 +32,6 @@ mod scales;
 mod scan;
 mod signs;
 mod spelled;
+mod turn;
 mod urls;
 mod utf16;

@@ -130,6 +130,67 @@ export declare function fabricatedUrls(reply: string, corpus: string, hosts?: Ar
  */
 export declare function groundingTokens(text: string): Array<string>
 
+/** One thing a check found. */
+export interface Finding {
+  /**
+   * What it is about: `link`, `placeholder`, `misdirected`, `unlinked`,
+   * `attached`, `figure`, `id`, `ratio`, `per-unit`, `unstated`,
+   * `unchecked`, `weekday`, `window` or `internal`.
+   */
+  kind: string
+  /** What was found. */
+  value: string
+}
+
+/** A text with its mendable defects put right, and what it still fails on. */
+export interface Grounding {
+  /** Whether the text fails on nothing. */
+  ok: boolean
+  /** The text, mended. */
+  text: string
+  /** Each link repair, as `from → to`. */
+  mends: Array<string>
+  /** What the mended text fails on, in check order. */
+  findings: Array<Finding>
+}
+
+/**
+ * The distinctive words of `text`, lowercased: no freshness marker,
+ * markdown mark, stopword or short token.
+ */
+export declare function groundingTokens(text: string): Array<string>
+
+/**
+ * A message the run sends itself, checked as the reply's round checks a
+ * reply.
+ *
+ * Its links are mended, its memory layout put in plain words, then it is
+ * held to the turn so far. `attached` says whether a link target names a file
+ * the run made.
+ *
+ * # Errors
+ *
+ * `turn.today` is not a `YYYY-MM-DD` date.
+ */
+export declare function groundMessage(text: string, turn: Turn, attached?: ((arg: string) => boolean) | undefined | null): Grounding
+
+/**
+ * The figures, ratios and ids of a page made for a person that `corpus`
+ * does not carry; none when the turn read pixels only.
+ */
+export declare function groundPage(text: string, corpus: string, said?: string | undefined | null, pixelOnly?: boolean | undefined | null): Array<string>
+
+/**
+ * A reply before it is delivered, checked as the correction round checks
+ * it: its links mended, then held to the turn so far, a link to a file the
+ * run made and a listed sheet row left unstated included.
+ *
+ * # Errors
+ *
+ * `turn.today` is not a `YYYY-MM-DD` date.
+ */
+export declare function groundReply(text: string, turn: Turn, attached?: ((arg: string) => boolean) | undefined | null): Grounding
+
 /** One identifier, with where it sits in the input. */
 export interface IdEntity {
   /** The kind of figure. */
@@ -143,6 +204,13 @@ export interface IdEntity {
   /** Its shape. */
   shape: "uuid" | "hex" | "key" | "prefixed" | "token"
 }
+
+/**
+ * The names of an agent's own internals `reply` shows that no person wrote
+ * in `said`: code names (lowercased), memory files no tool result in
+ * `vouching` holds whole, then roots and fixed names, as given.
+ */
+export declare function internalNames(reply: string, said: string, vocabulary: Vocabulary, vouching?: string | undefined | null): Array<string>
 
 /** A length of time, in the two parts that do not convert into each other. */
 export interface LengthValue {
@@ -212,6 +280,44 @@ export interface MemoryGrounding {
   groundedLines: number
   /** Whether it draws on any. */
   grounded: boolean
+
+/** A row a checking helper listed with an amount. */
+export interface ListedFigure {
+  /** The amount as the helper printed it. */
+  figure: string
+  /** The helper's line for the row. */
+  name: string
+}
+
+/** Which lines of the preloaded `notes` `response` visibly draws on. */
+export declare function memoryGrounding(response: string, notes: Array<string>): MemoryGrounding
+
+/** How much of a reply rests on the preloaded memory. */
+export interface MemoryGrounding {
+  /** The lines of content the notes held. */
+  preloadedLines: number
+  /** The lines the reply draws on. */
+  groundedLines: number
+  /** Whether the reply draws on any. */
+  grounded: boolean
+}
+
+/** Where an agent keeps its memory, and the plain words each part reads as. */
+export interface MemoryLayout {
+  /** The memory directory, with its trailing slash ("/memory/"). */
+  root: string
+  /** The prefix every memory tool's name carries ("memory_"). */
+  toolPrefix: string
+  /** The folders under the root, checked first. */
+  folders: Array<Phrase>
+  /** The file names a path ends in, or written alone, in order. */
+  files: Array<Phrase>
+  /** What the root alone reads as. */
+  rootPhrase: string
+  /** What any other path under the root reads as. */
+  otherPhrase: string
+  /** What a memory tool's name reads as. */
+  toolPhrase: string
 }
 
 /**
@@ -356,6 +462,14 @@ export interface PrintedFigures {
  */
 export declare function placeholderTargets(text: string): Array<string>
 
+/** A name and the plain words it reads as. */
+export interface Phrase {
+  /** A folder under the memory root, or a file name. */
+  name: string
+  /** What it reads as. */
+  phrase: string
+}
+
 /**
  * Figures `reply` worked out in prose that `corpus` does not carry, when
  * `message` gave four or more values; empty when it gave fewer.
@@ -375,6 +489,12 @@ export declare function proseArithmetic(reply: string, message: string, corpus: 
  * `today` is not a `YYYY-MM-DD` date.
  */
 export declare function rowsOutsideWindow(reply: string, today: string): Array<string>
+
+/**
+ * `reply` with each memory path, memory file named alone and memory tool
+ * name the person did not write in `said` put in its plain words.
+ */
+export declare function scrubMemoryLayout(reply: string, said: string, layout: MemoryLayout): string
 
 /**
  * Whether `reply` states an amount that `text` carries: a figure the gate
@@ -453,6 +573,36 @@ export interface StatedFigure {
  */
 export declare function statedFigures(text: string): Array<StatedFigure>
 
+ * What `reply` owes the turn's script `runs`: the listed rows it leaves
+ * unstated, and the amounts it took off a sheet without the helpers that
+ * list their rows.
+ */
+export declare function sheetFindings(reply: string, runs: Array<SheetRun>): SheetFindings
+
+/** What a reply owes the runs it drew an amount from. */
+export interface SheetFindings {
+  /** Every row listed by a run the reply draws on, once per line. */
+  listed: Array<ListedFigure>
+  /** The listed rows whose amount the reply does not state. */
+  unstated: Array<ListedFigure>
+  /** The amounts read off a sheet with no helper that lists their rows. */
+  unchecked: UncheckedFigures
+}
+
+/** One script run of the turn, as the sheet checks read it. */
+export interface SheetRun {
+  /** What the run printed. */
+  stdout: string
+  /** Whether it called a helper that lists the rows its figures rest on. */
+  listsItsRows: boolean
+  /** Whether it called a helper that takes a sheet as a frame of rows. */
+  framing: boolean
+  /** Whether it read a worksheet's cells itself. */
+  gridRead: boolean
+  /** The rows a helper listed for the reply to name beside its total. */
+  listed: Array<ListedFigure>
+}
+
 /**
  * Whether `text` states `figure` ("19,851", "1,234.50"), however it groups
  * it: the figure's whole part is matched.
@@ -472,6 +622,44 @@ export interface UncheckedFigures {
  * (`…/p1791180327.741099` to `…/p1791180327741099`); null for any other link.
  */
 export declare function undottedSlackLink(url: string): string | null
+
+/** What a text is checked against: the turn so far. */
+export interface Turn {
+  /** The thread, the request and the run's tool results. */
+  corpus: string
+  /**
+   * The system prompt, which grounds a link but never an example-domain
+   * one.
+   */
+  prompt?: string
+  /** What the people in the thread wrote. */
+  said?: string
+  /** The turn's date, `YYYY-MM-DD`. */
+  today: string
+  /** Whether an attachment the turn read rides only as pixels. */
+  pixelOnly?: boolean
+  /** The lowercased hosts the caller trusts a built link on. */
+  hosts?: Array<string>
+  /**
+   * Where the agent keeps its memory; a sent message's layout is put in
+   * plain words.
+   */
+  layout?: MemoryLayout
+  /** The names of the agent's internals, when the caller checks them. */
+  vocabulary?: Vocabulary
+  /** The tool results other than the memory tools'. */
+  vouching?: string
+  /** The turn's script runs, for the sheet checks. */
+  runs?: Array<SheetRun>
+}
+
+/** The amounts a reply took from a worksheet without the helpers' checks. */
+export interface UncheckedFigures {
+  /** The amounts, as the reply writes them. */
+  figures: Array<string>
+  /** Whether a run that gave one took a frame of rows and summed it by hand. */
+  framed: boolean
+}
 
 /**
  * The durations in `reply`, once each, whose length neither `corpus` nor
@@ -573,3 +761,21 @@ export declare function urlPrintedIn(url: string, read: string): boolean
 
 /** `text` with each link it holds replaced by a space. */
 export declare function withoutLinks(text: string): string
+
+/** The names a reply must not show unless a person wrote them. */
+export interface Vocabulary {
+  /**
+   * The tools and sandbox functions; one with an underscore counts as a
+   * word, one without only as a call.
+   */
+  names: Array<string>
+  /**
+   * Memory file names ("workspace.md"); a tool result in `vouching` that
+   * holds one vouches for it.
+   */
+  files: Array<string>
+  /** Directories ("/memory/"), counted only where they begin a path. */
+  roots: Array<string>
+  /** Other names (programs, environment variables), counted anywhere. */
+  fixed: Array<string>
+}

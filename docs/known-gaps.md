@@ -106,7 +106,10 @@ it stands; a contribution that closes one should remove it here.
 
 - A dossier line is matched by its words alone: a reply that repeats two of
   a line's words in another sense ("Tuesday" and "standup" about another
-  team) draws on it.
+  team) draws on it, one that says the opposite of a line ("standup is not
+  on Tuesday") draws on it as much as one that repeats it, and a paraphrase
+  sharing fewer than half its words does not.
+- Stopwords are English only.
 
 ## Weekdays
 
@@ -278,3 +281,18 @@ is pinned in `tests/it/durations.rs`.
   workbook, a delimited file or an API's records, some typed as dates by the
   file itself, and decides which helpers the host loads for them; it reads
   no reply or corpus text.
+
+## An agent's own internals
+
+- A code name is read only in its own spelling, lowercased: `webSearch`,
+  `web-search` or "web search" for `web_search` are not read, nor a name
+  without an underscore anywhere but before `(` ("I'll learn it").
+- The layout scrub reads any path that starts with the memory root without
+  its slash as one under it, so "/memorybank" reads as a memory path.
+- A path or tool name the person wrote is left in place wherever the reply
+  writes it, even in another sentence.
+
+## Amounts taken from a worksheet
+
+- Which helpers list their rows, take a frame or read cells is the caller's
+  to say; a run is read only through those three facts and its print.

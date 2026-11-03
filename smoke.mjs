@@ -103,4 +103,22 @@ assert.deepEqual(statedFigures("USD 6 951 spend, 3 leads, 12% CTR").map((f) => [
 assert.deepEqual(printedFigures("LT: $91.65 / 2 leads"), { values: [91.65, 2], amounts: [91.65] });
 assert.deepEqual(numericTokens("😀 took 1,250s", true).map((t) => [t.start, t.end, t.values]), [[8, 13, [1250, 1.25]]]);
 assert.equal(withoutLinks("x https://a.io/1 y"), "x   y");
-assert.deepEqual(sheetFindings("2027 holds $19,850.", [{ stdout: "total | 19,850", listsRows: true, listed: [{ figure: "19,851", name: "row 6 TOTAL" }] }]), { listed: [{ figure: "19,851", name: "row 6 TOTAL" }], unstated: [{ figure: "19,851", name: "row 6 TOTAL" }], unchecked: { figures: [], framed: false } });
+assert.deepEqual(sheetFindings("2027 holds $19,850.", [{ stdout: "total | 19,850", listsItsRows: true, listed: [{ figure: "19,851", name: "row 6 TOTAL" }] }]), { listed: [{ figure: "19,851", name: "row 6 TOTAL" }], unstated: [{ figure: "19,851", name: "row 6 TOTAL" }], unchecked: { figures: [], framed: false } });
+
+
+{
+  const { internalNames, scrubMemoryLayout, groundingTokens, memoryGrounding, sheetFindings, groundMessage, groundReply, groundPage } = createRequire(import.meta.url)("./index.js");
+  const vocabulary = { names: ["web_search", "learn"], files: ["workspace.md"], roots: ["/memory/"], fixed: ["RUN_TOKEN"] };
+  assert.deepEqual(internalNames("I called learn() and web_search; see /memory/workspace.md.", "", vocabulary), ["web_search", "learn", "workspace.md", "/memory/"]);
+  assert.deepEqual(internalNames("Steps are in docs/workspace.md.", "", vocabulary, "docs/workspace.md"), []);
+  const layout = { root: "/memory/", toolPrefix: "memory_", folders: [{ name: "integrations/", phrase: "the integration notes" }], files: [{ name: "workspace.md", phrase: "the team's shared notes" }], rootPhrase: "memory", otherPhrase: "the team's notes", toolPhrase: "my memory" };
+  assert.equal(scrubMemoryLayout("Saved with memory_write to /memory/workspace.md.", "", layout), "Saved with my memory to the team's shared notes.");
+  assert.deepEqual(groundingTokens("- Owner: Priya at 10:00 [derived 2026-09-01]"), ["owner", "priya", "10:00"]);
+  assert.deepEqual(memoryGrounding("Standup is Tuesday at 10:00.", ["- Standup moved to Tuesday 10:00\n- Ana owns billing"]), { preloadedLines: 2, groundedLines: 1, grounded: true });
+  assert.deepEqual(sheetFindings("Q3 4,200 and 3,100 net.", [{ stdout: "sum 4,200, 3,100 net", listsItsRows: false, framing: false, gridRead: true, listed: [] }]).unchecked, { figures: ["4,200", "3,100"], framed: false });
+  const turn = { corpus: "revenue 194,718\ncos 0.523", today: "2026-10-20", layout };
+  assert.deepEqual(groundMessage("COS 61,0% on revenue of $188,027, see /memory/workspace.md", turn), { ok: false, text: "COS 61,0% on revenue of $188,027, see the team's shared notes", mends: [], findings: [{ kind: "figure", value: "188,027" }, { kind: "ratio", value: "61,0%" }] });
+  assert.deepEqual(groundReply("Here: ![chart](chart.png)", turn, (target) => target === "chart.png").findings, [{ kind: "attached", value: "chart.png" }]);
+  assert.throws(() => groundMessage("x", { ...turn, today: "nope" }), /YYYY-MM-DD/);
+  assert.deepEqual(groundPage("Revenue $1,240,000, 14% up", "revenue: 1240000"), ["14%"]);
+}

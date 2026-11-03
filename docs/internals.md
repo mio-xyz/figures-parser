@@ -16,13 +16,18 @@ The library has one module per kind, each with a reader and a comparison:
 
 | Module | Reader | Comparison |
 |---|---|---|
-| `number` | `scan` (tokens), `readings`, `scale` (scale words), `spelled` (numbers in words), `digits` | `ground` (figures, and amounts against one print), `ratio`, `arithmetic`, `per_unit` |
-| `date` | `languages`, `names` (a port of chrono-node, and Arabic), `clock` (its times of day) | `calendar`, `bare` (a weekday beside a bare day), `window` (rows under a date window) |
+| `number` | `scan` (tokens), `readings`, `scale` (scale words), `spelled` (numbers in words), `digits`, `context` (the unit words around a figure), `printed` (the figures a clause states and a line prints) | `ground` (figures, and amounts against one print), `ratio`, `arithmetic`, `per_unit` |
+| `url` | `scan`, `items` (link targets, the items named beside links), `opened` (pages to open) | `ground`, `shapes` (links built from printed ids), `printed` (an address a text carried) |
 | `date` | `languages`, `names` (a port of chrono-node, and Arabic), `clock` (its times of day, `east` for Japanese, Chinese and Vietnamese, `relative` for lengths from now) | `calendar`, `bare` (a weekday beside a bare day), `casual` (a weekday beside a casual word for a day), `window` (rows under a date window) |
 | `email` | `emails` | `ungrounded_emails` |
 | `id` | `identifiers` | `ungrounded_identifiers`, `unseen_tokens` |
 | `duration` | `grammar`, `words`, `groups` | `corpus` (the forms a corpus writes a length in) |
+| `internals` | word segments | `internal_names`, `scrub_memory_layout` |
+| `sheet` | | `sheet_findings` |
 | `memory` | `grounding_tokens` | `memory_grounding` |
+| `page` | | `ungrounded_on_page`, `PageHolds` |
+| `reply` | | `speaker_prefix`, `memory_claim`, `silent_signal` |
+| `message` | | `ground_reply`, `ground_message`, `ground_page` |
 
 `text` holds the character lookups and helpers the kinds share, `kind` names
 the kinds a caller selects, and `utf16` converts byte offsets to UTF-16.
@@ -982,6 +987,90 @@ its design. `PageHolds` keeps, per file name, the claims a run was told
 about and how many times the file was held back; `hold` holds a page back
 when one of its claims is new for that file and the file was held back
 fewer than `HOLDS_PER_PAGE` (three) times, and records the claims.
+
+## An agent's own internals
+
+`internal_names` reads a reply for the names of the machinery an agent runs
+on, from a `Vocabulary` the caller gives: its tool and sandbox function
+names, its memory file names, the directories its code and memory live in
+(roots) and other fixed names (programs, environment variables). A name the
+people in the thread wrote passes, read by the same rules as the reply.
+
+- A code name counts as a word of the reply: a word segment, lowercased,
+  equal to the name. A name with an underscore counts wherever it is a
+  word; one without ("learn") only as a call, the word right before a
+  segment that opens on `(`, since such a name is also a verb.
+- Segments follow the Unicode word rules, which keep `web_search` and
+  `workspace.md` whole and part `webSearch` from nothing, so another
+  program's camelCase or a repository named `web-search` is not read. Two
+  departures: Hangul is parted from letters of another script, since Korean
+  writes a particle onto a name ("workspace.md에"), and Thai, Lao, Khmer and
+  Myanmar, which the rules keep apart from Latin, stay apart, so a name
+  written against Thai text is still a word.
+- A memory file counts as a word too, and passes when the vouching text
+  (the tool results other than the memory tools', which list the files
+  themselves) holds it whole, lowercased: no file-name character (a-z,
+  digits, `-`, `_`, `.`) on either side, so `old-workspace.md` vouches for
+  nothing.
+- A root counts only where it begins a path: one after a path character
+  (a-z, digits, `-._~%/:`) is inside someone else's link. A fixed name
+  counts anywhere, case aside. Neither is vouched for by a tool result,
+  since code a run executes can print either.
+
+`InternalsCheck::new` reads the person's words once, for every reply of a
+turn; `names_in` reads the vouching text only when the reply names a file.
+
+`scrub_memory_layout` puts the memory layout of a text in plain words, from a
+`MemoryLayout`: a path that starts with the root (or is the root without its
+slash) and runs on through path characters, less a trailing sentence mark,
+becomes the phrase of its folder, then of the file it ends in, then the
+root's or the other paths' phrase; a memory file named alone, whole, not
+after `/`, becomes its file's phrase; a name that starts with the tool
+prefix, not after an identifier character, becomes the tool phrase. A path
+inside a longer one and anything the person wrote is left as written.
+Matching is case aside, character by character, so every offset stays one of
+the text's: a character that lowercases to two (`İ`) matches nothing, and the
+Kelvin sign matches `k`. A text that shows no layout is returned borrowed.
+
+## Amounts taken from a worksheet
+
+`sheet_findings` reads the turn's script runs, each with what it printed and
+three facts the caller knows about it: whether it called a helper that lists
+the rows its figures rest on, whether it took a sheet as a frame of rows, and
+whether it read a worksheet's cells itself, with the rows a helper listed for
+the reply. A run counts only when the reply states one of its amounts
+(`Amounts`); its listed rows are then owed, and a listed row whose amount the
+reply does not state (`states_figure`) is unstated. A run that lists its rows
+checks every amount it shares with the reply. An amount is unchecked when a
+run printed it after taking a frame (when any run of the turn read cells,
+since a frame of a price series is no ledger), or when a run that read the
+cells itself printed it with another of the reply's amounts, one alone being
+possibly a single cell looked up; a checking run anywhere in the turn
+releases it.
+
+## Memory a reply draws on
+
+`grounding_tokens` drops freshness markers (`[derived …]`, `[as of …]`,
+ASCII case aside) and markdown marks, lowercases, splits on anything but a
+letter, a number or `:`, trims colons at either end, and drops stopwords and
+tokens under three UTF-16 units. `memory_grounding` reads each note line by
+line (trimmed, not empty, not a `#` heading) and counts a line the response
+draws on: at least two of its distinct tokens shared and at least half of
+them, or three of its tokens in a row repeated.
+
+## A turn's checks in one call
+
+`ground_message` runs on a message a run sends itself what the correction
+round runs on a reply: links mended (`mended_links`), the memory layout put
+in plain words, then links (`link_findings`, a placeholder target naming a
+file the run made passing), figures, ids, ratios and per-unit amounts (none
+on a turn that read pixels only), unchecked sheet amounts, weekdays, date
+windows and internals, in that order, each finding keyed by its kind.
+`ground_reply` is the reply's round: no layout scrub (a reply naming it is
+asked for a rewrite, and the delivered text is scrubbed after), a link to a
+file the run made reported as `attached`, and listed sheet rows left
+unstated reported as `unstated`. `ground_page` holds a page to its figures,
+ratios and ids only.
 
 ## The Node binding
 

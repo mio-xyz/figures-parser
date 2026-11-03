@@ -10,6 +10,8 @@
 
 use std::borrow::Cow;
 
+pub mod turn;
+
 use figures_parser::utf16::{Utf16Cursor, units};
 use figures_parser::{Kind, Length, durations, emails, identifiers, numbers, urls};
 use napi::Env;
@@ -522,99 +524,6 @@ pub fn without_links(text: String) -> String {
     figures_parser::without_links(&text)
 }
 
-/// A row a script listed with the amount the reply states beside its total.
-#[napi(object)]
-pub struct ListedFigure {
-    /// The amount as the script printed it ("19,851").
-    pub figure: String,
-    /// The script's line for the row.
-    pub name: String,
-}
-
-/// What one script run did with a worksheet.
-#[napi(object)]
-pub struct SheetRun {
-    /// What the run printed.
-    pub stdout: String,
-    /// It ran a check whose print lists the rows its figures rest on.
-    pub lists_rows: Option<bool>,
-    /// It took a ledger frame from a worksheet.
-    pub frames: Option<bool>,
-    /// It read a worksheet's grid itself.
-    pub grid_read: Option<bool>,
-    /// The rows it listed with their amounts.
-    pub listed: Option<Vec<ListedFigure>>,
-}
-
-/// The amounts a reply took from a worksheet without the checks.
-#[napi(object)]
-pub struct UncheckedFigures {
-    /// The amounts as the reply writes them.
-    pub figures: Vec<String>,
-    /// Whether a run took a ledger frame and summed it by hand.
-    pub framed: bool,
-}
-
-/// What a reply owes the runs it drew a worksheet's amounts from.
-#[napi(object)]
-pub struct SheetFindings {
-    /// Every row listed by a run the reply draws on.
-    pub listed: Vec<ListedFigure>,
-    /// The listed rows whose amount the reply leaves unstated.
-    pub unstated: Vec<ListedFigure>,
-    /// The amounts taken from a worksheet that no check listed.
-    pub unchecked: UncheckedFigures,
-}
-
-/// What `reply` owes `runs`, the turn's script runs in order: the rows they
-/// listed, those the reply leaves unstated, and the amounts it took from a
-/// worksheet no check listed.
-#[napi(catch_unwind)]
-#[must_use]
-pub fn sheet_findings(reply: String, runs: Vec<SheetRun>) -> SheetFindings {
-    let listed: Vec<Vec<figures_parser::ListedFigure>> = runs
-        .iter()
-        .map(|run| {
-            run.listed
-                .iter()
-                .flatten()
-                .map(|l| figures_parser::ListedFigure {
-                    figure: l.figure.clone(),
-                    name: l.name.clone(),
-                })
-                .collect()
-        })
-        .collect();
-    let read: Vec<figures_parser::SheetRun<'_>> = runs
-        .iter()
-        .zip(&listed)
-        .map(|(run, listed)| figures_parser::SheetRun {
-            stdout: &run.stdout,
-            lists_rows: run.lists_rows.unwrap_or(false),
-            frames: run.frames.unwrap_or(false),
-            grid_read: run.grid_read.unwrap_or(false),
-            listed,
-        })
-        .collect();
-    let found = figures_parser::sheet_findings(&reply, &read);
-    let rows = |rows: Vec<figures_parser::ListedFigure>| {
-        rows.into_iter()
-            .map(|l| ListedFigure {
-                figure: l.figure,
-                name: l.name,
-            })
-            .collect()
-    };
-    SheetFindings {
-        listed: rows(found.listed),
-        unstated: rows(found.unstated),
-        unchecked: UncheckedFigures {
-            figures: found.unchecked.figures,
-            framed: found.unchecked.framed,
-        },
-    }
-}
-
 /// A list the caller passed (hosts, links), as `&str`s; empty when absent.
 fn host_list(hosts: Option<&[String]>) -> Vec<&str> {
     hosts
@@ -890,40 +799,6 @@ pub fn unopened_links(text: String, opened: Option<Vec<String>>) -> Vec<String> 
         .into_iter()
         .map(str::to_owned)
         .collect()
-}
-
-/// How much of a reply rests on the dossiers a turn preloaded.
-#[napi(object)]
-pub struct MemoryGrounding {
-    /// The dossier lines read: every non-empty line that is no heading.
-    pub preloaded_lines: u32,
-    /// The lines the reply draws on.
-    pub grounded_lines: u32,
-    /// Whether it draws on any.
-    pub grounded: bool,
-}
-
-/// Which lines of `dossiers` (each a preloaded dossier's text) `response`
-/// visibly draws on: two or more of a line's distinctive words and half of
-/// them, or three of its words in a row.
-#[napi(catch_unwind)]
-#[must_use]
-pub fn memory_grounding(response: String, dossiers: Vec<String>) -> MemoryGrounding {
-    let dossiers: Vec<&str> = dossiers.iter().map(String::as_str).collect();
-    let read = figures_parser::memory_grounding(&response, &dossiers);
-    MemoryGrounding {
-        preloaded_lines: u32::try_from(read.preloaded_lines).unwrap_or(u32::MAX),
-        grounded_lines: u32::try_from(read.grounded_lines).unwrap_or(u32::MAX),
-        grounded: read.grounded,
-    }
-}
-
-/// The distinctive words of `text`, lowercased, in order, as
-/// `memoryGrounding` compares them.
-#[napi(catch_unwind)]
-#[must_use]
-pub fn grounding_tokens(text: String) -> Vec<String> {
-    figures_parser::grounding_tokens(&text)
 }
 
 /// Whether `url` is a link a reply may build rather than copy: a page naming

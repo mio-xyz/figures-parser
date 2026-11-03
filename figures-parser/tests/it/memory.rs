@@ -61,7 +61,10 @@ fn counts_no_line_that_shares_only_a_common_word() {
         ),
         read(3, 0)
     );
-    assert_eq!(memory_grounding("Tuesday at 10:00", &[]), read(0, 0));
+    assert_eq!(
+        memory_grounding("Tuesday at 10:00", &[] as &[&str]),
+        read(0, 0)
+    );
 }
 
 #[test]

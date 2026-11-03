@@ -9,15 +9,16 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use figures_parser::number::scan::{Scratch, tokens};
 use figures_parser::utf16::{Utf16Cursor, units};
 use figures_parser::{
-    Amounts, Date, ListedFigure, PageHolds, SheetRun, built_from_corpus, durations, emails,
-    extract_numbers, fabricated_urls, grounding_tokens, identifiers, link_findings, memory_claim,
-    memory_grounding, mended_links, misdated_weekdays, mispaired_per_unit, mispaired_per_unit_with,
-    numbers, numeric_tokens, placeholder_targets, printed_figures, prose_arithmetic,
-    rows_outside_window, sheet_findings, silent_signal, speaker_prefix, stated_figures,
-    states_figure, undotted_slack_link, ungrounded_durations, ungrounded_emails,
-    ungrounded_figures, ungrounded_identifiers, ungrounded_on_page, ungrounded_ratios,
-    ungrounded_ratios_with, ungrounded_urls, unopened_links, unprinted_ids, unseen_tokens,
-    url_printed_in, urls, without_links,
+    Amounts, Date, InternalsCheck, ListedFigure, MemoryLayout, PageHolds, SheetRun, Turn,
+    Vocabulary, built_from_corpus, durations, emails, extract_numbers, fabricated_urls,
+    ground_message, ground_page, ground_reply, grounding_tokens, identifiers, internal_names,
+    link_findings, memory_claim, memory_grounding, mended_links, misdated_weekdays,
+    mispaired_per_unit, mispaired_per_unit_with, numbers, numeric_tokens, placeholder_targets,
+    printed_figures, prose_arithmetic, rows_outside_window, scrub_memory_layout, sheet_findings,
+    silent_signal, speaker_prefix, stated_figures, states_figure, undotted_slack_link,
+    ungrounded_durations, ungrounded_emails, ungrounded_figures, ungrounded_identifiers,
+    ungrounded_on_page, ungrounded_ratios, ungrounded_ratios_with, ungrounded_urls, unopened_links,
+    unprinted_ids, unseen_tokens, url_printed_in, urls, without_links,
 };
 
 /// Calls every entry point on the three texts, and returns a sum the
@@ -67,27 +68,8 @@ fn exercise(reply: &str, corpus: &str, prompt: &str) -> usize {
         + misdated_weekdays(corpus, today_for(corpus)).len()
         + rows_outside_window(reply, today_for(reply)).len()
         + rows_outside_window(corpus, today_for(corpus)).len();
-    let listed = [ListedFigure {
-        figure: prompt.to_owned(),
-        name: corpus.to_owned(),
-    }];
-    let runs = [
-        SheetRun {
-            stdout: corpus,
-            lists_rows: true,
-            listed: &listed,
-            ..SheetRun::default()
-        },
-        SheetRun {
-            stdout: prompt,
-            frames: true,
-            grid_read: true,
-            ..SheetRun::default()
-        },
-    ];
     let amounts = Amounts::of(reply);
-    n += sheet_findings(reply, &runs).listed.len()
-        + amounts.shared_with(corpus).len()
+    n += amounts.shared_with(corpus).len()
         + amounts.shared_with(prompt).len()
         + usize::from(states_figure(corpus, reply))
         + usize::from(states_figure(reply, prompt))
@@ -124,6 +106,80 @@ fn exercise(reply: &str, corpus: &str, prompt: &str) -> usize {
         + ungrounded_durations(corpus, reply, prompt).len()
         + ungrounded_on_page(reply, corpus, prompt).len()
         + usize::from(PageHolds::default().hold(reply, &[corpus, prompt]))
+        + turn_checks(reply, corpus, prompt)
+}
+
+/// The checks that read a whole turn, each text taking every part in turn:
+/// the vocabulary and the layout are cut from the texts themselves, so a
+/// name or a root can be any string.
+fn turn_checks(reply: &str, corpus: &str, prompt: &str) -> usize {
+    let words: Vec<&str> = prompt.split_whitespace().take(8).collect();
+    let (names, files) = words.split_at(words.len() / 2);
+    let vocabulary = Vocabulary {
+        names,
+        files,
+        roots: &["/memory/", "/sdk/"],
+        fixed: files,
+    };
+    let root = words.first().copied().unwrap_or("/memory/");
+    let layout = MemoryLayout {
+        root,
+        tool_prefix: words.get(1).copied().unwrap_or("memory_"),
+        folders: &[("integrations/", "the integration notes")],
+        files: &[("user.md", "your notes"), ("", "")],
+        root_phrase: "memory",
+        other_phrase: "notes",
+        tool_phrase: "my memory",
+    };
+    let check = InternalsCheck::new(corpus, &vocabulary);
+    let listed = [
+        ListedFigure {
+            figure: prompt,
+            name: reply,
+        },
+        ListedFigure {
+            figure: "19,851",
+            name: corpus,
+        },
+    ];
+    let runs = [
+        SheetRun {
+            stdout: corpus,
+            lists_its_rows: reply.len().is_multiple_of(2),
+            framing: true,
+            grid_read: true,
+            listed: &listed,
+        },
+        SheetRun {
+            stdout: prompt,
+            grid_read: corpus.len().is_multiple_of(2),
+            ..SheetRun::default()
+        },
+    ];
+    let attached = |target: &str| target.len().is_multiple_of(2);
+    let turn = Turn {
+        corpus,
+        prompt,
+        said: corpus,
+        today: today_for(reply),
+        pixel_only: false,
+        hosts: &["github.com"],
+        attached: &attached,
+        layout: &layout,
+        internals: Some(&check),
+        vouching: prompt,
+        runs: &runs,
+    };
+    internal_names(reply, corpus, &vocabulary, prompt).len()
+        + check.names_in(prompt, || reply).len()
+        + scrub_memory_layout(reply, corpus, &layout).len()
+        + scrub_memory_layout(corpus, "", &layout).len()
+        + grounding_tokens(reply).len()
+        + memory_grounding(reply, &[corpus, prompt]).grounded_lines
+        + sheet_findings(reply, &runs).unchecked.len()
+        + ground_message(reply, &turn).findings.len()
+        + ground_reply(corpus, &turn).findings.len()
+        + ground_page(reply, corpus, prompt, false).len()
 }
 
 /// How many of `text`'s links `read` printed, so a parseable address is

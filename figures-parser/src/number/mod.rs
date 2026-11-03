@@ -11,7 +11,6 @@ mod ratio;
 mod readings;
 mod scale;
 pub mod scan;
-mod sheet;
 mod spelled;
 
 pub use arithmetic::prose_arithmetic;
@@ -21,7 +20,6 @@ pub use per_unit::{
 };
 pub use printed::{NumericToken, PrintedFigures, numeric_tokens, printed_figures, without_links};
 pub use ratio::{ungrounded_ratios, ungrounded_ratios_with};
-pub use sheet::{ListedFigure, SheetFindings, SheetRun, UncheckedFigures, sheet_findings};
 
 use std::borrow::Cow;
 use std::collections::VecDeque;

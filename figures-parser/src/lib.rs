@@ -19,6 +19,14 @@
 //! | Durations | [`durations`] | [`ungrounded_durations`] |
 //! | Memory | [`grounding_tokens`] | [`memory_grounding`] |
 //! | A reply's form | | [`speaker_prefix`], [`memory_claim`], [`silent_signal`] |
+
+//! | An agent's own internals | | [`internal_names`], [`InternalsCheck`], [`scrub_memory_layout`] |
+//! | Amounts taken from a worksheet | | [`sheet_findings`] |
+//! | Memory a reply draws on | [`grounding_tokens`] | [`memory_grounding`] |
+//!
+//! [`ground_reply`], [`ground_message`] and [`ground_page`] run the checks
+//! a turn runs on a reply, a message it sends and a page it makes, in one
+//! call.
 //!
 //! # Example
 //!
@@ -53,12 +61,16 @@ pub mod date;
 pub mod duration;
 mod email;
 pub mod id;
+mod internals;
 mod kind;
 mod memory;
+mod message;
 pub mod number;
 mod page;
 
 mod reply;
+
+mod sheet;
 mod text;
 mod url;
 pub mod utf16;
@@ -67,19 +79,26 @@ pub use date::{misdated_weekdays, rows_outside_window};
 pub use duration::{Duration, Length, durations, ungrounded_durations};
 pub use email::{Email, emails, ungrounded_emails};
 pub use id::{Identifier, identifiers, ungrounded_identifiers, unprinted_ids, unseen_tokens};
+pub use internals::{
+    InternalsCheck, MemoryLayout, Vocabulary, internal_names, scrub_memory_layout,
+};
 pub use jiff::civil::Date;
 pub use kind::{Kind, UnknownKind};
 pub use memory::{MemoryGrounding, grounding_tokens, memory_grounding};
+pub use message::{
+    Finding, FindingKind, Grounding, Turn, ground_message, ground_page, ground_reply,
+};
 pub use number::{
-    Amounts, Figure, ListedFigure, MispairedFigure, Number, NumericToken, PrintedFigures, Reading,
-    SheetFindings, SheetRun, Sign, StatedFigure, UncheckedFigures, extract_numbers,
-    mispaired_per_unit, mispaired_per_unit_with, numbers, numeric_tokens, printed_figures,
-    prose_arithmetic, shares_amount, sheet_findings, stated_figures, states_figure,
-    ungrounded_figures, ungrounded_ratios, ungrounded_ratios_with, without_links,
+    Amounts, Figure, MispairedFigure, Number, NumericToken, PrintedFigures, Reading, Sign,
+    StatedFigure, extract_numbers, mispaired_per_unit, mispaired_per_unit_with, numbers,
+    numeric_tokens, printed_figures, prose_arithmetic, shares_amount, stated_figures,
+    states_figure, ungrounded_figures, ungrounded_ratios, ungrounded_ratios_with, without_links,
 };
 pub use page::{HOLDS_PER_PAGE, PageHolds, ungrounded_on_page};
 
 pub use reply::{SilentSignal, memory_claim, silent_signal, speaker_prefix};
+
+pub use sheet::{ListedFigure, SheetFindings, SheetRun, sheet_findings};
 pub use url::{
     LinkFindings, Mended, Url, built_from_corpus, fabricated_urls, link_findings, mended_links,
     placeholder_targets, undotted_slack_link, ungrounded_urls, unopened_links, url_printed_in,

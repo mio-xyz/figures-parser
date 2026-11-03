@@ -1,18 +1,25 @@
-//! Whether a reply rests on retained memory: which lines of the dossiers a
-//! turn preloaded the reply visibly draws on.
+//! Whether a reply draws on the memory it was given: which of the preloaded
+//! notes' lines it visibly repeats.
 
 use rustc_hash::FxHashSet;
 use unicode_general_category::{GeneralCategory, get_general_category};
 
-/// The fewest distinctive words a reply shares with a line to draw on it.
+use crate::text::is_letter;
+
+/// How many of a line's distinct words a reply must share.
 const MIN_SHARED: usize = 2;
 
-/// The shortest token kept, in UTF-16 units: a bare `7` or `10` matches too
-/// much to be distinctive, while `10:00` stands on its own.
+/// The share of a line's distinct words a reply must hold, as a fraction
+/// `MIN_RATIO.0 / MIN_RATIO.1`.
+const MIN_RATIO: (usize, usize) = (1, 2);
+
+/// Shorter tokens are dropped with the short words: a bare `7` matches too
+/// much to be distinctive, while `10:00` clears the bar on its own. Counted
+/// in UTF-16 units, as the host's lines are.
 const MIN_TOKEN_UNITS: usize = 3;
 
-/// Words too common to tell one line from another.
-const STOPWORDS: [&str; 109] = [
+/// Words that tell no line from another.
+const STOPWORDS: &[&str] = &[
     "the", "a", "an", "and", "or", "but", "of", "to", "in", "on", "at", "for", "with", "by", "as",
     "is", "are", "was", "were", "be", "been", "being", "it", "its", "this", "that", "these",
     "those", "from", "not", "no", "yes", "we", "our", "ours", "you", "your", "yours", "i", "my",
@@ -24,94 +31,98 @@ const STOPWORDS: [&str; 109] = [
     "etc", "still", "yet", "now", "new", "old", "use", "used", "uses", "using", "one", "two",
 ];
 
-/// How much of a reply rests on the dossiers a turn preloaded.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// How much of a reply rests on the preloaded memory; [`memory_grounding`]
+/// reads it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct MemoryGrounding {
-    /// The dossier lines read: every non-empty line that is no heading.
+    /// The lines of content the notes held.
     pub preloaded_lines: usize,
     /// The lines the reply draws on.
     pub grounded_lines: usize,
-    /// Whether it draws on any.
+    /// Whether the reply draws on any.
     pub grounded: bool,
 }
 
-/// Whether `c` is part of a token: a letter, a number or `:`.
-fn is_token_char(c: char) -> bool {
-    if c.is_ascii() {
-        return c.is_ascii_alphanumeric() || c == ':';
-    }
-    matches!(
-        get_general_category(c),
-        GeneralCategory::UppercaseLetter
-            | GeneralCategory::LowercaseLetter
-            | GeneralCategory::TitlecaseLetter
-            | GeneralCategory::ModifierLetter
-            | GeneralCategory::OtherLetter
-            | GeneralCategory::DecimalNumber
-            | GeneralCategory::LetterNumber
-            | GeneralCategory::OtherNumber
-    )
-}
-
-/// The byte past the freshness marker (`[derived 2026-09-07]`, `[as of
-/// 2026-09]`) that opens `text`, when one does.
+/// The length of the freshness marker (`[derived …]`, `[as of …]`) that
+/// opens at the start of `text`, its brackets included.
 fn marker_len(text: &str) -> Option<usize> {
     let rest = text.strip_prefix('[')?;
-    let opens = |word: &str| {
+    let head = ["derived", "as of"].into_iter().find(|word| {
         rest.get(..word.len())
-            .is_some_and(|head| head.eq_ignore_ascii_case(word))
-    };
-    if !(opens("derived") || opens("as of")) {
-        return None;
-    }
-    rest.find(']').map(|close| close.saturating_add(2))
+            .is_some_and(|start| start.eq_ignore_ascii_case(word))
+    })?;
+    let close = rest.get(head.len()..)?.find(']')?;
+    close.checked_add(head.len())?.checked_add(2)
 }
 
-/// The distinctive words of `text`, lowercased, in order.
-///
-/// Its freshness markers and markdown are dropped, it is cut at every
-/// character that is no letter, number or `:`, a `:` at either end of a token
-/// is dropped (the one in `10:00` stays), and every token shorter than three
-/// UTF-16 units or too common is left out.
-///
-/// # Examples
-///
-/// ```
-/// let tokens = figures_parser::grounding_tokens("**Owner:** Ana, standup at 10:00 [as of 2026-09]");
-/// assert_eq!(tokens, ["owner", "ana", "standup", "10:00"]);
-/// ```
-#[must_use]
-pub fn grounding_tokens(text: &str) -> Vec<String> {
-    let mut plain = String::with_capacity(text.len());
+/// `text` with its freshness markers and markdown marks made spaces: they
+/// mark how a line was kept, not what it says.
+fn without_marks(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
     let mut at = 0;
-    while let Some(c) = text.get(at..).and_then(|rest| rest.chars().next()) {
-        if c == '['
-            && let Some(len) = text.get(at..).and_then(marker_len)
-        {
-            plain.push(' ');
+    while let Some(rest) = text.get(at..) {
+        let Some(c) = rest.chars().next() else {
+            break;
+        };
+        if let Some(len) = marker_len(rest) {
+            out.push(' ');
             at = at.saturating_add(len);
             continue;
         }
-        plain.push(if matches!(c, '*' | '_' | '`' | '~' | '>' | '#') {
+        out.push(if matches!(c, '*' | '_' | '`' | '~' | '>' | '#') {
             ' '
         } else {
             c
         });
         at = at.saturating_add(c.len_utf8());
     }
-    plain
-        .to_lowercase()
+    out
+}
+
+/// Whether `c` is a letter, a number of any kind, or the colon a time holds.
+fn is_token_char(c: char) -> bool {
+    c == ':'
+        || is_letter(c)
+        || matches!(
+            get_general_category(c),
+            GeneralCategory::DecimalNumber
+                | GeneralCategory::LetterNumber
+                | GeneralCategory::OtherNumber
+        )
+}
+
+/// The distinctive words of `text`, lowercased, in order: no freshness
+/// marker, markdown mark, stopword or short token, and no colon at either end
+/// of one (`Owner:`), while the one inside `10:00` stays.
+///
+/// # Examples
+///
+/// ```
+/// let tokens = figures_parser::grounding_tokens("**Standup** is at 10:00 [as of 2026-09]. Owner: Ana");
+/// assert_eq!(tokens, ["standup", "10:00", "owner", "ana"]);
+/// ```
+#[must_use]
+pub fn grounding_tokens(text: &str) -> Vec<String> {
+    tokens(&lowered(text)).map(str::to_owned).collect()
+}
+
+/// `text` without its marks, lowercased: what [`tokens`] splits.
+fn lowered(text: &str) -> String {
+    without_marks(text).to_lowercase()
+}
+
+/// The distinctive words of a [`lowered`] text.
+fn tokens(lower: &str) -> impl Iterator<Item = &str> {
+    lower
         .split(|c: char| !is_token_char(c))
         .map(|token| token.trim_matches(':'))
         .filter(|token| {
             token.encode_utf16().count() >= MIN_TOKEN_UNITS && !STOPWORDS.contains(token)
         })
-        .map(str::to_owned)
-        .collect()
 }
 
-/// Whether `c` is whitespace as JavaScript's `trim` reads it.
-const fn is_js_space(c: char) -> bool {
+/// Whether `c` is white space as a host's `trim` reads it.
+const fn is_trim_space(c: char) -> bool {
     matches!(
         c,
         '\t' | '\n' | '\u{b}' | '\u{c}' | '\r' | ' ' | '\u{a0}' | '\u{1680}' | '\u{2000}'
@@ -125,67 +136,61 @@ const fn is_js_space(c: char) -> bool {
     )
 }
 
-/// Every three tokens in a row of `tokens`, joined by a space.
-fn trigrams(tokens: &[String]) -> FxHashSet<String> {
-    tokens.windows(3).map(|three| three.join(" ")).collect()
+/// The lines of a note that say something: not empty, not a heading.
+fn content_lines(note: &str) -> impl Iterator<Item = &str> {
+    note.split('\n')
+        .map(|line| line.trim_matches(is_trim_space))
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
 }
 
-/// Which lines of `dossiers` (each a preloaded dossier's text) `response`
-/// visibly draws on.
+/// Every run of three tokens in `words`.
+fn trigrams<'t>(words: &[&'t str]) -> impl Iterator<Item = (&'t str, &'t str, &'t str)> {
+    words.windows(3).filter_map(|w| match *w {
+        [a, b, c] => Some((a, b, c)),
+        _ => None,
+    })
+}
+
+/// Which lines of the preloaded `notes` `response` visibly draws on.
 ///
-/// A line is every non-empty line of a dossier that is no `#` heading. The
-/// response draws on one when it shares at least two of the line's distinct
-/// [`grounding_tokens`] and at least half of them, or repeats three of the
-/// line's tokens in a row. A line of fewer than two distinct tokens is read
-/// but never drawn on by overlap.
+/// A line counts when the response shares at least two of its distinctive words
+/// and at least half of them, or repeats three of its words in a row; a
+/// line of fewer than two distinct words never counts.
 ///
 /// # Examples
 ///
 /// ```
-/// let dossier = "# Ana\nPrefers async standups at 10:00\nOwns the Q3 renewal";
-/// let read = figures_parser::memory_grounding("Standup moves to 10:00, async as Ana prefers.", &[dossier]);
-/// assert_eq!((read.preloaded_lines, read.grounded_lines, read.grounded), (2, 1, true));
+/// let notes = ["# Team\n- Standup moved to Tuesday 10:00 in the Zoom room\n- Ana owns billing"];
+/// let grounding = figures_parser::memory_grounding("Standup is Tuesday at 10:00.", &notes);
+/// assert_eq!((grounding.preloaded_lines, grounding.grounded_lines), (2, 1));
+/// assert!(grounding.grounded);
 /// ```
 #[must_use]
-pub fn memory_grounding(response: &str, dossiers: &[&str]) -> MemoryGrounding {
-    let response_tokens = grounding_tokens(response);
-    let response_set: FxHashSet<&str> = response_tokens.iter().map(String::as_str).collect();
-    let response_trigrams = trigrams(&response_tokens);
-    let mut read = MemoryGrounding::default();
-    let mut joined = String::new();
-    for line in dossiers
-        .iter()
-        .flat_map(|dossier| dossier.split('\n'))
-        .map(|line| line.trim_matches(is_js_space))
-        .filter(|line| !line.is_empty() && !line.starts_with('#'))
-    {
-        read.preloaded_lines = read.preloaded_lines.saturating_add(1);
-        let tokens = grounding_tokens(line);
-        let distinct: FxHashSet<&str> = tokens.iter().map(String::as_str).collect();
+pub fn memory_grounding<N: AsRef<str>>(response: &str, notes: &[N]) -> MemoryGrounding {
+    let lower = lowered(response);
+    let response_tokens: Vec<&str> = tokens(&lower).collect();
+    let words: FxHashSet<&str> = response_tokens.iter().copied().collect();
+    let runs: FxHashSet<(&str, &str, &str)> = trigrams(&response_tokens).collect();
+    let mut preloaded_lines = 0_usize;
+    let mut grounded_lines = 0_usize;
+    for line in notes.iter().flat_map(|note| content_lines(note.as_ref())) {
+        preloaded_lines = preloaded_lines.saturating_add(1);
+        let line_lower = lowered(line);
+        let line_tokens: Vec<&str> = tokens(&line_lower).collect();
+        let distinct: FxHashSet<&str> = line_tokens.iter().copied().collect();
         if distinct.len() < MIN_SHARED {
             continue;
         }
-        let shared = distinct
-            .iter()
-            .filter(|token| response_set.contains(*token))
-            .count();
-        // At least half the line's distinct tokens, compared without division.
-        let half = distinct.len().div_ceil(2);
-        let by_overlap = shared >= MIN_SHARED && shared >= half;
-        let by_trigram = tokens.windows(3).any(|three| {
-            joined.clear();
-            for (i, token) in three.iter().enumerate() {
-                if i > 0 {
-                    joined.push(' ');
-                }
-                joined.push_str(token);
-            }
-            response_trigrams.contains(joined.as_str())
-        });
-        if by_overlap || by_trigram {
-            read.grounded_lines = read.grounded_lines.saturating_add(1);
+        let shared = distinct.iter().filter(|t| words.contains(*t)).count();
+        let by_overlap = shared >= MIN_SHARED
+            && shared.saturating_mul(MIN_RATIO.1) >= distinct.len().saturating_mul(MIN_RATIO.0);
+        if by_overlap || trigrams(&line_tokens).any(|run| runs.contains(&run)) {
+            grounded_lines = grounded_lines.saturating_add(1);
         }
     }
-    read.grounded = read.grounded_lines > 0;
-    read
+    MemoryGrounding {
+        preloaded_lines,
+        grounded_lines,
+        grounded: grounded_lines > 0,
+    }
 }

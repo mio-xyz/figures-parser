@@ -204,13 +204,13 @@ fn reads_the_figures_a_clause_states_and_a_line_prints() {
 #[test]
 fn walks_the_runs_a_reply_drew_a_sheets_amounts_from() {
     let listed = [ListedFigure {
-        figure: "19,851".into(),
-        name: "row 6 TOTAL: 19,851 not counted".into(),
+        figure: "19,851",
+        name: "row 6 TOTAL: 19,851 not counted",
     }];
     let reply = "2027 holds $19,850 and $1,458 in fees.";
     let checked = SheetRun {
         stdout: "Total | 19,850",
-        lists_rows: true,
+        lists_its_rows: true,
         listed: &listed,
         ..SheetRun::default()
     };
@@ -221,8 +221,8 @@ fn walks_the_runs_a_reply_drew_a_sheets_amounts_from() {
     };
     let found = sheet_findings(reply, &[checked, by_hand]);
     assert_eq!(found.unstated, listed);
-    assert_eq!(found.unchecked.figures, ["1,458"]);
-    assert!(!found.unchecked.framed);
+    assert_eq!(found.unchecked, ["1,458"]);
+    assert!(!found.framed);
     // A run that touched no worksheet holds the reply to nothing.
     let plain = SheetRun {
         stdout: "19,850 | 1,458",

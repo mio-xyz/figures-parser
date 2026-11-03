@@ -135,7 +135,11 @@ flagged:
 - a link right after a backtick or an unspaced script is read;
 - a `<url|label>` wrapped link is unwrapped whatever the case of its scheme;
 - both ends of a weekday range are checked;
-- a weekday pair is reported once, as written.
+- a weekday pair is reported once, as written;
+- a name of the agent's internals written against Thai, Lao, Khmer or
+  Myanmar text is still a word, in the reply and in the person's words
+  alike: "ใช้web_searchค้นหา" names `web_search`, where the original's
+  segmenter reads it as one Thai word.
 
 ### Dates read more accurately than the TypeScript check
 
@@ -206,6 +210,8 @@ this library reads it as written. Each case is pinned by a test in
   "03 11月5日" in the year 3; this library reads 2003, as chrono reads a
   two-digit year everywhere else.
 
+### Durations
+
 The duration check replaces a TypeScript original that reads a second, a
 minute and an hour after digits, and was fuzzed against it on 75,000
 generated replies and corpora. Every difference that remained is a
@@ -263,3 +269,9 @@ where the TypeScript reads the text wrongly:
 - `memory_claim` reads a claim written with a curly apostrophe ("I’ll
   remember"), where the TypeScript check reads a straight one only; the
   claim is the same.
+
+The internals check, the memory layout scrub, the memory-use count and the
+sheet checks were run beside their TypeScript originals on 20,000 generated
+inputs each (the sheet checks on the 16,500 whose amounts both read alike),
+and agree on all of them except the Thai cases above. Korean is parted from a
+name as the original's segmenter parts it ("workspace.md에").
