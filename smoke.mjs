@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
-const { extract, ungroundedFigures, ungroundedRatios, amountsSharedWith, sharesAmount, statesFigure, proseArithmetic, ungroundedUrls, linkFindings, mendedLinks, fabricatedUrls, ungroundedEmails, misdatedWeekdays, ungroundedIdentifiers, unseenTokens, ungroundedDurations } = createRequire(import.meta.url)("./index.js");
+const { extract, ungroundedFigures, ungroundedRatios, amountsSharedWith, sharesAmount, statesFigure, proseArithmetic, ungroundedUrls, linkFindings, mendedLinks, fabricatedUrls, ungroundedEmails, misdatedWeekdays, ungroundedIdentifiers, unseenTokens, ungroundedDurations, unprintedIds, urlPrintedIn } = createRequire(import.meta.url)("./index.js");
 
 const entities = extract("Total $1,250 and ١٢", { kinds: ["number"] });
 const has = (text, integer) => entities.some((e) => e.text === text && e.value.integer === integer);
@@ -48,4 +48,7 @@ assert.deepEqual(ungroundedFigures("Revenue hit $1.2 million, $4.7 million plann
 assert.deepEqual(extract("We hit twelve thousand five hundred users", { kinds: ["number"] }).map((e) => [e.text, e.value.integer]), [["twelve thousand five hundred", "12500"]]);
 assert.deepEqual(ungroundedFigures("Revenue is 1,200,000.", "on the call: one million two hundred thousand"), []);
 assert.deepEqual(extract("2 and a half million, one point two million, 3億5000万円", { kinds: ["number"] }).filter((e) => !e.value.derived).map((e) => [e.text, e.value.integer]), [["2 and a half million", "2500000"], ["one point two million", "1200000"], ["3億5000万", "350000000"]]);
+assert.deepEqual(unprintedIds("Created prod_TQ81xLmN20aB7c and prod_VU49BpM22sWxIM, see <@U0A1B2C3D>.", '{"id": "PROD_TQ81XLMN20AB7C"}'), ["prod_VU49BpM22sWxIM"]);
+assert.equal(urlPrintedIn("https://www.acme.com/blog/post/", "[Post](/blog/post)"), true);
+assert.equal(urlPrintedIn("https://acme.com/blog/post", "## Post"), false);
 console.log("ok");

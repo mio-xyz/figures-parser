@@ -12,7 +12,7 @@ use figures_parser::{
     Date, durations, emails, extract_numbers, fabricated_urls, identifiers, link_findings,
     mended_links, misdated_weekdays, numbers, prose_arithmetic, ungrounded_durations,
     ungrounded_emails, ungrounded_figures, ungrounded_identifiers, ungrounded_ratios,
-    ungrounded_urls, unseen_tokens, urls,
+    ungrounded_urls, unprinted_ids, unseen_tokens, url_printed_in, urls,
 };
 
 /// Calls every entry point on the three texts, and returns a sum the
@@ -61,8 +61,22 @@ fn exercise(reply: &str, corpus: &str, prompt: &str) -> usize {
         + mended_links(corpus, reply).text.len()
         + ungrounded_emails(reply, corpus, prompt).len()
         + ungrounded_identifiers(reply, corpus, prompt).len()
+        + unprinted_ids(reply, corpus).len()
+        + unprinted_ids(corpus, reply).len()
+        + usize::from(url_printed_in(reply, corpus))
+        + usize::from(url_printed_in(prompt, reply))
+        + found_urls_printed(reply, corpus)
         + unseen_tokens(reply, corpus, prompt).len()
         + ungrounded_durations(reply, corpus, prompt).len()
+}
+
+/// How many of `text`'s links `read` printed, so a parseable address is
+/// compared too.
+fn found_urls_printed(text: &str, read: &str) -> usize {
+    urls(text)
+        .iter()
+        .filter(|url| url_printed_in(url.text, read))
+        .count()
 }
 
 /// One "today" per input, rotating through the edges of the calendar.
@@ -261,6 +275,14 @@ const POOL: &[&str] = &[
     "example.com",
     "www.",
     "mailto:",
+    "prod_VU49BpM22sWxIM",
+    "0b6c2d4e-1f3a-4b5c-8d9e-0a1b2c3d4e5f",
+    "<@",
+    "https://www.acme.com:8080/a/../b?q=1#x",
+    "file:////",
+    "xn--",
+    "\u{212A}",
+    "\u{130}",
     "合計",
     "は",
     "ー",

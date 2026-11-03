@@ -385,6 +385,15 @@ alone, since the prompt's examples are not links to write) are linked as
 exactly one item's link. The splices run from the last item back, so each
 earlier offset holds. Every repair is listed as `from → to`.
 
+`url_printed_in(url, read)` parses the address with the `url` crate, which
+follows the WHATWG URL standard as browsers and Node do, so the host is
+lowercased and IDNA-encoded, a default port dropped, the path's dot segments
+resolved and its characters percent-encoded. It then looks for three plain
+substrings of `read`: the address as given less a trailing `/`, the host
+(less one leading `www.`, with a non-default port) followed by the path and
+query, and the path and query alone when they are not empty. An address that
+does not parse is looked for only as given.
+
 ## Weekdays
 
 `misdated_weekdays(reply, today)` is a port of chrono-node 2.10.2's parsers,
@@ -438,6 +447,22 @@ A UUID or a hash is always held, and a short hash is grounded by the full one
 it starts. A tracker key or a prefixed id is held only when the corpus holds
 another of the same prefix. Long mixed tokens share their shape with product
 and model names, so they are never held; `unseen_tokens` returns them apart.
+
+`unprinted_ids(reply, corpus)` reads its own three shapes, each a whole run
+of ASCII letters, digits, `_` and `-` (no outer `_` or `-` dropped):
+
+- a typed id: two to eight lowercase letters, the first `_`, then ten or more
+  letters and digits mixing both, in mixed case unless sixteen or more long,
+  so a snake-case name (`df_sales2024q1`) is not one;
+- a UUID;
+- a hex digest of 8 to 64 digits mixing digits and letters.
+
+The reply's links are blanked first, each distinct link everywhere it
+occurs, longest first, so a run ends where a link starts and a run after a
+link follows the blank. A run right after `@` or `#` is skipped as a chat
+mention. An id is grounded by the corpus holding it, ASCII case aside; a
+corpus with a Kelvin sign or a capital dotted I, which lowercase to `k` and
+`i`, is also read lowercased.
 
 ## Durations
 

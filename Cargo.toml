@@ -51,6 +51,7 @@ linkify = "0.11"
 memchr = "2"
 regex = "1"
 rustc-hash = "2"
+url = "2"
 stats_alloc = "0.1"
 criterion = { version = "0.8", default-features = false }
 napi = { version = "3", default-features = false, features = ["napi9"] }

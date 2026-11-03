@@ -18,6 +18,7 @@ linkify.workspace = true
 memchr.workspace = true
 regex.workspace = true
 rustc-hash.workspace = true
+url.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true

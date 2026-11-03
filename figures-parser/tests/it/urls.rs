@@ -701,3 +701,49 @@ fn a_mended_reply_passes_the_check_and_names_each_repair_made() {
         [format!("{DOTTED} → {UNDOTTED}"), format!("#3647 → {PR}")]
     );
 }
+
+#[test]
+fn an_address_is_printed_whole_without_its_scheme_or_by_its_path() {
+    use figures_parser::url_printed_in;
+    let url = "https://www.acme.com/blog/when-marking-runs-late/";
+    for read in [
+        "[When marking runs late](/blog/when-marking-runs-late)",
+        "see acme.com/blog/when-marking-runs-late",
+        "<https://www.acme.com/blog/when-marking-runs-late/>",
+    ] {
+        assert!(url_printed_in(url, read), "{read}");
+    }
+    // A site's root the asker gave without a scheme.
+    assert!(url_printed_in(
+        "https://acme.com",
+        "the site is live on <http://acme.com|acme.com>"
+    ));
+}
+
+#[test]
+fn an_address_built_from_a_title_is_not_printed() {
+    use figures_parser::url_printed_in;
+    let read = "the site is live on acme.com\n## The Journal\n## When marking runs late\n\
+                ![](/blog-images/marking.jpg)";
+    assert!(!url_printed_in(
+        "https://acme.com/blog/when-marking-runs-late",
+        read
+    ));
+    assert!(!url_printed_in("https://acme.com", "nothing"));
+}
+
+#[test]
+fn an_address_is_compared_as_a_browser_parses_it() {
+    use figures_parser::url_printed_in;
+    assert!(url_printed_in("https://ACME.com/x", "acme.com/x"));
+    assert!(url_printed_in("https://acme.com:443/x", "acme.com/x"));
+    assert!(url_printed_in("https://acme.com:8080/x", "acme.com:8080/x"));
+    assert!(!url_printed_in("https://acme.com:8080/", "acme.com"));
+    assert!(url_printed_in("https://acme.com/a b", "/a%20b"));
+    assert!(url_printed_in("https://acme.com/a/../b", "acme.com/b"));
+    assert!(url_printed_in("https://bücher.de/x", "xn--bcher-kva.de/x"));
+    assert!(url_printed_in("https://acme.com/?q=1", "?q=1"));
+    // One that does not parse is printed only whole.
+    assert!(url_printed_in("acme.com/x/", "acme.com/x"));
+    assert!(!url_printed_in("acme.com/x", "/x"));
+}

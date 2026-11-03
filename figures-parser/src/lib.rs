@@ -10,10 +10,10 @@
 //! | Kind | Reader | Comparison |
 //! |---|---|---|
 //! | Numbers | [`numbers`], [`extract_numbers`] | [`ungrounded_figures`], [`ungrounded_ratios`], [`prose_arithmetic`], [`Amounts`], [`states_figure`] |
-//! | Links | [`urls`] | [`ungrounded_urls`], [`link_findings`], [`fabricated_urls`], [`mended_links`] |
+//! | Links | [`urls`] | [`ungrounded_urls`], [`link_findings`], [`fabricated_urls`], [`mended_links`], [`url_printed_in`] |
 //! | Weekdays beside dates | | [`misdated_weekdays`] |
 //! | Email addresses | [`emails`] | [`ungrounded_emails`] |
-//! | Identifiers | [`identifiers`] | [`ungrounded_identifiers`], [`unseen_tokens`] |
+//! | Identifiers | [`identifiers`] | [`ungrounded_identifiers`], [`unprinted_ids`], [`unseen_tokens`] |
 //! | Durations | [`durations`] | [`ungrounded_durations`] |
 //!
 //! # Example
@@ -58,7 +58,7 @@ pub mod utf16;
 pub use date::misdated_weekdays;
 pub use duration::{Duration, Length, durations, ungrounded_durations};
 pub use email::{Email, emails, ungrounded_emails};
-pub use id::{Identifier, identifiers, ungrounded_identifiers, unseen_tokens};
+pub use id::{Identifier, identifiers, ungrounded_identifiers, unprinted_ids, unseen_tokens};
 pub use jiff::civil::Date;
 pub use kind::{Kind, UnknownKind};
 pub use number::{
@@ -66,7 +66,8 @@ pub use number::{
     shares_amount, states_figure, ungrounded_figures, ungrounded_ratios,
 };
 pub use url::{
-    LinkFindings, Mended, Url, fabricated_urls, link_findings, mended_links, ungrounded_urls, urls,
+    LinkFindings, Mended, Url, fabricated_urls, link_findings, mended_links, ungrounded_urls,
+    url_printed_in, urls,
 };
 
 /// The README's examples, run as doc tests so they stay true.

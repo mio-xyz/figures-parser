@@ -236,6 +236,13 @@ export declare function ungroundedRatios(reply: string, corpus: string, said?: s
 export declare function ungroundedUrls(reply: string, corpus: string, prompt?: string | undefined | null, hosts?: Array<string> | undefined | null): Array<string>
 
 /**
+ * The opaque ids `reply` states outside its links (a typed id such as
+ * `prod_VU49BpM22sWxIM`, a UUID, a hex digest) that `corpus` never carries,
+ * case aside, once each.
+ */
+export declare function unprintedIds(reply: string, corpus: string): Array<string>
+
+/**
  * The long mixed tokens in `reply`, once each, that neither `corpus` nor
  * `prompt` carries, for measurement only.
  */
@@ -255,3 +262,9 @@ export interface UrlEntity {
   /** One past the last UTF-16 unit. */
   end: number
 }
+
+/**
+ * Whether `read` carries `url` whole, without its scheme, or as the path a
+ * page links it by, the address parsed as a browser parses it.
+ */
+export declare function urlPrintedIn(url: string, read: string): boolean

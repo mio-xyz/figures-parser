@@ -79,6 +79,12 @@ it stands; a contribution that closes one should remove it here.
   not decoded before it is looked for in the corpus.
 - A built link's host list is the caller's: with none given, only a known
   shape's own host passes unprinted, and only at its root.
+- `url_printed_in` parses an address with the `url` crate, which reads some
+  `file:` addresses (empty path segments as in "file://a//", a backslash
+  after the host) differently from Node's parser; http(s) addresses parse
+  alike.
+- `url_printed_in` grounds an address by its path alone wherever the text
+  holds it, so a page on another host that links the same path grounds it.
 
 ## Weekdays
 
@@ -111,6 +117,8 @@ it stands; a contribution that closes one should remove it here.
   passes.
 - Long mixed tokens are never checked, and ISO durations ("PT1H30M45S") and
   chat user ids ("U01ABCDEF2") land among them.
+- `unprinted_ids` reads no tracker key, and no typed id whose prefix holds a
+  digit or an underscore (`cs_test_a1B2…`, read whole from its first `_`).
 
 ## Durations
 

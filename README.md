@@ -67,9 +67,10 @@ what a text states, with byte spans.
 | [Ratios](#ratios) | `ungrounded_ratios` | | a ratio or a printed decimal rounds to it, or the person's numbers give it |
 | [Arithmetic in prose](#arithmetic-in-prose) | `prose_arithmetic` | | the corpus prints the same value |
 | [Links](#links) | `ungrounded_urls`, `fabricated_urls` | `urls` | the corpus holds the link, with or without its scheme, its path under no other host, or the ids it was built from |
+| [Addresses read](#addresses-read) | `url_printed_in` | | the text read holds the address, without its scheme or by its path |
 | [Weekdays](#weekdays) | `misdated_weekdays` | | the weekday is the date's own |
 | [Email addresses](#email-addresses) | `ungrounded_emails` | `emails` | the corpus or the prompt carries it, case aside |
-| [Identifiers](#identifiers) | `ungrounded_identifiers` | `identifiers` | the corpus or the prompt carries it |
+| [Identifiers](#identifiers) | `ungrounded_identifiers`, `unprinted_ids` | `identifiers` | the corpus or the prompt carries it |
 | [Durations](#durations) | `ungrounded_durations` | `durations` | the corpus carries the same length, in any form |
 
 ### Numbers
@@ -271,6 +272,26 @@ assert!(fabricated_urls("Open https://acme.io/new.", "", &["acme.io"]).is_empty(
 `urls(text)` finds http(s) links, the `<url|label>` wrapping chat apps use and markdown links
 included, without the markup around them.
 
+### Addresses read
+
+`url_printed_in(url, read)` tells whether an address a caller fetched was
+given or put together: it is true when `read` (every page, message and tool
+result read so far) holds the address whole, without its scheme
+("acme.com/blog/post"), or as the path a page links it by ("/blog/post").
+The address is parsed as a browser parses it: the host lowercased and
+without a leading `www.`, the path normalized and without a trailing `/`,
+the query kept and the fragment dropped. A failed read of an address no text
+printed says nothing about the site, since the address was built, often from
+a page's title.
+
+```rust
+use figures_parser::url_printed_in;
+
+let url = "https://acme.com/blog/when-marking-runs-late";
+assert!(url_printed_in(url, "[When marking runs late](/blog/when-marking-runs-late)"));
+assert!(!url_printed_in(url, "## The Journal\n## When marking runs late"));
+```
+
 ### Weekdays
 
 `misdated_weekdays(reply, today)` finds each weekday written beside a date
@@ -326,6 +347,22 @@ let corpus = "CORE-1710 is open.";
 assert_eq!(
     ungrounded_identifiers("Fixed in CORE-1711, built with GPT-4.", corpus, ""),
     ["CORE-1711"]
+);
+```
+
+`unprinted_ids(reply, corpus)` is the stricter check for opaque ids, which
+no reasoning yields: every typed id (`prod_VU49BpM22sWxIM`, a lowercase
+prefix and a mixed body), UUID and hex digest the reply states outside its
+links is held to the corpus, whatever its prefix and inside code too. A run
+right after `@` or `#` is a chat mention and is left alone.
+
+```rust
+use figures_parser::unprinted_ids;
+
+let corpus = r#"{"id": "prod_TQ81xLmN20aB7c"}"#;
+assert_eq!(
+    unprinted_ids("Created prod_TQ81xLmN20aB7c and prod_VU49BpM22sWxIM.", corpus),
+    ["prod_VU49BpM22sWxIM"]
 );
 ```
 

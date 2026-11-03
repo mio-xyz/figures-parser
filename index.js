@@ -793,4 +793,6 @@ module.exports.ungroundedFigures = nativeBinding.ungroundedFigures
 module.exports.ungroundedIdentifiers = nativeBinding.ungroundedIdentifiers
 module.exports.ungroundedRatios = nativeBinding.ungroundedRatios
 module.exports.ungroundedUrls = nativeBinding.ungroundedUrls
+module.exports.unprintedIds = nativeBinding.unprintedIds
 module.exports.unseenTokens = nativeBinding.unseenTokens
+module.exports.urlPrintedIn = nativeBinding.urlPrintedIn

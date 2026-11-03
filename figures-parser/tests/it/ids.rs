@@ -116,3 +116,117 @@ fn a_tracker_key_is_held_by_a_key_of_its_prefix_inside_a_corpus_link() {
         ["CORE-1711"]
     );
 }
+
+#[test]
+fn an_opaque_id_no_result_printed_is_unprinted_and_one_a_result_printed_is_not() {
+    use figures_parser::unprinted_ids;
+    let created = r#"{"id": "prod_TQ81xLmN20aB7c", "name": "Annual"}"#;
+    assert_eq!(
+        unprinted_ids(
+            "Created prod_TQ81xLmN20aB7c and prod_VU49BpM22sWxIM.",
+            created
+        ),
+        ["prod_VU49BpM22sWxIM"]
+    );
+    let failed = "Error: StripeInvalidRequestError: No such price: 'price_1Q'";
+    assert_eq!(
+        unprinted_ids(
+            "The products were created: `prod_VU49BpM22sWxIM`, `prod_VU49Bq7sLx02Tn`.",
+            failed
+        ),
+        ["prod_VU49BpM22sWxIM", "prod_VU49Bq7sLx02Tn"]
+    );
+}
+
+#[test]
+fn a_uuid_and_a_digest_are_read_and_grounded_whole_or_shortened() {
+    use figures_parser::unprinted_ids;
+    let read =
+        "trace 7f3a9c0b2e8d4f61a5b3c9d0e1f2a3b4 sha 3080fc1335ab9e7c0d2f4a6b8c1e3f5a7b9d0c2e";
+    assert_eq!(
+        unprinted_ids(
+            "Trace 7f3a9c0b2e8d4f61a5b3c9d0e1f2a3b4, commit 3080fc133.",
+            read
+        ),
+        Vec::<&str>::new()
+    );
+    assert_eq!(
+        unprinted_ids(
+            "Trace 7f3a9c0b2e8d4f61, run 0b6c2d4e-1f3a-4b5c-8d9e-0a1b2c3d4e5f.",
+            read
+        ),
+        ["0b6c2d4e-1f3a-4b5c-8d9e-0a1b2c3d4e5f"]
+    );
+    assert_eq!(
+        unprinted_ids("Trace A1B2C3D4E5F60718.", ""),
+        ["A1B2C3D4E5F60718"]
+    );
+    assert_eq!(
+        unprinted_ids("Trace A1B2C3D4E5F60718.", "trace a1b2c3d4e5f60718"),
+        Vec::<&str>::new()
+    );
+    assert_eq!(
+        unprinted_ids(
+            "Run 0B6C2D4E-1F3A-4B5C-8D9E-0A1B2C3D4E5F",
+            "run 0b6c2d4e-1f3a-4b5c-8d9e-0a1b2c3d4e5f"
+        ),
+        Vec::<&str>::new()
+    );
+}
+
+#[test]
+fn words_names_dates_numbers_links_and_mentions_are_no_opaque_ids() {
+    use figures_parser::unprinted_ids;
+    let reply = "Ran daily_recap_report on 2026-11-02 for order 40017731, deadbeef cafe, \
+                 see https://x.com/runs/9f8e7d6c5b4a39281706.";
+    assert_eq!(unprinted_ids(reply, ""), Vec::<&str>::new());
+    assert_eq!(
+        unprinted_ids("<@U0A1B2C3D> here is the summary, see <#C0A1B2C3D>.", ""),
+        Vec::<&str>::new()
+    );
+    assert_eq!(
+        unprinted_ids(
+            "Then `df_sales2024q1 = load()`; account acct_1234567890abcdefgh.",
+            ""
+        ),
+        ["acct_1234567890abcdefgh"]
+    );
+    // A tracker key and an id with a dash in its body are neither shape.
+    assert_eq!(
+        unprinted_ids("CORE-1711 and prod_VU49BpM22sWxIM-x", ""),
+        Vec::<&str>::new()
+    );
+}
+
+#[test]
+fn an_opaque_id_beside_a_link_is_read_apart_from_it() {
+    use figures_parser::unprinted_ids;
+    // A chat link's label is read, its address is not, and a mention is the
+    // mention check's.
+    assert_eq!(
+        unprinted_ids(
+            "<https://acme.io/x|9f2e4c1a0b> and <@9f2e4c1a0c>, https://acme.io/r/0a1b2c3d4e",
+            ""
+        ),
+        ["9f2e4c1a0b"]
+    );
+    // A shorter link that starts a longer one blanks only itself.
+    assert_eq!(
+        unprinted_ids("https://acme.io/a https://acme.io/ab 0a1b2c3d4e", ""),
+        ["0a1b2c3d4e"]
+    );
+}
+
+#[test]
+fn an_opaque_id_is_grounded_by_a_corpus_that_lowercases_to_it() {
+    use figures_parser::unprinted_ids;
+    // The Kelvin sign lowercases to `k`.
+    assert_eq!(
+        unprinted_ids("prod_kabc12345XYZ", "prod_\u{212A}abc12345xyz"),
+        Vec::<&str>::new()
+    );
+    assert_eq!(
+        unprinted_ids("prod_kabc12345XYZ", "prod_xabc12345xyz"),
+        ["prod_kabc12345XYZ"]
+    );
+}

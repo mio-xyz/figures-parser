@@ -423,6 +423,18 @@ pub fn ungrounded_identifiers(
     figures_parser::ungrounded_identifiers(&reply, &corpus, prompt.as_deref().unwrap_or_default())
 }
 
+/// The opaque ids `reply` states outside its links (a typed id such as
+/// `prod_VU49BpM22sWxIM`, a UUID, a hex digest) that `corpus` never carries,
+/// case aside, once each.
+#[napi(catch_unwind)]
+#[must_use]
+pub fn unprinted_ids(reply: String, corpus: String) -> Vec<String> {
+    figures_parser::unprinted_ids(&reply, &corpus)
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
+}
+
 /// The long mixed tokens in `reply`, once each, that neither `corpus` nor
 /// `prompt` carries, for measurement only.
 #[napi(catch_unwind)]
@@ -437,6 +449,14 @@ pub fn unseen_tokens(reply: String, corpus: String, prompt: Option<String>) -> V
 #[must_use]
 pub fn ungrounded_durations(reply: String, corpus: String, prompt: Option<String>) -> Vec<String> {
     figures_parser::ungrounded_durations(&reply, &corpus, prompt.as_deref().unwrap_or_default())
+}
+
+/// Whether `read` carries `url` whole, without its scheme, or as the path a
+/// page links it by, the address parsed as a browser parses it.
+#[napi(catch_unwind)]
+#[must_use]
+pub fn url_printed_in(url: String, read: String) -> bool {
+    figures_parser::url_printed_in(&url, &read)
 }
 
 /// The links in `reply`, once each, that `corpus` does not carry.
