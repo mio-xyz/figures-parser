@@ -122,9 +122,16 @@ it stands; a contribution that closes one should remove it here.
 
 ## Durations
 
-- German, Dutch, Swedish, Finnish, Russian, Ukrainian, Japanese, Chinese and
-  Vietnamese words are not read, though the weekday check reads those
-  languages.
+- Finnish and Ukrainian units are not read, though the weekday check reads
+  those languages.
+- Number words outside English, French, Spanish, Italian, Portuguese and
+  Arabic are not read ("fünf Minuten", "пять минут"), nor are days, weeks,
+  months and years in the languages whose seconds, minutes and hours are
+  read by their CLDR names. Russian and Polish case forms past CLDR's
+  ("минутах", "godzinach") are not read either.
+- Some CLDR short names are words too: "jam" (Indonesian hours), "tim"
+  (Swedish), "std" (German) and "sa" (Turkish), so "3 jam sessions" reads as
+  three hours.
 - Arabic: number words past ninety-nine ("مئة ساعة"), dialect numbers
   ("تلات ساعات"), and units written with their short vowels are not read. A
   lone singular unit ("استغرق ساعة", "it took an hour") is not read either,
@@ -133,9 +140,15 @@ it stands; a contribution that closes one should remove it here.
   decimal in words is misread: "one point five hours" reads as five hours.
 - "An hour" alone is not read, only "an hour and a half", since "once a day"
   uses the same article.
-- A range reads its upper end only: "2-3 hours" is 3 hours.
+- A range is read only with a bare number in digits and a dash before a
+  part in digits: "2 to 3 hours", "between 2 and 3 hours" and "two-three
+  hours" read their upper end only, as does a range whose low is not below
+  its high ("30-10 minutes" reads "10 minutes").
 - Minutes after a spaced hour are dropped ("2h 30" is 2 hours), and "1h30s"
   is not read.
 - Calendar lengths do not convert to days: "4 weeks" is not "1 month", and
   "365 days" is not "1 year".
 - A time of day written "15h30" reads as a length.
+- A printed length rounds to a reply's at the reply's place, so a long unit
+  is loose: "2 hours" is grounded by any printed length from 1:30:01 to
+  2:29:59, and "1 year" by 6.01 to 17.99 months.

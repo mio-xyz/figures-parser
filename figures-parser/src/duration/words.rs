@@ -1,6 +1,8 @@
 //! The words a duration is written with in English, French, Spanish, Italian
 //! and Portuguese, curated from rustling-ontology's duration and number
 //! grammars (MIT or Apache-2.0), and in Arabic, which rustling does not read.
+//! A second's, a minute's and an hour's names in the other languages are
+//! CLDR's, long and short, as `Intl.NumberFormat` prints them.
 
 use super::grammar::Unit;
 
@@ -211,17 +213,75 @@ pub const MILLISECOND: &[&str] = &[
 /// A second's words.
 pub const SECOND: &[&str] = &[
     "seconds", "second", "secondes", "seconde", "secondi", "secondo", "segundos", "segundo",
-    "secs", "sec", "segs", "seg",
+    "secs", "sec", "segs", "seg", "sekunden", "sekunde", "sek", "seconden", "sekunda", "sekundy",
+    "sekund", "sekunder", "saniye", "sn", "detik", "dtk", "giây",
 ];
 
 /// A minute's words.
 pub const MINUTE: &[&str] = &[
-    "minutes", "minute", "minutos", "minuto", "minuti", "mins", "min", "mn",
+    "minutes", "minute", "minutos", "minuto", "minuti", "mins", "min", "mn", "minuten", "minuut",
+    "minuta", "minuty", "minut", "minuter", "dakika", "dk", "menit", "mnt", "phút",
 ];
 
 /// An hour's words.
 pub const HOUR: &[&str] = &[
-    "hours", "hour", "heures", "heure", "horas", "hora", "ore", "ora", "hrs", "hr",
+    "hours", "hour", "heures", "heure", "horas", "hora", "ore", "ora", "hrs", "hr", "stunden",
+    "stunde", "std", "uur", "godzina", "godziny", "godzin", "godz", "timmar", "timme", "tim",
+    "saat", "sa", "jam",
+];
+
+/// The unit names CLDR writes with a closing dot.
+pub const DOTTED: &[&str] = &["sek", "sn", "min", "dk", "std", "godz", "sa", "ชม"];
+
+/// The names of a second, a minute and an hour that end in a letter outside
+/// ASCII (Russian, Hebrew, Persian, Hindi, Japanese, Korean, Chinese, Thai,
+/// Vietnamese), read after digits by a pattern of their own, since the part
+/// pattern's ASCII word boundary does not end them.
+pub const NAMED: &[(&str, Unit)] = &[
+    ("секунда", Unit::Second),
+    ("секунды", Unit::Second),
+    ("секунд", Unit::Second),
+    ("сек", Unit::Second),
+    ("ثانیه", Unit::Second),
+    ("שניה", Unit::Second),
+    ("שתי שניות", Unit::Second),
+    ("שניות", Unit::Second),
+    ("שנ׳", Unit::Second),
+    ("सेकंड", Unit::Second),
+    ("से॰", Unit::Second),
+    ("秒钟", Unit::Second),
+    ("วินาที", Unit::Second),
+    ("วิ", Unit::Second),
+    ("минута", Unit::Minute),
+    ("минуты", Unit::Minute),
+    ("минут", Unit::Minute),
+    ("мин", Unit::Minute),
+    ("دقیقه", Unit::Minute),
+    ("דקה", Unit::Minute),
+    ("שתי דקות", Unit::Minute),
+    ("דקות", Unit::Minute),
+    ("דק׳", Unit::Minute),
+    ("मिनट", Unit::Minute),
+    ("मि॰", Unit::Minute),
+    ("分钟", Unit::Minute),
+    ("นาที", Unit::Minute),
+    ("часов", Unit::Hour),
+    ("часа", Unit::Hour),
+    ("час", Unit::Hour),
+    ("ساعت", Unit::Hour),
+    ("שעה", Unit::Hour),
+    ("שעתיים", Unit::Hour),
+    ("שעות", Unit::Hour),
+    ("שע׳", Unit::Hour),
+    ("घंटा", Unit::Hour),
+    ("घंटे", Unit::Hour),
+    ("घं॰", Unit::Hour),
+    ("時間", Unit::Hour),
+    ("시간", Unit::Hour),
+    ("小时", Unit::Hour),
+    ("ชั่วโมง", Unit::Hour),
+    ("ชม", Unit::Hour),
+    ("giờ", Unit::Hour),
 ];
 
 /// A day's words.

@@ -305,3 +305,204 @@ fn grounds_an_arabic_duration_however_the_corpus_writes_it() {
         Vec::<String>::new()
     );
 }
+
+const VIDEO_REVIEW: &str =
+    "A silent 6-minute screen recording.\n350 seconds is too long: cut to 60–90 seconds max.";
+
+fn ungrounded(reply: &str, corpus: &str) -> Vec<String> {
+    ungrounded_durations(reply, corpus, "")
+}
+
+#[test]
+fn names_a_length_nothing_in_the_turn_printed() {
+    assert_eq!(
+        ungrounded(
+            "Here's a 2-minute walkthrough of how it works:",
+            VIDEO_REVIEW
+        ),
+        ["2-minute"]
+    );
+}
+
+#[test]
+fn passes_a_printed_length_rounded_at_the_unit_it_is_written_in() {
+    assert_eq!(
+        ungrounded("Here's a 6-minute walkthrough.", "duration: 350 seconds"),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        ungrounded("It ran 2 hours.", "it ran 100 minutes"),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        ungrounded("It ran 2 hours.", "it ran 89 minutes"),
+        ["2 hours"]
+    );
+}
+
+#[test]
+fn reads_a_compound_as_its_sum() {
+    assert_eq!(
+        ungrounded("a 5-minute-50-second walkthrough", "350 seconds"),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        ungrounded("5 minutes 40 seconds long", "350 seconds"),
+        ["5 minutes 40 seconds"]
+    );
+}
+
+#[test]
+fn holds_a_value_halfway_between_two_to_neither() {
+    assert_eq!(ungrounded("a 2-minute clip", "90 seconds"), ["2-minute"]);
+    assert_eq!(ungrounded("a 1-minute clip", "90 seconds"), ["1-minute"]);
+}
+
+#[test]
+fn holds_a_decimal_to_the_place_it_is_written_to() {
+    assert_eq!(ungrounded("1.5 hours", "90 minutes"), Vec::<String>::new());
+    assert_eq!(ungrounded("1.5 hours", "92 minutes"), Vec::<String>::new());
+    assert_eq!(ungrounded("1.5 hours", "70 minutes"), ["1.5 hours"]);
+    assert_eq!(
+        ungrounded("an hour and a half", "100 minutes"),
+        Vec::<String>::new()
+    );
+    let found = durations("1.5 hours, 1½ hours, an hour and a half");
+    let places: Vec<u64> = found.iter().map(|d| d.place.milliseconds).collect();
+    assert_eq!(places, [6 * MINUTE, 30 * MINUTE, 30 * MINUTE]);
+}
+
+#[test]
+fn allows_one_unit_either_way_when_the_length_is_marked_approximate() {
+    assert_eq!(
+        ungrounded("about ~5 minutes", "350 seconds"),
+        Vec::<String>::new()
+    );
+    assert_eq!(ungrounded("≈ 2 hours", "151 minutes"), Vec::<String>::new());
+    assert_eq!(ungrounded("5 minutes", "350 seconds"), ["5 minutes"]);
+    assert!(durations("~5 minutes")[0].approximate);
+}
+
+#[test]
+fn passes_a_range_a_printed_length_lies_in() {
+    assert_eq!(
+        ungrounded("each takes 10–30 min", "the longest ran 25 minutes"),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        ungrounded("each takes 10–30 min", "it ran 45 minutes"),
+        ["10–30 min"]
+    );
+    assert_eq!(
+        ungrounded("it took 60-90 seconds", VIDEO_REVIEW),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        ungrounded("it took 75 seconds", "cut to 60–90 seconds"),
+        ["75 seconds"]
+    );
+    let range = &durations("2 - 3 hours")[0];
+    assert_eq!(
+        (range.text, range.from, range.length),
+        ("2 - 3 hours", Some(clock(2 * HOUR)), clock(3 * HOUR))
+    );
+}
+
+#[test]
+fn reads_no_range_whose_low_is_not_below_its_high_or_is_part_of_a_word() {
+    for (text, written) in [
+        ("step 3 - 2 minutes", "2 minutes"),
+        ("Q1-3 hours", "3 hours"),
+        ("v1.2-3 hours", "3 hours"),
+    ] {
+        let found = durations(text);
+        assert_eq!(
+            found.iter().map(|d| (d.text, d.from)).collect::<Vec<_>>(),
+            [(written, None)],
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn reads_a_unit_glued_to_a_printed_figure_and_names_in_other_languages() {
+    assert_eq!(
+        ungrounded("Book a 30-minute call", "cal.com booking: 30min meeting"),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        ungrounded("une vidéo de 6 minutes", "Durée : 350 secondes"),
+        Vec::<String>::new()
+    );
+    for (text, length) in [
+        ("5 Minuten", clock(5 * MINUTE)),
+        ("2 Std.", clock(2 * HOUR)),
+        ("3 uur", clock(3 * HOUR)),
+        ("2 godziny", clock(2 * HOUR)),
+        ("3 timmar", clock(3 * HOUR)),
+        ("10 dakika", clock(10 * MINUTE)),
+        ("5 menit", clock(5 * MINUTE)),
+        ("5 phút", clock(5 * MINUTE)),
+        ("2 giờ", clock(2 * HOUR)),
+        ("5 минут", clock(5 * MINUTE)),
+        ("2 часа", clock(2 * HOUR)),
+        ("2 שעות", clock(2 * HOUR)),
+        ("10 دقیقه", clock(10 * MINUTE)),
+        ("5 मिनट", clock(5 * MINUTE)),
+        ("3時間", clock(3 * HOUR)),
+        ("2 시간", clock(2 * HOUR)),
+        ("5分钟", clock(5 * MINUTE)),
+        ("2 ชั่วโมง", clock(2 * HOUR)),
+    ] {
+        assert_eq!(read(text), [(text, length)], "{text}");
+    }
+    assert_eq!(read("3時間かかった"), [("3時間", clock(3 * HOUR))]);
+    assert_eq!(ungrounded("5 минут", "330 seconds"), ["5 минут"]);
+    assert_eq!(
+        ungrounded("2 Std. 30 min", "150 minutes"),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn reads_no_unit_inside_a_word() {
+    assert_eq!(read("3 minor fixes, hourly, 5 mint, 2 минуточки"), []);
+}
+
+#[test]
+fn never_holds_a_number_glued_to_a_one_letter_symbol() {
+    let stated: Vec<&str> = durations("3 minor fixes, the 90s, 24h, 3d, 15h, 24 h")
+        .into_iter()
+        .filter(|d| d.stated)
+        .map(|d| d.text)
+        .collect();
+    assert_eq!(stated, ["24 h"]);
+    assert_eq!(
+        ungrounded("the 90s, 24h, 1h30", "90 minutes"),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn ignores_a_link_s_digits() {
+    assert_eq!(
+        ungrounded("see https://cal.com/someone/45min", ""),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        ungrounded("see https://example.com/a?t=45 minutes", ""),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn reads_a_corpus_comma_before_three_digits_as_a_decimal_too() {
+    assert_eq!(
+        ungrounded("1.25 seconds", "1,250 secondes"),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        ungrounded("1,250 seconds", "1,250 secondes"),
+        Vec::<String>::new()
+    );
+}

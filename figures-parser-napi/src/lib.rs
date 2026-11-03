@@ -11,7 +11,7 @@
 use std::borrow::Cow;
 
 use figures_parser::utf16::{Utf16Cursor, units};
-use figures_parser::{Kind, durations, emails, identifiers, numbers, urls};
+use figures_parser::{Kind, Length, durations, emails, identifiers, numbers, urls};
 use napi::bindgen_prelude::Either5;
 use napi_derive::napi;
 
@@ -103,6 +103,24 @@ pub struct IdEntity {
     pub shape: String,
 }
 
+/// A length of time, in the two parts that do not convert into each other.
+#[napi(object)]
+pub struct LengthValue {
+    /// Its weeks, days, hours, minutes and seconds, in milliseconds.
+    pub milliseconds: i64,
+    /// Its years, quarters and months, in hundredths of a month.
+    pub centimonths: i64,
+}
+
+impl From<Length> for LengthValue {
+    fn from(length: Length) -> Self {
+        Self {
+            milliseconds: i64::try_from(length.milliseconds).unwrap_or(i64::MAX),
+            centimonths: i64::try_from(length.centimonths).unwrap_or(i64::MAX),
+        }
+    }
+}
+
 /// One duration, with where it sits in the input.
 #[napi(object)]
 pub struct DurationEntity {
@@ -119,8 +137,18 @@ pub struct DurationEntity {
     pub milliseconds: i64,
     /// Its years, quarters and months, in hundredths of a month.
     pub centimonths: i64,
-    /// Whether a reply is held to it: false for a number glued to a bare
-    /// `s`, which may be a plural ("the 90s") as well as seconds.
+    /// A range's lower bound ("10" of "10–30 min"); `milliseconds` and
+    /// `centimonths` are its upper bound.
+    pub from: Option<LengthValue>,
+    /// The step it is written to: its smallest unit, a decimal place of it
+    /// or the fraction added to it. A printed length rounds to it within
+    /// half a step.
+    pub place: LengthValue,
+    /// Whether an approximation mark stands before it ("~5 minutes").
+    pub approximate: bool,
+    /// Whether a reply is held to it: false for a number glued to a
+    /// one-letter symbol, which may be a plural ("the 90s"), a time of day
+    /// ("15h") or a size as well as a length.
     pub stated: bool,
 }
 
@@ -212,6 +240,9 @@ pub fn extract(
                     end,
                     milliseconds: i64::try_from(d.length.milliseconds).unwrap_or(i64::MAX),
                     centimonths: i64::try_from(d.length.centimonths).unwrap_or(i64::MAX),
+                    from: d.from.map(LengthValue::from),
+                    place: d.place.into(),
+                    approximate: d.approximate,
                     stated: d.stated,
                 })
             })),
@@ -444,7 +475,8 @@ pub fn unseen_tokens(reply: String, corpus: String, prompt: Option<String>) -> V
 }
 
 /// The durations in `reply`, once each, whose length neither `corpus` nor
-/// `prompt` carries, written out or as an API gives it.
+/// `prompt` carries, written out or as an API gives it, rounded at the place
+/// the reply writes it to.
 #[napi(catch_unwind)]
 #[must_use]
 pub fn ungrounded_durations(reply: String, corpus: String, prompt: Option<String>) -> Vec<String> {

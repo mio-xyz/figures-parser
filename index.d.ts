@@ -30,8 +30,22 @@ export interface DurationEntity {
   /** Its years, quarters and months, in hundredths of a month. */
   centimonths: number
   /**
-   * Whether a reply is held to it: false for a number glued to a bare
-   * `s`, which may be a plural ("the 90s") as well as seconds.
+   * A range's lower bound ("10" of "10–30 min"); `milliseconds` and
+   * `centimonths` are its upper bound.
+   */
+  from?: LengthValue
+  /**
+   * The step it is written to: its smallest unit, a decimal place of it
+   * or the fraction added to it. A printed length rounds to it within
+   * half a step.
+   */
+  place: LengthValue
+  /** Whether an approximation mark stands before it ("~5 minutes"). */
+  approximate: boolean
+  /**
+   * Whether a reply is held to it: false for a number glued to a
+   * one-letter symbol, which may be a plural ("the 90s"), a time of day
+   * ("15h") or a size as well as a length.
    */
   stated: boolean
 }
@@ -84,6 +98,14 @@ export interface IdEntity {
   end: number
   /** Its shape. */
   shape: "uuid" | "hex" | "key" | "prefixed" | "token"
+}
+
+/** A length of time, in the two parts that do not convert into each other. */
+export interface LengthValue {
+  /** Its weeks, days, hours, minutes and seconds, in milliseconds. */
+  milliseconds: number
+  /** Its years, quarters and months, in hundredths of a month. */
+  centimonths: number
 }
 
 /**
@@ -194,7 +216,8 @@ export declare function statesFigure(text: string, figure: string): boolean
 
 /**
  * The durations in `reply`, once each, whose length neither `corpus` nor
- * `prompt` carries, written out or as an API gives it.
+ * `prompt` carries, written out or as an API gives it, rounded at the place
+ * the reply writes it to.
  */
 export declare function ungroundedDurations(reply: string, corpus: string, prompt?: string | undefined | null): Array<string>
 

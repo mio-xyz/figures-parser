@@ -470,8 +470,23 @@ corpus with a Kelvin sign or a capital dotted I, which lowercase to `k` and
 or a comma, "1½", number words ("forty-five", "vingt et un",
 "trentacinque"), glued runs of units ("1h30", "1h5m30s"), and fixed phrases
 ("half an hour", "un quart d'heure", "mezz'ora", "a fortnight"). Parts in
-falling units join into one length ("1 hour and 30 minutes", "2 jours, 4
-heures"). The words are curated from rustling-ontology's grammar.
+falling units join into one length ("1 hour and 30 minutes",
+"5-minute-50-second", "2 jours, 4 heures"). A bare number and one dash
+before a part in digits open a range ("10–30 min", "2 - 3 hours"), when the
+number is below the part's amount; otherwise the part reads alone ("step 3 -
+2 minutes"). The words are curated from rustling-ontology's grammar.
+
+A second, a minute and an hour are also read under the names CLDR prints
+them with, long and short, in the figure reader's locales (German, Dutch,
+Polish, Swedish, Turkish, Indonesian, Vietnamese, Russian, Hebrew, Persian,
+Hindi, Japanese, Korean, Chinese, Thai). A name that ends in ASCII joins the
+part pattern; one that ends outside it ("минут", "時間", "giờ") has a
+pattern of its own, run only over a text that is not all ASCII, since the
+part pattern's ASCII word boundary cannot end it. Such a name ends before
+no letter, mark or digit, except that a name in a script written without
+spaces ends before an uncased letter ("3時間かかった"). An abbreviation CLDR
+closes with a dot ("Std.", "godz.", "min.") takes the dot, so a part after
+it still joins ("2 Std. 30 min").
 
 Arabic has a pattern of its own, run only over a text that holds Arabic
 letters (one `memchr` scan decides):
@@ -489,11 +504,27 @@ letters (one `memchr` scan decides):
   part ("بساعتين", "و30 دقيقة"), and `و` or `،` joining two parts.
 
 A length keeps its clock part in milliseconds and its calendar part in
-hundredths of a month, since a month and a year have no fixed length.
-`ungrounded_durations` grounds a length the corpus carries in any of these
-forms:
+hundredths of a month, since a month and a year have no fixed length. Each
+duration also keeps its place, the step it is written to: its smallest unit
+("6 minutes" to the minute), the decimal place its digits stop at ("1.5
+hours" to the tenth of an hour), or the fraction added to it ("1½ hours",
+"an hour and a half" to the half hour; "half an hour" to the half hour, "a
+fortnight" to the week).
 
-- written out, or as one part of a longer duration;
+`ungrounded_durations` grounds a reply's duration with a printed length that
+rounds to it at its place: within half a step ("6 minutes" takes 5:31 to
+6:29, so 350 seconds grounds it and 90 seconds grounds neither "1 minute"
+nor "2 minutes"), or within a whole step when an approximation mark (`~`,
+`≈`, `∼`) stands before it. A range is grounded by a printed length, or a
+printed range, that lies inside it widened by as much; a single length by a
+printed range only when both bounds round to it. Only the component of the
+step rounds: the other one, clock or calendar, must match. The corpus
+prints a length in any of these forms:
+
+- written out, or as one part of a longer duration, a range as its two
+  bounds (its upper part is not also read alone), and a comma before three
+  digits as a decimal comma too ("1,250 secondes" is 1.25 seconds as well as
+  1,250);
 - as ISO 8601 (`PT1H30M`);
 - as a clock reading (`1:30:00`; `12:30` reads both as hours and minutes and
   as minutes and seconds);
@@ -503,10 +534,12 @@ forms:
 
 A clock reading right after a date (`2026-10-09 14:30`) is a time of day,
 not a length. Rates ("once a day"), dimensions ("3D") and a bare `m`, as
-often a metre or a million, are not durations. A number glued to a bare `s`
-("30s") may be a plural ("the 90s"), so it grounds a reply's duration but is
-never reported itself; `Duration::stated` says which readings a reply is held
-to.
+often a metre or a million, are not durations. A number glued to a
+one-letter symbol ("30s", "24h", "3d") may be a plural ("the 90s"), a time
+of day ("15h") or a size, so it grounds a reply's duration but is never
+reported itself; spaced from it ("24 h") it is a unit symbol and is held.
+`Duration::stated` says which readings a reply is held to. A duration that
+starts inside one of the reply's links is never reported either.
 
 ## The Node binding
 

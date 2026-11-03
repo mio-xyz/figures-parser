@@ -9,8 +9,8 @@ use std::sync::LazyLock;
 use regex::Regex;
 use rustc_hash::FxHashMap;
 
-use super::grammar::{Amount, Unit, parts};
-use super::{Length, join};
+use super::grammar::{Amount, Part, Unit, parts};
+use super::{Length, Want, join};
 use crate::text::{compile, is_ascii_word_byte, is_iso_date, run_end, run_start, same_word};
 
 /// An ISO 8601 duration (`P1Y2M`, `PT1H30M`, `P3W`).
@@ -232,33 +232,60 @@ fn at_separator(text: &str, at: usize) -> [Option<Length>; 2] {
     field_at(text, at).map_or([None, None], |(key, number)| field_lengths(key, number))
 }
 
-/// Marks each length in `wanted` that `text` carries. The written durations
-/// are read first, whole; the ISO durations, clock readings and fields after
-/// them are read only until every length is marked.
-pub fn mark(text: &str, wanted: &mut [(Length, bool)]) {
-    if wanted.iter().all(|&(_, found)| found) {
+/// Marks each duration in `wanted` that a length `text` prints grounds, a
+/// range printed as its two bounds and each part of a longer duration as a
+/// length of its own, a part's thousands comma read as a decimal one too. The written durations are read first,
+/// whole; the ISO durations, clock readings and fields after them are read
+/// only until every duration is marked.
+pub fn mark(text: &str, wanted: &mut [Want]) {
+    if wanted.iter().all(|w| w.found) {
         return;
     }
     let found = parts(text);
+    let joined = join(text, &found);
+    let single = |l: Length| (l, l);
+    // A range's upper part is a bound, not a length the corpus printed. Parts
+    // and durations both run in order, so one cursor finds each part's.
+    let mut cursor = 0;
+    let mut in_range = |p: &&Part| {
+        while joined
+            .get(cursor)
+            .is_some_and(|d| d.span.end <= p.span.start)
+        {
+            cursor = cursor.saturating_add(1);
+        }
+        joined
+            .get(cursor)
+            .is_some_and(|d| d.from.is_some() && d.span.start <= p.span.start)
+    };
     let readings = found
         .iter()
-        .map(|p| p.length)
-        .chain(join(text, &found).into_iter().map(|d| d.length))
+        .filter(|p| !in_range(p))
+        .flat_map(|p| [Some(p.length), p.loose])
+        .flatten()
+        .map(single)
+        .chain(
+            joined
+                .iter()
+                .map(|d| (d.from.unwrap_or(d.length), d.length)),
+        )
         .chain(
             ISO.iter()
                 .flat_map(|re| re.find_iter(text))
-                .filter_map(|m| iso_length(m.as_str())),
+                .filter_map(|m| iso_length(m.as_str()))
+                .map(single),
         )
         .chain(
             memchr::memchr2_iter(b':', b'=', text.as_bytes())
                 .flat_map(|at| at_separator(text, at))
-                .flatten(),
+                .flatten()
+                .map(single),
         );
-    for length in readings {
+    for (low, high) in readings {
         let mut all = true;
-        for (want, marked) in wanted.iter_mut() {
-            *marked |= *want == length;
-            all &= *marked;
+        for want in wanted.iter_mut() {
+            want.found = want.found || want.grounded_by(low, high);
+            all &= want.found;
         }
         if all {
             return;

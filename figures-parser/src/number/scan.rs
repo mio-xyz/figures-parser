@@ -287,7 +287,7 @@ pub(super) const fn is_inline_space(c: char) -> bool {
 /// one space of the same line between ("~12", "≈ 12"), standing after no
 /// digit or word letter: after a digit, with or without a space, a tilde is
 /// a range ("10~20", "10 ~ 20").
-fn approximation_at(text: &str, at: usize) -> Option<usize> {
+pub(crate) fn approximation_at(text: &str, at: usize) -> Option<usize> {
     let before = text.get(..at)?;
     let mark_end = before_marks(
         text,

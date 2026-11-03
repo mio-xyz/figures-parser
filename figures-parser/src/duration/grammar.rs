@@ -13,11 +13,13 @@ use regex::Regex;
 use super::Length;
 use super::groups::{Groups, scan};
 use super::words::{
-    AR_ONES, AR_TENS, AR_UNITS, DAY, Form, HOUR, ITALIAN_TENS, ITALIAN_UNITS, MILLISECOND, MINUTE,
-    MONTH, QUARTER, SECOND, SINGLES, TENS, WEEK, YEAR,
+    AR_ONES, AR_TENS, AR_UNITS, DAY, DOTTED, Form, HOUR, ITALIAN_TENS, ITALIAN_UNITS, MILLISECOND,
+    MINUTE, MONTH, NAMED, QUARTER, SECOND, SINGLES, TENS, WEEK, YEAR,
 };
 use crate::number::digits::digit_value;
-use crate::text::{alternation, char_at, char_before, compile, lookup};
+use crate::text::{
+    alternation, char_at, char_before, compile, is_letter, is_unspaced_script, lookup, same_word,
+};
 
 /// A unit of time, smallest first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -150,8 +152,16 @@ pub struct Part {
     pub largest: Unit,
     /// Its smallest unit.
     pub smallest: Unit,
-    /// Whether a reply is held to it: not for a number glued to a bare `s`,
-    /// which may be a plural ("the 90s", "100s of users") as well as seconds.
+    /// The step it is written to: its smallest unit, a decimal place of it
+    /// ("1.5 hours" is written to the tenth of an hour), or the fraction
+    /// added to it ("an hour and a half" is written to the half hour).
+    pub place: Length,
+    /// The length a corpus may also mean by it: a comma before three digits
+    /// read as a decimal one ("1,250 secondes" as 1.25 seconds).
+    pub loose: Option<Length>,
+    /// Whether a reply is held to it: not for a number glued to a one-letter
+    /// symbol, which may be a plural ("the 90s"), a time of day ("15h") or a
+    /// size as well as a length.
     pub stated: bool,
 }
 
@@ -225,6 +235,31 @@ impl Amount {
             Some(_) => None,
         }
     }
+}
+
+/// The step `amount` of `unit` is written to: the unit, or the decimal place
+/// its digits stop at; a vulgar fraction's own step when `written` holds one.
+fn digits_place(unit: Unit, amount: Amount, written: &str) -> Option<Length> {
+    if written.contains('½') {
+        unit.times(Amount::HALF)
+    } else if written.contains(['¼', '¾']) {
+        unit.times(Amount::QUARTER)
+    } else {
+        unit.times(Amount {
+            mantissa: 1,
+            scale: amount.scale,
+        })
+    }
+}
+
+/// The length `unit` times `written` reads as when its one thousands comma
+/// is a decimal comma ("1,250" as 1.25), as a corpus in French may write it.
+fn decimal_comma(unit: Unit, written: &str) -> Option<Length> {
+    let (_, decimals) = written.split_once(',')?;
+    if decimals.contains([',', '.']) {
+        return None;
+    }
+    unit.times(Amount::of_digits(written, false)?)
 }
 
 /// A case-insensitive pattern of the words in `table`, those with a value in
@@ -302,6 +337,18 @@ fn arabic_pattern() -> String {
     )
 }
 
+/// The pattern of a part whose unit name ends outside ASCII: digits, an
+/// optional space or hyphen, and a name of [`NAMED`].
+fn named_pattern() -> String {
+    let names = alternation(NAMED.iter().map(|&(w, _)| w));
+    format!(
+        r"(?-u:\b)(?:(?P<thousands>[0-9]{{1,3}}(?:,[0-9]{{3}})+(?:\.[0-9]+)?)|(?P<decimal>[0-9]+(?:[.,][0-9]+)?))(?:{SPACE}|-)?(?P<unit>(?i:{names}))"
+    )
+}
+
+/// The named-unit part pattern, compiled once.
+static NAMED_PART: LazyLock<Option<Regex>> = LazyLock::new(|| compile(&named_pattern()));
+
 /// The part pattern, compiled once.
 static PART: LazyLock<Option<Regex>> = LazyLock::new(|| compile(&part_pattern()));
 
@@ -376,11 +423,14 @@ fn read_glued(span: Range<usize>, written: &str) -> Option<Part> {
     if written.ends_with(|c: char| c.is_ascii_digit()) {
         add(Unit::Minute, number)?;
     }
+    let smallest = smallest?;
     Some(Part {
         span,
         length,
         largest: largest?,
-        smallest: smallest?,
+        smallest,
+        place: smallest.one(),
+        loose: None,
         stated: true,
     })
 }
@@ -411,17 +461,32 @@ fn read_part(text: &str, caps: &Groups<'_, '_>) -> Option<Part> {
         return None;
     }
     let mut length = unit.times(count)?;
+    let mut place = match caps.get("thousands").or_else(|| caps.get("decimal")) {
+        Some(digits) => digits_place(unit, count, digits.as_str())?,
+        None => unit.one(),
+    };
     if let Some((_, fraction)) = extra {
         length = length.checked_add(unit.times(fraction)?)?;
+        let step = if fraction == Amount::HALF {
+            Amount::HALF
+        } else {
+            Amount::QUARTER
+        };
+        place = place.min(unit.times(step)?);
     }
-    let glued_s =
-        written.as_str() == "s" && caps.get("decimal").is_some() && caps.get("gap").is_none();
+    let glued_symbol = written.as_str().chars().count() == 1
+        && caps.get("decimal").is_some()
+        && caps.get("gap").is_none();
     Some(Part {
-        span: whole.range(),
+        span: whole.start()..dotted_end(text, written.as_str(), whole.end()),
         length,
         largest: unit,
         smallest: unit,
-        stated: !glued_s,
+        place,
+        loose: caps
+            .get("thousands")
+            .and_then(|m| decimal_comma(unit, m.as_str())),
+        stated: !glued_symbol,
     })
 }
 
@@ -431,20 +496,85 @@ fn read_phrase(text: &str, caps: &Groups<'_, '_>) -> Option<Part> {
     if !starts_clean(text, whole.start()) || !ends_clean(text, whole.end()) {
         return None;
     }
-    let (unit, count) = if caps.get("half").is_some() {
-        (Unit::Minute, 30)
+    let (unit, count, step) = if caps.get("half").is_some() {
+        (Unit::Minute, 30, 30)
     } else if caps.get("quarter").is_some() {
-        (Unit::Minute, 15)
+        (Unit::Minute, 15, 15)
     } else if caps.get("threequarters").is_some() {
-        (Unit::Minute, 45)
+        (Unit::Minute, 45, 15)
     } else {
-        (Unit::Week, 2)
+        (Unit::Week, 2, 1)
     };
     Some(Part {
         span: whole.range(),
         length: unit.times(Amount::whole(count))?,
         largest: unit,
         smallest: unit,
+        place: unit.times(Amount::whole(step))?,
+        loose: None,
+        stated: true,
+    })
+}
+
+/// Whether a unit name ending in `last` may end before byte `at`: not before
+/// a letter, a mark or a digit, except that a name in a script written
+/// without spaces ("3時間かかった", "3시간이") may end before an uncased
+/// letter.
+fn ends_named(text: &str, at: usize, last: char) -> bool {
+    char_at(text, at).is_none_or(|c| {
+        let wordlike = c.is_numeric() || c.is_lowercase() || c.is_uppercase();
+        if is_unspaced_script(last) {
+            !wordlike
+        } else {
+            !(wordlike || is_letter(c) || is_mark(c))
+        }
+    })
+}
+
+/// Whether `c` is a combining mark, which continues the letter before it.
+fn is_mark(c: char) -> bool {
+    use unicode_general_category::{GeneralCategory, get_general_category};
+    matches!(
+        get_general_category(c),
+        GeneralCategory::NonspacingMark
+            | GeneralCategory::SpacingMark
+            | GeneralCategory::EnclosingMark
+    )
+}
+
+/// Where a unit written `name` and ending at byte `end` ends with its closing
+/// dot: past the dot when CLDR abbreviates the name with one ("Std.",
+/// "godz.", "min."), so a compound after it ("2 Std. 30 min") still joins.
+fn dotted_end(text: &str, name: &str, end: usize) -> usize {
+    let dotted = DOTTED.iter().any(|&d| same_word(d, name));
+    if dotted && text.get(end..).is_some_and(|rest| rest.starts_with('.')) {
+        end.saturating_add(1)
+    } else {
+        end
+    }
+}
+
+/// The part a match of the named-unit pattern writes, if it is one.
+fn read_named(text: &str, caps: &Groups<'_, '_>) -> Option<Part> {
+    let whole = caps.whole()?;
+    let name = caps.get("unit")?;
+    let last = name.as_str().chars().next_back()?;
+    if !starts_clean(text, whole.start()) || !ends_named(text, whole.end(), last) {
+        return None;
+    }
+    let &(_, unit) = NAMED.iter().find(|&&(w, _)| same_word(w, name.as_str()))?;
+    let (written, thousands) = match caps.get("thousands") {
+        Some(m) => (m.as_str(), true),
+        None => (caps.get("decimal")?.as_str(), false),
+    };
+    let count = Amount::of_digits(written, thousands)?;
+    Some(Part {
+        span: whole.start()..dotted_end(text, name.as_str(), whole.end()),
+        length: unit.times(count)?,
+        largest: unit,
+        smallest: unit,
+        place: digits_place(unit, count, written)?,
+        loose: thousands.then(|| decimal_comma(unit, written)).flatten(),
         stated: true,
     })
 }
@@ -524,6 +654,17 @@ fn arabic_fraction(unit: Unit, word: &str) -> Option<Length> {
     }
 }
 
+/// The step a fraction word writes `unit` to: three quarters are written to
+/// the quarter, a half and a third to themselves.
+fn arabic_step(unit: Unit, word: &str) -> Option<Length> {
+    let word = word.trim_start_matches(|c: char| c == 'و' || c.is_whitespace());
+    if word.starts_with("ثلاث") {
+        unit.times(Amount::QUARTER)
+    } else {
+        arabic_fraction(unit, word)
+    }
+}
+
 /// Whether an Arabic part may start at byte `at`: as a part elsewhere may,
 /// or after a one-letter proclitic written onto it ("و", "ب", "ل", "ف",
 /// "ك": "و30 دقيقة", "بساعتين").
@@ -584,11 +725,17 @@ fn read_arabic(text: &str, caps: &Groups<'_, '_>) -> Option<Part> {
         }
     }
     let suffixed = plus.is_some() || minus.is_some();
+    let mut place = unit.one();
     let base = match (arabic_before(caps)?, form) {
         (Before::Count(count), Form::Singular | Form::Plural) if one.is_none() => {
+            place = unit.times(Amount {
+                mantissa: 1,
+                scale: count.scale,
+            })?;
             unit.times(count)?
         }
         (Before::Fraction(word), Form::Singular | Form::Definite) if one.is_none() && !suffixed => {
+            place = arabic_step(unit, word)?;
             arabic_fraction(unit, word)?
         }
         (Before::Nothing, Form::Dual) if one.is_none() => unit.times(Amount::whole(2))?,
@@ -600,9 +747,12 @@ fn read_arabic(text: &str, caps: &Groups<'_, '_>) -> Option<Part> {
         _ => return None,
     };
     let length = if let Some(word) = plus {
+        place = place.min(arabic_step(unit, word.as_str())?);
         base.checked_add(arabic_fraction(unit, word.as_str())?)?
     } else if let Some(word) = minus {
-        let fraction = arabic_fraction(unit, word.as_str().split_whitespace().last()?)?;
+        let word = word.as_str().split_whitespace().last()?;
+        place = place.min(arabic_step(unit, word)?);
+        let fraction = arabic_fraction(unit, word)?;
         Length {
             milliseconds: base.milliseconds.checked_sub(fraction.milliseconds)?,
             centimonths: base.centimonths.checked_sub(fraction.centimonths)?,
@@ -615,6 +765,8 @@ fn read_arabic(text: &str, caps: &Groups<'_, '_>) -> Option<Part> {
         length,
         largest: unit,
         smallest: unit,
+        place,
+        loose: None,
         stated: true,
     })
 }
@@ -651,10 +803,11 @@ fn collect(re: &Regex, text: &str, read: Reader, out: &mut Vec<Part>) {
 /// Every part in `text`, in order, a longer one winning an overlap.
 pub fn parts(text: &str) -> Vec<Part> {
     let mut found = Vec::new();
-    let readers: [(&Option<Regex>, Reader, bool); 3] = [
+    let readers: [(&Option<Regex>, Reader, bool); 4] = [
         (&PART, read_part, true),
         (&PHRASE, read_phrase, true),
         (&ARABIC, read_arabic, has_arabic(text)),
+        (&NAMED_PART, read_named, !text.is_ascii()),
     ];
     for (re, read, wanted) in readers {
         if wanted && let Some(re) = re {

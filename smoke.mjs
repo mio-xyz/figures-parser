@@ -39,6 +39,8 @@ assert.deepEqual(ungroundedIdentifiers("CORE-1711 and CORE-1710", "CORE-1710"), 
 assert.deepEqual(unseenTokens("model claude-opus-5-5", ""), ["claude-opus-5-5"]);
 assert.deepEqual(extract("took 1h30 then 30s", { kinds: ["duration"] }).map((e) => [e.kind, e.text, e.milliseconds, e.centimonths, e.stated]), [["duration", "1h30", 5400000, 0, true], ["duration", "30s", 30000, 0, false]]);
 assert.deepEqual(ungroundedDurations("45 minutes, then 2 hours", '{"duration": 2700}'), ["2 hours"]);
+assert.deepEqual(ungroundedDurations("a 6-minute walkthrough, then a 2-minute recap, each 10–30 min", "350 seconds; the longest ran 25 minutes"), ["2-minute"]);
+assert.deepEqual(extract("~10–30 min", { kinds: ["duration"] }).map((e) => [e.text, e.from, e.place, e.approximate]), [["10–30 min", { milliseconds: 600000, centimonths: 0 }, { milliseconds: 60000, centimonths: 0 }, true]]);
 assert.deepEqual(extract("-$12,500 and (1,250)", { kinds: ["number"] }).filter((e) => !e.value.derived).map((e) => [e.text, e.value.sign]), [["12,500", "minus"], ["12,500", "minus"], ["1,250", "parenthesized"], ["1,250", "parenthesized"]]);
 assert.deepEqual(ungroundedFigures("Moved by -12,500.", "delta: 12500"), ["-12,500"]);
 assert.deepEqual(extract("~$12,500", { kinds: ["number"] }).map((e) => e.value.approximate), [true, true, true, false]);

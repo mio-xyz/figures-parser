@@ -375,9 +375,12 @@ errors.
 
 `ungrounded_durations(reply, corpus, prompt)` returns the lengths of time the
 corpus does not carry. A reply's "1h30" is grounded by "90 minutes",
-`PT1H30M`, `1:30:00` or `"elapsed_ms": 5400000`. Words and phrases are read
-in English, French, Spanish, Italian, Portuguese and Arabic ("an hour and a
-half", "deux heures et demie", "ساعة ونصف").
+`PT1H30M`, `1:30:00` or `"elapsed_ms": 5400000`, and its "6-minute" by "350
+seconds", which rounds to it; "~5 minutes" takes a minute either way, and
+"10–30 min" any length inside it. Words and phrases are read in English,
+French, Spanish, Italian, Portuguese and Arabic ("an hour and a half",
+"deux heures et demie", "ساعة ونصف"), and a second, a minute and an hour in
+fifteen more languages ("5 Minuten", "2 часа", "3時間").
 
 ```rust
 use figures_parser::ungrounded_durations;
@@ -386,6 +389,12 @@ let corpus = r#"{"elapsed_ms": 5400000}"#;
 assert_eq!(
     ungrounded_durations("The job ran 1h30, then 45 minutes.", corpus, ""),
     ["45 minutes"]
+);
+
+let corpus = "duration: 350 seconds";
+assert_eq!(
+    ungrounded_durations("A 6-minute walkthrough and a 2-minute recap.", corpus, ""),
+    ["2-minute"]
 );
 ```
 
@@ -457,7 +466,7 @@ in one forward pass, as the binding does.
 | Weekdays | English, French, German, Spanish, Italian, Portuguese, Dutch, Swedish, Finnish, Russian, Ukrainian, Japanese, Chinese (simplified and traditional), Vietnamese and Arabic (the month names of every Arab country, Arabic-Indic digits). |
 | Email addresses | Any language, a local part outside ASCII included. |
 | Identifiers | ASCII letters, digits, `-` and `_`, whatever the language around them. |
-| Durations | English, French, Spanish, Italian, Portuguese and Arabic for words; unit symbols (`ms`, `s`, `h`, `d`, `w`, `y`) in any language. |
+| Durations | English, French, Spanish, Italian, Portuguese and Arabic for words; seconds, minutes and hours under their CLDR names in German, Dutch, Polish, Swedish, Turkish, Indonesian, Vietnamese, Russian, Hebrew, Persian, Hindi, Japanese, Korean, Chinese and Thai too; unit symbols (`ms`, `s`, `h`, `d`, `w`, `y`) in any language. |
 
 ## Documentation
 
