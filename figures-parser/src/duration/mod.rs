@@ -13,10 +13,10 @@ use std::sync::LazyLock;
 use regex::Regex;
 
 pub use grammar::Unit;
-use grammar::{Amount, Part, parts};
+use grammar::{Amount, Part, is_number_symbol, parts, starts_clean};
 
 use crate::number::scan::approximation_at;
-use crate::text::{carried, char_before, compile, report_once};
+use crate::text::{compile, report_once};
 use crate::url::urls;
 
 /// A length of time: its clock part in milliseconds, and its calendar part in
@@ -73,12 +73,19 @@ pub struct Duration<'a> {
     /// How long it is; a range's upper bound.
     pub length: Length,
     /// A range's lower bound ("10" of "10–30 min"), always below `length`.
+    /// A range written high to low ("30-10 minutes", "step 3 - 2 minutes")
+    /// is read as the span between its two numbers.
     pub from: Option<Length>,
     /// The step it is written to: its smallest unit ("6 minutes" is written to
     /// the minute), a decimal place of it ("1.5 hours", to the tenth of an
     /// hour) or the fraction added to it ("an hour and a half", to the half
     /// hour). A printed length rounds to it within half a step.
     pub place: Length,
+    /// The other reading of a length whose digits fit two, and the step it
+    /// is written to: a lone dot or comma before three digits may group them
+    /// or end the whole number ("1.250 Sekunden" is 1,250 seconds, or 1.25).
+    /// A printed length that grounds either grounds the duration.
+    pub loose: Option<(Length, Length)>,
     /// Whether an approximation mark stands before it ("~5 minutes"), which
     /// lets a printed length round to it within a whole step.
     pub approximate: bool,
@@ -88,11 +95,14 @@ pub struct Duration<'a> {
     pub stated: bool,
 }
 
-/// What may stand between two parts of one duration: a comma, Latin or
-/// Arabic, a word for "and", the Arabic `و` written onto the next part, or a
-/// hyphen alone ("5-minute-50-second").
-static JOIN: LazyLock<Option<Regex>> =
-    LazyLock::new(|| compile(r"^(?:\s*[,،]?\s*(?:(?i:and|et|y|e|&)\s+|و\s*)?|-)$"));
+/// What may stand between two parts of one duration, within a line: a
+/// comma, Latin or Arabic, a word for "and", the Arabic `و` written onto the
+/// next part, or a hyphen ("5-minute-50-second", "2 hours - 30 minutes").
+static JOIN: LazyLock<Option<Regex>> = LazyLock::new(|| {
+    compile(
+        r"^(?:[ \t\x{A0}\x{202F}\x{2009}]*[,،]?[ \t\x{A0}\x{202F}\x{2009}]*(?:(?i:and|et|y|e|&)[ \t\x{A0}\x{202F}\x{2009}]+|و[ \t\x{A0}\x{202F}\x{2009}]*)?|[ \t\x{A0}\x{202F}\x{2009}]*-[ \t\x{A0}\x{202F}\x{2009}]*)$",
+    )
+});
 
 /// Whether `gap` joins two parts into one duration.
 fn joins(gap: &str) -> bool {
@@ -105,21 +115,15 @@ const fn is_range_space(c: char) -> bool {
     matches!(c, ' ' | '\u{a0}' | '\u{202f}' | '\u{2009}')
 }
 
-/// Whether the digits `written` group thousands with commas ("1,500"), where
-/// a comma before other than three digits is a decimal one ("1,5").
-fn groups_thousands(written: &str) -> bool {
-    let whole = written.split('.').next().unwrap_or_default();
-    whole.contains(',') && whole.split(',').skip(1).all(|g| g.len() == 3)
-}
-
 /// The lower bound of a range that ends in `part`, and where it starts: a
-/// bare number in digits, then one dash ("10–30 min", "2 - 3 hours"), below
-/// the part's own amount. The part is one unit written in digits.
+/// bare number, then one dash within the line ("10–30 min", "2 - 3 hours").
+/// The part is one unit written in digits. The bound may be above the
+/// part's own amount, a range written high to low.
 fn range_low(text: &str, part: &Part, floor: usize) -> Option<(usize, Length)> {
     if part.largest != part.smallest
         || !text
             .get(part.span.start..)?
-            .starts_with(|c: char| c.is_ascii_digit())
+            .starts_with(|c: char| c.is_numeric())
     {
         return None;
     }
@@ -128,21 +132,26 @@ fn range_low(text: &str, part: &Part, floor: usize) -> Option<(usize, Length)> {
         .trim_end_matches(is_range_space)
         .strip_suffix(['-', '\u{2013}', '\u{2014}'])?
         .trim_end_matches(is_range_space);
-    let digits = before.trim_end_matches(|c: char| c.is_ascii_digit() || c == '.' || c == ',');
-    let start = digits.len();
-    let low = before.get(start..)?;
-    if start < floor
-        || !low.starts_with(|c: char| c.is_ascii_digit())
-        || !low.ends_with(|c: char| c.is_ascii_digit())
-        || char_before(text, start)
-            .is_some_and(|c| c.is_alphanumeric() || matches!(c, '_' | '.' | ',' | '/'))
-    {
+    let low = before
+        .get(
+            before
+                .trim_end_matches(|c: char| c.is_numeric() || is_number_symbol(c))
+                .len()..,
+        )?
+        .trim_start_matches(|c: char| !c.is_numeric());
+    // Groups a plain space joins that fit no one number are side by side
+    // ("phase 2 10-30 min"): the last one opens the range.
+    let (low, amount) = if let Some((amount, _)) = Amount::of_printed(low) {
+        (low, amount)
+    } else {
+        let (_, last) = low.rsplit_once(' ')?;
+        (last, Amount::of_printed(last)?.0)
+    };
+    let start = before.len().saturating_sub(low.len());
+    if start < floor || !low.ends_with(|c: char| c.is_numeric()) || !starts_clean(text, start) {
         return None;
     }
-    let length = part
-        .smallest
-        .times(Amount::of_digits(low, groups_thousands(low))?)?;
-    (length < part.length).then_some((start, length))
+    Some((start, part.smallest.times(amount)?))
 }
 
 /// The durations `parts` of `text` make, joining a part to the one before it
@@ -165,17 +174,22 @@ fn join<'a>(text: &'a str, parts: &[Part]) -> Vec<Duration<'a>> {
             previous.span.end = part.span.end;
             previous.text = joined;
             previous.place = part.place;
+            previous.loose = None;
             previous.stated |= part.stated;
         } else {
             let floor = out.last().map_or(0, |d| d.span.end);
-            let (start, from) = range_low(text, part, floor)
-                .map_or((part.span.start, None), |(start, low)| (start, Some(low)));
+            let (start, from, length) = match range_low(text, part, floor) {
+                Some((start, low)) if low < part.length => (start, Some(low), part.length),
+                Some((start, high)) if high > part.length => (start, Some(part.length), high),
+                _ => (part.span.start, None, part.length),
+            };
             out.push(Duration {
                 text: text.get(start..part.span.end).unwrap_or_default(),
                 span: start..part.span.end,
-                length: part.length,
+                length,
                 from,
                 place: part.place,
+                loose: part.loose.filter(|_| from.is_none()),
                 approximate: approximation_at(text, start).is_some(),
                 stated: part.stated,
             });
@@ -208,6 +222,8 @@ pub(crate) struct Want {
     high: Length,
     /// The step it is written to.
     place: Length,
+    /// Its other reading and that reading's step, when its digits fit two.
+    loose: Option<(Length, Length)>,
     /// Whether it is marked approximate.
     approximate: bool,
     /// Whether a printed length grounds it.
@@ -224,6 +240,7 @@ impl Want {
             },
             high: duration.length,
             place: duration.place,
+            loose: duration.loose,
             approximate: duration.approximate,
             found: false,
         }
@@ -235,7 +252,24 @@ impl Want {
     /// (a whole step when approximate), a range when the printed bounds lie
     /// inside it widened by as much; the other component matches as written.
     fn grounded_by(&self, low: Length, high: Length) -> bool {
-        let calendar = self.place.centimonths > 0;
+        self.reads_as(self.low, self.high, self.place, low, high)
+            || self
+                .loose
+                .is_some_and(|(length, place)| self.reads_as(length, length, place, low, high))
+    }
+
+    /// Whether a printed length from `low` to `high` rounds to the reading
+    /// from `want_low` to `want_high` written to `place`, as
+    /// [`grounded_by`](Self::grounded_by) says.
+    fn reads_as(
+        &self,
+        want_low: Length,
+        want_high: Length,
+        place: Length,
+        low: Length,
+        high: Length,
+    ) -> bool {
+        let calendar = place.centimonths > 0;
         let pick = |l: Length| {
             if calendar {
                 l.centimonths
@@ -250,16 +284,16 @@ impl Want {
                 l.centimonths
             }
         };
-        let step = pick(self.place);
+        let step = pick(place);
         let reach = if self.approximate {
             step.saturating_mul(2)
         } else {
             step
         };
-        let (want_low, want_high) = (pick(self.low), pick(self.high));
-        if other(low) != other(self.low) || other(high) != other(self.high) {
+        if other(low) != other(want_low) || other(high) != other(want_high) {
             return false;
         }
+        let (want_low, want_high) = (pick(want_low), pick(want_high));
         if want_low == want_high {
             let near = |p: u64| {
                 let distance = p.abs_diff(want_low);
@@ -277,10 +311,10 @@ impl Want {
 /// thread, the request, the run's tool results) nor `prompt` carries.
 ///
 /// A length is carried by a duration written out, by any one part of a
-/// longer one, by an ISO 8601 duration (`PT1H30M`), by a clock reading
-/// (`1:30:00`, or `12:30` read both as hours and as minutes), or by a number
-/// under a field named for its unit (`"duration_ms": 5400000`); a reply's
-/// duration written as the corpus wrote it is carried too.
+/// list ("1 hour, 30 minutes"), by an ISO 8601 duration (`PT1H30M`), by a
+/// clock reading (`1:30:00`, or `12:30` read both as hours and as minutes),
+/// or by a number under a field named for its unit (`"duration_ms":
+/// 5400000`).
 ///
 /// A printed length carries a reply's when it rounds to it at the
 /// [`place`](Duration::place) the reply writes it to: 350 seconds is "6
@@ -305,21 +339,44 @@ impl Want {
 /// ```
 #[must_use]
 pub fn ungrounded_durations(reply: &str, corpus: &str, prompt: &str) -> Vec<String> {
-    let mut stated: Vec<Duration<'_>> = durations(reply).into_iter().filter(|d| d.stated).collect();
-    if stated.is_empty() {
+    let mut found = parts(reply);
+    if !found.iter().any(|p| p.stated) {
         return Vec::new();
     }
+    // A part inside a link is the link's ("cal.com/x/30min"), and joins no
+    // part after it.
     let links: Vec<Range<usize>> = urls(reply).into_iter().map(|u| u.span).collect();
-    stated.retain(|d| !links.iter().any(|l| l.contains(&d.span.start)));
+    found.retain(|p| !links.iter().any(|l| l.contains(&p.span.start)));
+    let in_link = |at: usize| links.iter().any(|l| l.contains(&at));
+    let stated: Vec<Duration<'_>> = join(reply, &found)
+        .into_iter()
+        .filter(|d| d.stated)
+        .filter_map(|d| {
+            if !in_link(d.span.start) {
+                return Some(d);
+            }
+            // A range whose low is the link's ("cal.com/x/16 – 1880 seconds")
+            // is its part alone.
+            let part = found.iter().find(|p| p.span.end == d.span.end)?;
+            Some(Duration {
+                text: reply.get(part.span.clone())?,
+                span: part.span.clone(),
+                length: part.length,
+                from: None,
+                place: part.place,
+                loose: part.loose,
+                approximate: false,
+                stated: part.stated,
+            })
+        })
+        .collect();
     let mut wanted: Vec<Want> = stated.iter().map(Want::of).collect();
     corpus::mark(corpus, &mut wanted);
     corpus::mark(prompt, &mut wanted);
     let mut out: Vec<String> = Vec::new();
     for (duration, want) in stated.iter().zip(&wanted) {
         if !want.found {
-            report_once(&mut out, duration.text, || {
-                carried(duration.text, corpus, prompt)
-            });
+            report_once(&mut out, duration.text, || false);
         }
     }
     out

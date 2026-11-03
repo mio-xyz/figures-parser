@@ -146,8 +146,23 @@ fn grounds_a_length_however_the_corpus_writes_it() {
         Vec::<String>::new()
     );
     assert_eq!(
-        ungrounded_durations("30 minutes", "1 hour 30 minutes", ""),
+        ungrounded_durations("30 minutes", "1 hour, 30 minutes, 15 minutes", ""),
         Vec::<String>::new()
+    );
+}
+
+#[test]
+fn holds_a_part_of_one_length_to_that_length() {
+    for corpus in ["1 hour 30 minutes", "5-minute-30-second", "130 minutes"] {
+        assert_eq!(
+            ungrounded_durations("30 minutes", corpus, ""),
+            ["30 minutes"],
+            "{corpus}"
+        );
+    }
+    assert_eq!(
+        ungrounded_durations("took 30 minutes", "10-30 minutes", ""),
+        ["30 minutes"]
     );
 }
 
@@ -196,7 +211,7 @@ fn reads_a_glued_run_of_units() {
 }
 
 #[test]
-fn a_number_glued_to_a_bare_s_grounds_but_is_never_held() {
+fn a_number_before_a_bare_s_grounds_but_is_never_held() {
     let found = durations("back in the 90s, 100s of users, a 30s timeout, 30 s");
     let stated: Vec<(&str, bool)> = found.iter().map(|d| (d.text, d.stated)).collect();
     assert_eq!(
@@ -205,7 +220,7 @@ fn a_number_glued_to_a_bare_s_grounds_but_is_never_held() {
             ("90s", false),
             ("100s", false),
             ("30s", false),
-            ("30 s", true)
+            ("30 s", false)
         ]
     );
     assert_eq!(
@@ -362,14 +377,26 @@ fn holds_a_value_halfway_between_two_to_neither() {
 fn holds_a_decimal_to_the_place_it_is_written_to() {
     assert_eq!(ungrounded("1.5 hours", "90 minutes"), Vec::<String>::new());
     assert_eq!(ungrounded("1.5 hours", "92 minutes"), Vec::<String>::new());
+    assert_eq!(ungrounded("1.5 hours", "80 minutes"), Vec::<String>::new());
     assert_eq!(ungrounded("1.5 hours", "70 minutes"), ["1.5 hours"]);
+    assert_eq!(ungrounded("0.5 hours", "50 seconds"), ["0.5 hours"]);
+    assert_eq!(ungrounded("1.2 hours", "80 minutes"), ["1.2 hours"]);
     assert_eq!(
         ungrounded("an hour and a half", "100 minutes"),
         Vec::<String>::new()
     );
-    let found = durations("1.5 hours, 1½ hours, an hour and a half");
+    let found = durations("1.5 hours, 1½ hours, an hour and a half, 1.2 hours, 2.25 hours");
     let places: Vec<u64> = found.iter().map(|d| d.place.milliseconds).collect();
-    assert_eq!(places, [6 * MINUTE, 30 * MINUTE, 30 * MINUTE]);
+    assert_eq!(
+        places,
+        [
+            30 * MINUTE,
+            30 * MINUTE,
+            30 * MINUTE,
+            6 * MINUTE,
+            15 * MINUTE
+        ]
+    );
 }
 
 #[test]
@@ -409,12 +436,29 @@ fn passes_a_range_a_printed_length_lies_in() {
 }
 
 #[test]
-fn reads_no_range_whose_low_is_not_below_its_high_or_is_part_of_a_word() {
-    for (text, written) in [
-        ("step 3 - 2 minutes", "2 minutes"),
-        ("Q1-3 hours", "3 hours"),
-        ("v1.2-3 hours", "3 hours"),
-    ] {
+fn reads_a_range_written_high_to_low_as_the_span_between_its_numbers() {
+    let found = durations("step 3 - 2 minutes");
+    assert_eq!(
+        found
+            .iter()
+            .map(|d| (d.text, d.from, d.length))
+            .collect::<Vec<_>>(),
+        [("3 - 2 minutes", Some(clock(2 * MINUTE)), clock(3 * MINUTE))]
+    );
+    assert_eq!(
+        ungrounded("30-10 minutes", "20 minutes"),
+        Vec::<String>::new()
+    );
+    assert_eq!(ungrounded("30-10 minutes", "45 minutes"), ["30-10 minutes"]);
+    assert_eq!(
+        ungrounded("step 3 takes 2 minutes", "step 3 - 2 minutes"),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn reads_no_range_whose_low_is_part_of_a_word() {
+    for (text, written) in [("Q1-3 hours", "3 hours"), ("v1.2-3 hours", "3 hours")] {
         let found = durations(text);
         assert_eq!(
             found.iter().map(|d| (d.text, d.from)).collect::<Vec<_>>(),
@@ -470,13 +514,14 @@ fn reads_no_unit_inside_a_word() {
 }
 
 #[test]
-fn never_holds_a_number_glued_to_a_one_letter_symbol() {
-    let stated: Vec<&str> = durations("3 minor fixes, the 90s, 24h, 3d, 15h, 24 h")
+fn never_holds_a_number_before_a_one_letter_symbol() {
+    let stated: Vec<&str> = durations("3 minor fixes, the 90s, 24h, 3d, 15h, 24 h, à 15 h")
         .into_iter()
         .filter(|d| d.stated)
         .map(|d| d.text)
         .collect();
-    assert_eq!(stated, ["24 h"]);
+    assert_eq!(stated, Vec::<&str>::new());
+    assert_eq!(ungrounded("3 hours", "took 3h"), Vec::<String>::new());
     assert_eq!(
         ungrounded("the 90s, 24h, 1h30", "90 minutes"),
         Vec::<String>::new()
@@ -504,5 +549,185 @@ fn reads_a_corpus_comma_before_three_digits_as_a_decimal_too() {
     assert_eq!(
         ungrounded("1,250 seconds", "1,250 secondes"),
         Vec::<String>::new()
+    );
+}
+
+#[test]
+fn reads_digits_of_any_script_in_any_locale_s_grouping() {
+    for (text, length) in [
+        ("took ३ घंटे", clock(3 * HOUR)),
+        ("took ５分钟", clock(5 * MINUTE)),
+        ("took ๓ ชั่วโมง", clock(3 * HOUR)),
+        ("took ٣ ساعات", clock(3 * HOUR)),
+        ("took 1'250 Sekunden", clock(1_250_000)),
+        ("took 1’250 Sekunden", clock(1_250_000)),
+        ("took 1 250 secondes", clock(1_250_000)),
+        ("took 1\u{202f}250 secondes", clock(1_250_000)),
+        ("took 12,50,000 seconds", clock(1_250_000_000)),
+        ("took 1.234,5 Sekunden", clock(1_234_500)),
+        ("took 1.250 Sekunden", clock(1_250_000)),
+    ] {
+        assert_eq!(one(text), length, "{text}");
+    }
+}
+
+#[test]
+fn grounds_a_lone_dot_or_comma_before_three_digits_by_either_reading() {
+    for corpus in ["1250 seconds", "1.25 seconds"] {
+        assert_eq!(
+            ungrounded("took 1.250 Sekunden", corpus),
+            Vec::<String>::new(),
+            "{corpus}"
+        );
+    }
+    assert_eq!(
+        ungrounded("took 1.250 Sekunden", "12 seconds"),
+        ["1.250 Sekunden"]
+    );
+}
+
+#[test]
+fn reads_a_unit_beside_a_script_written_without_spaces() {
+    assert_eq!(one("合計5分钟"), clock(5 * MINUTE));
+    assert_eq!(one("5分钟後に"), clock(5 * MINUTE));
+    assert_eq!(one("30 minutes後"), clock(30 * MINUTE));
+    assert_eq!(one("時間は36 – 50 Sekunde"), clock(50_000));
+}
+
+#[test]
+fn reads_finnish_and_ukrainian_units_and_the_cases_a_count_of_one_takes() {
+    for (text, length) in [
+        ("kesti 5 minuuttia", clock(5 * MINUTE)),
+        ("3 tunnin kokous", clock(3 * HOUR)),
+        ("30 sekuntia", clock(30_000)),
+        ("тривало 5 хвилин", clock(5 * MINUTE)),
+        ("за 2 години", clock(2 * HOUR)),
+        ("через 1 минуту", clock(MINUTE)),
+        ("за 1 годину", clock(HOUR)),
+    ] {
+        assert_eq!(one(text), length, "{text}");
+    }
+}
+
+#[test]
+fn reads_a_number_before_an_arabic_dual_or_a_hyphen() {
+    assert_eq!(one("استغرق 2 ساعتين"), clock(2 * HOUR));
+    assert_eq!(one("5-دقائق"), clock(5 * MINUTE));
+    assert_eq!(read("x97-ساعتان"), []);
+}
+
+#[test]
+fn reads_a_spanish_y_as_and_not_as_a_year() {
+    assert_eq!(read("entre 1 y 2 horas"), [("2 horas", clock(2 * HOUR))]);
+    assert_eq!(one("took 3y"), Length::calendar(3_600));
+}
+
+#[test]
+fn joins_parts_a_spaced_hyphen_or_a_bare_comma_sets_apart() {
+    for text in [
+        "2 hours - 30 minutes",
+        "2 hours,30 minutes",
+        "2 hours-30 minutes",
+    ] {
+        assert_eq!(read(text), [(text, clock(150 * MINUTE))], "{text}");
+    }
+}
+
+#[test]
+fn reads_parts_joined_by_and_as_one_length_where_the_typescript_check_reads_two() {
+    assert_eq!(
+        ungrounded("2 minutes and 30 seconds", "150 seconds"),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        ungrounded("2 minutes and 30 seconds", "2 minutes"),
+        ["2 minutes and 30 seconds"]
+    );
+}
+
+#[test]
+fn ends_a_length_at_a_sentence_s_full_stop() {
+    assert_eq!(
+        read("It ran 2 hours. 30 minutes went to review."),
+        [
+            ("2 hours", clock(2 * HOUR)),
+            ("30 minutes", clock(30 * MINUTE))
+        ]
+    );
+    assert_eq!(
+        ungrounded("3.7 seconds", "took 72 hrs. 3.7 seconds"),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn reads_no_range_across_a_line_break() {
+    assert_eq!(
+        read("Total: 10\n- 30 min review"),
+        [("30 min", clock(30 * MINUTE))]
+    );
+    assert_eq!(ungrounded("10\n-\n30 min", "20 min"), ["30 min"]);
+}
+
+#[test]
+fn reads_no_piece_of_a_number_as_a_length() {
+    for text in [
+        "1/2 hours",
+        "x7,59 min",
+        "v1,250 seconds",
+        "1/12’665 sekundy",
+    ] {
+        assert!(
+            durations(text).iter().all(|d| d.length != clock(2 * HOUR)
+                && d.length != clock(59 * MINUTE)
+                && d.length != clock(250_000)
+                && d.length != clock(665_000)),
+            "{text}: {:?}",
+            durations(text)
+        );
+    }
+    assert_eq!(one("1/2 hour"), clock(30 * MINUTE));
+}
+
+#[test]
+fn reads_no_unit_inside_a_longer_word_of_any_script() {
+    assert_eq!(read("5 วินาทีly"), []);
+    assert_eq!(read("3 ساعتانly"), []);
+}
+
+#[test]
+fn reads_two_numbers_a_space_sets_apart_as_two() {
+    assert_eq!(
+        ungrounded("1.75 seconds", "1:52:39 1.75 seconds"),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        read("phase 2 10-30 min"),
+        [("10-30 min", clock(30 * MINUTE))]
+    );
+}
+
+#[test]
+fn reads_a_range_of_one_number_as_that_length() {
+    assert_eq!(read("18-18 seconds"), [("18 seconds", clock(18_000))]);
+    assert_eq!(
+        ungrounded("5–73 sec", "took 18-18 seconds"),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn reads_a_part_inside_a_link_as_the_link_s() {
+    assert_eq!(
+        ungrounded("see https://cal.com/x/30min and 17 seconds", ""),
+        ["17 seconds"]
+    );
+}
+
+#[test]
+fn reads_a_range_whose_low_is_a_link_s_as_its_part_alone() {
+    assert_eq!(
+        ungrounded("see https://cal.com/x/16 – 1880 seconds", "16-1880 seconds"),
+        ["1880 seconds"]
     );
 }

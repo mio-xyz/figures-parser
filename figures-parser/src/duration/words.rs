@@ -2,7 +2,9 @@
 //! and Portuguese, curated from rustling-ontology's duration and number
 //! grammars (MIT or Apache-2.0), and in Arabic, which rustling does not read.
 //! A second's, a minute's and an hour's names in the other languages are
-//! CLDR's, long and short, as `Intl.NumberFormat` prints them.
+//! CLDR's, long and short, as `Intl.NumberFormat` prints them, with the
+//! Finnish genitive ("3 tunnin kokous") and the Russian and Ukrainian
+//! accusative ("за 1 минуту") beside them.
 
 use super::grammar::Unit;
 
@@ -214,27 +216,49 @@ pub const MILLISECOND: &[&str] = &[
 pub const SECOND: &[&str] = &[
     "seconds", "second", "secondes", "seconde", "secondi", "secondo", "segundos", "segundo",
     "secs", "sec", "segs", "seg", "sekunden", "sekunde", "sek", "seconden", "sekunda", "sekundy",
-    "sekund", "sekunder", "saniye", "sn", "detik", "dtk", "giây",
+    "sekund", "sekunder", "saniye", "sn", "detik", "dtk", "giây", "sekuntia", "sekunti",
+    "sekunnin",
 ];
 
 /// A minute's words.
 pub const MINUTE: &[&str] = &[
-    "minutes", "minute", "minutos", "minuto", "minuti", "mins", "min", "mn", "minuten", "minuut",
-    "minuta", "minuty", "minut", "minuter", "dakika", "dk", "menit", "mnt", "phút",
+    "minutes",
+    "minute",
+    "minutos",
+    "minuto",
+    "minuti",
+    "mins",
+    "min",
+    "mn",
+    "minuten",
+    "minuut",
+    "minuta",
+    "minuty",
+    "minut",
+    "minuter",
+    "dakika",
+    "dk",
+    "menit",
+    "mnt",
+    "phút",
+    "minuuttia",
+    "minuutti",
+    "minuutin",
 ];
 
 /// An hour's words.
 pub const HOUR: &[&str] = &[
     "hours", "hour", "heures", "heure", "horas", "hora", "ore", "ora", "hrs", "hr", "stunden",
     "stunde", "std", "uur", "godzina", "godziny", "godzin", "godz", "timmar", "timme", "tim",
-    "saat", "sa", "jam",
+    "saat", "sa", "jam", "tuntia", "tunti", "tunnin",
 ];
 
 /// The unit names CLDR writes with a closing dot.
 pub const DOTTED: &[&str] = &["sek", "sn", "min", "dk", "std", "godz", "sa", "ชม"];
 
 /// The names of a second, a minute and an hour that end in a letter outside
-/// ASCII (Russian, Hebrew, Persian, Hindi, Japanese, Korean, Chinese, Thai,
+/// ASCII (Russian and Ukrainian, with the accusative a count of one takes
+/// after "за" or "через", Hebrew, Persian, Hindi, Japanese, Korean, Chinese, Thai,
 /// Vietnamese), read after digits by a pattern of their own, since the part
 /// pattern's ASCII word boundary does not end them.
 pub const NAMED: &[(&str, Unit)] = &[
@@ -242,6 +266,8 @@ pub const NAMED: &[(&str, Unit)] = &[
     ("секунды", Unit::Second),
     ("секунд", Unit::Second),
     ("сек", Unit::Second),
+    ("секунду", Unit::Second),
+    ("секунди", Unit::Second),
     ("ثانیه", Unit::Second),
     ("שניה", Unit::Second),
     ("שתי שניות", Unit::Second),
@@ -256,6 +282,12 @@ pub const NAMED: &[(&str, Unit)] = &[
     ("минуты", Unit::Minute),
     ("минут", Unit::Minute),
     ("мин", Unit::Minute),
+    ("минуту", Unit::Minute),
+    ("хвилина", Unit::Minute),
+    ("хвилини", Unit::Minute),
+    ("хвилину", Unit::Minute),
+    ("хвилин", Unit::Minute),
+    ("хв", Unit::Minute),
     ("دقیقه", Unit::Minute),
     ("דקה", Unit::Minute),
     ("שתי דקות", Unit::Minute),
@@ -268,6 +300,10 @@ pub const NAMED: &[(&str, Unit)] = &[
     ("часов", Unit::Hour),
     ("часа", Unit::Hour),
     ("час", Unit::Hour),
+    ("година", Unit::Hour),
+    ("години", Unit::Hour),
+    ("годину", Unit::Hour),
+    ("годин", Unit::Hour),
     ("ساعت", Unit::Hour),
     ("שעה", Unit::Hour),
     ("שעתיים", Unit::Hour),

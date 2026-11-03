@@ -778,6 +778,7 @@ function __napiStampBindingTarget(exportsObject, target) {
 // linked import resolves to `undefined`.
 module.exports.__napiBindingTarget = __napiStampBindingTarget(nativeBinding, __napiLoadedBindingTarget)
 module.exports = nativeBinding
+module.exports.PageHolds = nativeBinding.PageHolds
 module.exports.amountsSharedWith = nativeBinding.amountsSharedWith
 module.exports.extract = nativeBinding.extract
 module.exports.fabricatedUrls = nativeBinding.fabricatedUrls
@@ -793,6 +794,7 @@ module.exports.ungroundedDurations = nativeBinding.ungroundedDurations
 module.exports.ungroundedEmails = nativeBinding.ungroundedEmails
 module.exports.ungroundedFigures = nativeBinding.ungroundedFigures
 module.exports.ungroundedIdentifiers = nativeBinding.ungroundedIdentifiers
+module.exports.ungroundedOnPage = nativeBinding.ungroundedOnPage
 module.exports.ungroundedRatios = nativeBinding.ungroundedRatios
 module.exports.ungroundedUrls = nativeBinding.ungroundedUrls
 module.exports.unprintedIds = nativeBinding.unprintedIds

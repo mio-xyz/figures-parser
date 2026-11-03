@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
-const { extract, ungroundedFigures, ungroundedRatios, mispairedPerUnit, amountsSharedWith, sharesAmount, statesFigure, proseArithmetic, ungroundedUrls, linkFindings, mendedLinks, fabricatedUrls, ungroundedEmails, misdatedWeekdays, rowsOutsideWindow, ungroundedIdentifiers, unseenTokens, ungroundedDurations, unprintedIds, urlPrintedIn } = createRequire(import.meta.url)("./index.js");
+const { extract, ungroundedFigures, ungroundedRatios, mispairedPerUnit, amountsSharedWith, sharesAmount, statesFigure, proseArithmetic, ungroundedUrls, linkFindings, mendedLinks, fabricatedUrls, ungroundedEmails, misdatedWeekdays, rowsOutsideWindow, ungroundedIdentifiers, unseenTokens, ungroundedDurations, unprintedIds, urlPrintedIn, ungroundedOnPage, PageHolds } = createRequire(import.meta.url)("./index.js");
 
 const entities = extract("Total $1,250 and ١٢", { kinds: ["number"] });
 const has = (text, integer) => entities.some((e) => e.text === text && e.value.integer === integer);
@@ -60,4 +60,8 @@ assert.deepEqual(extract("2 and a half million, one point two million, 3億5000�
 assert.deepEqual(unprintedIds("Created prod_TQ81xLmN20aB7c and prod_VU49BpM22sWxIM, see <@U0A1B2C3D>.", '{"id": "PROD_TQ81XLMN20AB7C"}'), ["prod_VU49BpM22sWxIM"]);
 assert.equal(urlPrintedIn("https://www.acme.com/blog/post/", "[Post](/blog/post)"), true);
 assert.equal(urlPrintedIn("https://acme.com/blog/post", "## Post"), false);
+assert.deepEqual(ungroundedOnPage("activation up 12% on 1,840 sign-ups", "signups 1840").sort(), ["12%"]);
+const holds = new PageHolds();
+assert.deepEqual([holds.hold("p.png", ["12%"]), holds.hold("p.png", ["12%"]), holds.hold("p.png", ["12%", "40%"])], [true, false, true]);
+assert.deepEqual(ungroundedDurations("took ३ घंटे, then 2 minutes and 30 seconds", "150 seconds"), ["३ घंटे"]);
 console.log("ok");

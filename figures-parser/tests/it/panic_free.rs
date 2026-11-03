@@ -9,11 +9,11 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use figures_parser::number::scan::{Scratch, tokens};
 use figures_parser::utf16::{Utf16Cursor, units};
 use figures_parser::{
-    Date, durations, emails, extract_numbers, fabricated_urls, identifiers, link_findings,
-    mended_links, misdated_weekdays, mispaired_per_unit, numbers, prose_arithmetic,
+    Date, PageHolds, durations, emails, extract_numbers, fabricated_urls, identifiers,
+    link_findings, mended_links, misdated_weekdays, mispaired_per_unit, numbers, prose_arithmetic,
     rows_outside_window, ungrounded_durations, ungrounded_emails, ungrounded_figures,
-    ungrounded_identifiers, ungrounded_ratios, ungrounded_urls, unprinted_ids, unseen_tokens,
-    url_printed_in, urls,
+    ungrounded_identifiers, ungrounded_on_page, ungrounded_ratios, ungrounded_urls, unprinted_ids,
+    unseen_tokens, url_printed_in, urls,
 };
 
 /// Calls every entry point on the three texts, and returns a sum the
@@ -76,6 +76,9 @@ fn exercise(reply: &str, corpus: &str, prompt: &str) -> usize {
         + found_urls_printed(reply, corpus)
         + unseen_tokens(reply, corpus, prompt).len()
         + ungrounded_durations(reply, corpus, prompt).len()
+        + ungrounded_durations(corpus, reply, prompt).len()
+        + ungrounded_on_page(reply, corpus, prompt).len()
+        + usize::from(PageHolds::default().hold(reply, &[corpus, prompt]))
 }
 
 /// How many of `text`'s links `read` printed, so a parseable address is
@@ -273,6 +276,13 @@ const POOL: &[&str] = &[
     "時間",
     " Std.",
     "-minute-",
+    "分钟後",
+    "合計",
+    " tunnin",
+    " хвилину",
+    " y ",
+    " 1'250",
+    " วินาทีly",
     " giờ",
     "मिनट",
     " and a half",

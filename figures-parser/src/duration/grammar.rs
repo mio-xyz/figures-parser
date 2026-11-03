@@ -156,9 +156,11 @@ pub struct Part {
     /// ("1.5 hours" is written to the tenth of an hour), or the fraction
     /// added to it ("an hour and a half" is written to the half hour).
     pub place: Length,
-    /// The length a corpus may also mean by it: a comma before three digits
-    /// read as a decimal one ("1,250 secondes" as 1.25 seconds).
-    pub loose: Option<Length>,
+    /// The other reading of its digits, with the step it is written to, when
+    /// a lone dot or comma before three digits may group them or end the
+    /// whole number ("1,250 secondes" as 1.25 seconds, "1.250 Sekunden" as
+    /// 1,250).
+    pub loose: Option<(Length, Length)>,
     /// Whether a reply is held to it: not for a number glued to a one-letter
     /// symbol, which may be a plural ("the 90s"), a time of day ("15h") or a
     /// size as well as a length.
@@ -210,7 +212,7 @@ impl Amount {
         let mut decimal = false;
         let mut vulgar: Option<u64> = None;
         for c in text.chars() {
-            if let Some(d) = c.to_digit(10) {
+            if let Some(d) = digit_value(c) {
                 mantissa = mantissa.checked_mul(10)?.checked_add(u64::from(d))?;
                 if decimal {
                     scale = scale.checked_add(1)?;
@@ -237,12 +239,124 @@ impl Amount {
     }
 }
 
+/// Whether `c` groups digits or ends a whole number in a printed number, in
+/// any of the figure reader's locales: a comma, a dot, the two apostrophes
+/// Swiss German groups with, the spaces French and Russian group with, the
+/// Arabic thousands and decimal signs, and the fullwidth comma.
+pub const fn is_number_symbol(c: char) -> bool {
+    matches!(
+        c,
+        ',' | '.'
+            | '\''
+            | '\u{2019}'
+            | ' '
+            | '\u{a0}'
+            | '\u{202f}'
+            | '\u{2009}'
+            | '\u{66c}'
+            | '\u{66b}'
+            | '\u{ff0c}'
+    )
+}
+
+/// Whether `c` may end a whole number before its decimals: a dot, a comma or
+/// the Arabic decimal sign; the other symbols only ever group.
+const fn is_decimal_symbol(c: char) -> bool {
+    matches!(c, '.' | ',' | '\u{66b}')
+}
+
+/// Whether `groups`, a printed number's digit groups in order, group
+/// thousands: a lead of one to three digits that is not zero, then groups of
+/// three; or the Indian lakh notation, a lead of one or two, groups of two
+/// and a last group of three ("12,50,000").
+fn is_thousands<'a>(mut groups: impl Iterator<Item = &'a str>) -> bool {
+    let Some(lead) = groups.next() else {
+        return false;
+    };
+    let lead_digits = lead.chars().count();
+    if !(1..=3).contains(&lead_digits) || lead.chars().all(|c| digit_value(c) == Some(0)) {
+        return false;
+    }
+    let (mut rest, mut last) = (0_usize, 0_usize);
+    let (mut threes, mut twos) = (true, true);
+    for group in groups {
+        if rest > 0 {
+            threes &= last == 3;
+            twos &= last == 2;
+        }
+        last = group.chars().count();
+        rest = rest.saturating_add(1);
+    }
+    rest > 0 && last == 3 && (threes || (lead_digits <= 2 && twos))
+}
+
+impl Amount {
+    /// The digits of `text` in any script, every other character skipped, a
+    /// whole number.
+    fn of_any_digits(text: &str) -> Option<Self> {
+        text.chars()
+            .filter_map(digit_value)
+            .try_fold(0_u64, |n, d| n.checked_mul(10)?.checked_add(u64::from(d)))
+            .map(Self::whole)
+    }
+
+    /// The readings of a printed number, digits of any script joined by
+    /// [`is_number_symbol`]s: the one it is held to, and the other one when a
+    /// lone dot or comma before three digits may group them or end the whole
+    /// number ("1.250" is 1,250 in Berlin and 1.25 in Boston). Groups joined
+    /// by one repeated symbol that fit thousands grouping are a whole number;
+    /// a last decimal symbol after one group, or after a whole grouped by
+    /// another symbol ("1.234.567,89"), ends the whole number. Groups that fit
+    /// neither are no one number.
+    pub(crate) fn of_printed(text: &str) -> Option<(Self, Option<Self>)> {
+        let mut symbols = text.chars().filter(|&c| is_number_symbol(c));
+        let Some(first) = symbols.next() else {
+            return Some((Self::of_any_digits(text)?, None));
+        };
+        let count = symbols.count().saturating_add(1);
+        let (whole, fraction) = text.rsplit_once(is_number_symbol)?;
+        let last = text.get(whole.len()..)?.chars().next()?;
+        let thousands = text
+            .chars()
+            .filter(|&c| is_number_symbol(c))
+            .all(|c| c == last)
+            && is_thousands(text.split(is_number_symbol));
+        let decimal = is_decimal_symbol(last)
+            && (count == 1
+                || (first != last
+                    && whole
+                        .chars()
+                        .filter(|&c| is_number_symbol(c))
+                        .all(|c| c == first)
+                    && is_thousands(whole.split(is_number_symbol))));
+        let decimal = decimal
+            .then(|| {
+                let Self { mantissa, .. } = Self::of_any_digits(text)?;
+                let scale = u32::try_from(fraction.chars().count()).ok()?;
+                Some(Self { mantissa, scale })
+            })
+            .flatten();
+        if thousands {
+            Some((Self::of_any_digits(text)?, decimal))
+        } else {
+            Some((decimal?, None))
+        }
+    }
+}
+
 /// The step `amount` of `unit` is written to: the unit, or the decimal place
-/// its digits stop at; a vulgar fraction's own step when `written` holds one.
+/// its digits stop at; a half or a quarter when the fraction is one, written
+/// as a vulgar fraction ("1½") or in digits ("1.5", "2.25"), since "1.5
+/// hours" is "an hour and a half" spelled in digits.
 fn digits_place(unit: Unit, amount: Amount, written: &str) -> Option<Length> {
-    if written.contains('½') {
+    let hundredths = match amount.scale {
+        1 => amount.mantissa.checked_rem(10)?.checked_mul(10)?,
+        2 => amount.mantissa.checked_rem(100)?,
+        _ => 0,
+    };
+    if written.contains('½') || hundredths == 50 {
         unit.times(Amount::HALF)
-    } else if written.contains(['¼', '¾']) {
+    } else if written.contains(['¼', '¾']) || matches!(hundredths, 25 | 75) {
         unit.times(Amount::QUARTER)
     } else {
         unit.times(Amount {
@@ -252,14 +366,9 @@ fn digits_place(unit: Unit, amount: Amount, written: &str) -> Option<Length> {
     }
 }
 
-/// The length `unit` times `written` reads as when its one thousands comma
-/// is a decimal comma ("1,250" as 1.25), as a corpus in French may write it.
-fn decimal_comma(unit: Unit, written: &str) -> Option<Length> {
-    let (_, decimals) = written.split_once(',')?;
-    if decimals.contains([',', '.']) {
-        return None;
-    }
-    unit.times(Amount::of_digits(written, false)?)
+/// The length `count` of `unit` reads as, with the step it is written to.
+fn reading(unit: Unit, count: Amount, written: &str) -> Option<(Length, Length)> {
+    Some((unit.times(count)?, digits_place(unit, count, written)?))
 }
 
 /// A case-insensitive pattern of the words in `table`, those with a value in
@@ -272,6 +381,18 @@ fn words_of(table: &'static [(&'static str, u64)], values: Range<u64>) -> String
             .map(|&(w, _)| w),
     )
 }
+
+/// The symbols a printed number's digit groups are joined by, as
+/// [`is_number_symbol`] reads them.
+const GROUP: &str = r"[,.'\x{2019} \x{A0}\x{202F}\x{2009}\x{66C}\x{66B}\x{FF0C}]";
+
+/// The start of a number's digits: an ASCII digit at a word boundary, or a
+/// digit of another script, which no ASCII boundary precedes.
+const LEAD: &str = r"(?:(?-u:\b)[0-9]|[\p{Nd}--[0-9]])\p{Nd}*";
+
+/// A printed number: digits of any script, in groups joined by one of
+/// [`is_number_symbol`]'s symbols each.
+const PRINTED: &str = r"(?:(?-u:\b)[0-9]|[\p{Nd}--[0-9]])\p{Nd}*(?:[,.'\x{2019} \x{A0}\x{202F}\x{2009}\x{66C}\x{66B}\x{FF0C}]\p{Nd}+)*";
 
 /// The spaces a number and its unit may stand apart by.
 const SPACE: &str = r"[ \x{A0}\x{202F}\x{2009}]";
@@ -304,23 +425,23 @@ fn part_pattern() -> String {
         })
         .collect::<Vec<_>>()
         .join("|");
-    let digits = r"(?P<thousands>[0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]+)?)|(?P<decimal>[0-9]+(?:[.,][0-9]+)?[½¼¾]?)";
+    let digits = format!("(?P<vulgar>{LEAD}[½¼¾])|(?P<printed>{PRINTED})");
     let worded = format!(
         r"(?i:(?P<couple>(?:a\s+)?couple\s+of|(?:un\s+)?paio\s+di))|(?i:(?P<tens>{tens})(?:\s+(?:y|e|et)\s+|-et-|-|\s+)(?P<ones>{ones}))|(?i:(?P<ittens>{it_tens})[ia]?(?P<itones>{it_ones}))|(?i:(?P<article>an?))|(?i:(?P<word>{words}|{tens}))"
     );
     let and_half = r"\s+and\s+an?\s+half";
     let suffix = r"(?P<half>and\s+an?\s+half|et\s+demie?|y\s+media|e\s+mezz[oa]|e\s+meia)|(?P<quarter>and\s+a\s+quarter|et\s+quart|y\s+cuarto|e\s+un\s+quarto|e\s+um\s+quarto)|(?P<threequarters>e\s+tre\s+quarti)";
     format!(
-        r"(?-u:\b)(?:(?P<glued>{GLUED})(?-u:\b)|(?:(?:{digits})(?i:(?P<andhalf>{and_half}))?(?P<gap>{SPACE}|-)?|(?:{worded})(?i:(?P<wordhalf>{and_half}))?(?:{SPACE}|-)|(?i:(?P<elided>un['’])|(?P<coupled>(?:un\s+)?paio\s+d['’])))(?:{units})(?-u:\b)(?:\s+(?i:{suffix})(?-u:\b))?)"
+        r"(?:(?-u:\b)(?P<glued>{GLUED})(?-u:\b)|(?:(?:{digits})(?i:(?P<andhalf>{and_half}))?(?P<gap>{SPACE}|-)?|(?-u:\b)(?:{worded})(?i:(?P<wordhalf>{and_half}))?(?:{SPACE}|-)|(?-u:\b)(?i:(?P<elided>un['’])|(?P<coupled>(?:un\s+)?paio\s+d['’])))(?:{units})(?-u:\b)(?:\s+(?i:{suffix})(?-u:\b))?)"
     )
 }
 
 /// The pattern of a fixed phrase.
 const SPECIAL: &str = r"(?i)(?-u:\b)(?:(?P<half>half\s+an?\s+hour|an?\s+half[\s-]hour|(?:une\s+)?demie?[\s-]heure|(?:una\s+)?media\s+hora|(?:una\s+)?mezz['’]?ora|(?:uma\s+)?meia[\s-]hora|1/2\s?h(?:our|eure)?)|(?P<quarter>(?:a\s+)?quarter(?:\s+of\s+an\s+|-)hour|(?:un\s+)?quart\s+d['’]heure|(?:un\s+)?cuarto\s+de\s+hora|(?:un\s+)?quarto\s+d['’]ora|(?:um\s+)?quarto\s+de\s+hora|1/4\s?h(?:our|eure)?)|(?P<threequarters>three[\s-]quarters\s+of\s+an\s+hour|trois\s+quarts\s+d['’]heure|tres\s+cuartos\s+de\s+hora|tre\s+quarti\s+d['’]ora|tr[eê]s\s+quartos\s+de\s+hora|3/4\s?h(?:our|eure)?)|(?P<fortnight>(?:a\s+|one\s+)?fortnight))(?-u:\b)";
 
-/// A digit as Arabic texts write them: Western, Arabic-Indic or extended
-/// Arabic-Indic.
-const AR_DIGIT: &str = "[0-9\u{660}-\u{669}\u{6F0}-\u{6F9}]";
+/// A digit as Arabic texts write them: Western, Arabic-Indic, extended
+/// Arabic-Indic, or any other script's.
+const AR_DIGIT: &str = r"\p{Nd}";
 
 /// The pattern of an Arabic part: an optional amount (digits, a number word
 /// up to ninety-nine, or a fraction), a unit word, then `واحد` ("one") after
@@ -333,7 +454,7 @@ fn arabic_pattern() -> String {
     let units = alternation(AR_UNITS.iter().map(|&(w, _, _)| w));
     let fractions = "نصف|نص|ربع|ثلث";
     format!(
-        r"(?:(?P<digits>{d}+(?:[.,٫]{d}+)?)\s*|(?P<cu>{ones})\s+و\s*(?P<ct>{tens})\s+|(?P<tu>{ones})\s+(?:عشرة|عشره|عشر)\s+|(?P<tens>{tens})\s+|(?P<single>{single})\s+|(?P<frac>ثلاثة\s+أرباع|ثلاث\s+أرباع|ثلاثة\s+ارباع|ثلاث\s+ارباع|{fractions})\s+)?(?P<unit>{units})(?:\s+(?P<one>واحدة|واحده|واحد))?(?:\s*(?P<plus>و\s*(?:{fractions}))|\s+(?P<minus>(?:إلا|الا)\s+(?:ربع|ثلث)))?"
+        r"(?:(?P<digits>{d}+(?:{GROUP}{d}+)*)(?:\s*|-)|(?P<cu>{ones})\s+و\s*(?P<ct>{tens})\s+|(?P<tu>{ones})\s+(?:عشرة|عشره|عشر)\s+|(?P<tens>{tens})\s+|(?P<single>{single})\s+|(?P<frac>ثلاثة\s+أرباع|ثلاث\s+أرباع|ثلاثة\s+ارباع|ثلاث\s+ارباع|{fractions})\s+)?(?P<unit>{units})(?:\s+(?P<one>واحدة|واحده|واحد))?(?:\s*(?P<plus>و\s*(?:{fractions}))|\s+(?P<minus>(?:إلا|الا)\s+(?:ربع|ثلث)))?"
     )
 }
 
@@ -341,9 +462,7 @@ fn arabic_pattern() -> String {
 /// optional space or hyphen, and a name of [`NAMED`].
 fn named_pattern() -> String {
     let names = alternation(NAMED.iter().map(|&(w, _)| w));
-    format!(
-        r"(?-u:\b)(?:(?P<thousands>[0-9]{{1,3}}(?:,[0-9]{{3}})+(?:\.[0-9]+)?)|(?P<decimal>[0-9]+(?:[.,][0-9]+)?))(?:{SPACE}|-)?(?P<unit>(?i:{names}))"
-    )
+    format!(r"(?P<printed>{PRINTED})(?:{SPACE}|-)?(?P<unit>(?i:{names}))")
 }
 
 /// The named-unit part pattern, compiled once.
@@ -359,25 +478,35 @@ static ARABIC: LazyLock<Option<Regex>> = LazyLock::new(|| compile(&arabic_patter
 static PHRASE: LazyLock<Option<Regex>> = LazyLock::new(|| compile(SPECIAL));
 
 /// Whether a part may start at byte `at`: not inside a word or a number,
-/// nor after a fraction's slash.
-fn starts_clean(text: &str, at: usize) -> bool {
-    !char_before(text, at)
-        .is_some_and(|c| c.is_alphanumeric() || matches!(c, '_' | '.' | ',' | '/'))
+/// nor after a number's group or decimal symbol or a fraction slash ("1/2
+/// hours"), which leaves a piece of the number before it. A
+/// letter of a script written without spaces is no word boundary
+/// ("合計5分钟").
+pub fn starts_clean(text: &str, at: usize) -> bool {
+    match char_before(text, at) {
+        None => true,
+        Some(c) if c == '/' || (is_number_symbol(c) && !c.is_whitespace()) => {
+            !char_before(text, at.saturating_sub(c.len_utf8())).is_some_and(char::is_numeric)
+        }
+        Some(c) => !(c == '_' || c.is_numeric() || (c.is_alphabetic() && !is_unspaced_script(c))),
+    }
 }
 
 /// Whether a part may end at byte `at`: not before a letter or a digit of
-/// any script, which the ASCII boundary in the pattern lets through.
+/// any script, which the ASCII boundary in the pattern lets through, except
+/// a letter of a script written without spaces ("5分钟後", "30 minutes後").
 fn ends_clean(text: &str, at: usize) -> bool {
-    !char_at(text, at).is_some_and(char::is_alphanumeric)
+    !char_at(text, at).is_some_and(|c| c.is_alphanumeric() && !is_unspaced_script(c))
 }
 
-/// The amount a part's captures write.
-fn amount(caps: &Groups<'_, '_>) -> Option<Amount> {
-    if let Some(m) = caps.get("thousands") {
-        return Amount::of_digits(m.as_str(), true);
+/// The amount a part's captures write, and its other reading when its digits
+/// fit two (see [`Amount::of_printed`]).
+fn amount(caps: &Groups<'_, '_>) -> Option<(Amount, Option<Amount>)> {
+    if let Some(m) = caps.get("printed") {
+        return Amount::of_printed(m.as_str());
     }
-    if let Some(m) = caps.get("decimal") {
-        return Amount::of_digits(m.as_str(), false);
+    if let Some(m) = caps.get("vulgar") {
+        return Some((Amount::of_digits(m.as_str(), false)?, None));
     }
     let value = if caps.get("couple").is_some() || caps.get("coupled").is_some() {
         2
@@ -391,7 +520,7 @@ fn amount(caps: &Groups<'_, '_>) -> Option<Amount> {
         let word = caps.get("word")?.as_str();
         lookup(SINGLES, word).or_else(|| lookup(TENS, word))?
     };
-    Some(Amount::whole(value))
+    Some((Amount::whole(value), None))
 }
 
 /// The part a glued run of units writes ("1h5m30s"): each number takes the
@@ -444,10 +573,16 @@ fn read_part(text: &str, caps: &Groups<'_, '_>) -> Option<Part> {
     if let Some(glued) = caps.get("glued") {
         return read_glued(whole.range(), glued.as_str());
     }
-    let count = amount(caps)?;
+    let (count, other) = amount(caps)?;
     let (unit, written) = Unit::ALL
         .into_iter()
         .find_map(|u| caps.get(u.group()).map(|m| (u, m)))?;
+    let digits = caps.get("printed").or_else(|| caps.get("vulgar"));
+    let symbol = written.as_str().chars().count() == 1;
+    // A spaced "y" is the Spanish "and" ("entre 1 y 2 horas"), not a year.
+    if written.as_str() == "y" && (digits.is_none() || caps.get("gap").is_some()) {
+        return None;
+    }
     let extra = [
         ("andhalf", Amount::HALF),
         ("wordhalf", Amount::HALF),
@@ -461,9 +596,15 @@ fn read_part(text: &str, caps: &Groups<'_, '_>) -> Option<Part> {
         return None;
     }
     let mut length = unit.times(count)?;
-    let mut place = match caps.get("thousands").or_else(|| caps.get("decimal")) {
+    let mut place = match digits {
         Some(digits) => digits_place(unit, count, digits.as_str())?,
         None => unit.one(),
+    };
+    let loose = match (other, digits) {
+        (Some(other), Some(digits)) if extra.is_none() => {
+            Some(reading(unit, other, digits.as_str())?)
+        }
+        _ => None,
     };
     if let Some((_, fraction)) = extra {
         length = length.checked_add(unit.times(fraction)?)?;
@@ -474,19 +615,14 @@ fn read_part(text: &str, caps: &Groups<'_, '_>) -> Option<Part> {
         };
         place = place.min(unit.times(step)?);
     }
-    let glued_symbol = written.as_str().chars().count() == 1
-        && caps.get("decimal").is_some()
-        && caps.get("gap").is_none();
     Some(Part {
         span: whole.start()..dotted_end(text, written.as_str(), whole.end()),
         length,
         largest: unit,
         smallest: unit,
         place,
-        loose: caps
-            .get("thousands")
-            .and_then(|m| decimal_comma(unit, m.as_str())),
-        stated: !glued_symbol,
+        loose,
+        stated: !symbol,
     })
 }
 
@@ -526,7 +662,7 @@ fn ends_named(text: &str, at: usize, last: char) -> bool {
         if is_unspaced_script(last) {
             !wordlike
         } else {
-            !(wordlike || is_letter(c) || is_mark(c))
+            is_unspaced_script(c) || !(wordlike || is_letter(c) || is_mark(c))
         }
     })
 }
@@ -563,18 +699,16 @@ fn read_named(text: &str, caps: &Groups<'_, '_>) -> Option<Part> {
         return None;
     }
     let &(_, unit) = NAMED.iter().find(|&&(w, _)| same_word(w, name.as_str()))?;
-    let (written, thousands) = match caps.get("thousands") {
-        Some(m) => (m.as_str(), true),
-        None => (caps.get("decimal")?.as_str(), false),
-    };
-    let count = Amount::of_digits(written, thousands)?;
+    let written = caps.get("printed")?.as_str();
+    let (count, other) = Amount::of_printed(written)?;
+    let (length, place) = reading(unit, count, written)?;
     Some(Part {
         span: whole.start()..dotted_end(text, name.as_str(), whole.end()),
-        length: unit.times(count)?,
+        length,
         largest: unit,
         smallest: unit,
-        place: digits_place(unit, count, written)?,
-        loose: thousands.then(|| decimal_comma(unit, written)).flatten(),
+        place,
+        loose: other.and_then(|o| reading(unit, o, written)),
         stated: true,
     })
 }
@@ -593,7 +727,7 @@ enum Before<'t> {
 fn arabic_before<'t>(caps: &Groups<'_, 't>) -> Option<Before<'t>> {
     let count = |n: u64| Some(Before::Count(Amount::whole(n)));
     if let Some(m) = caps.get("digits") {
-        return Some(Before::Count(arabic_digits(m.as_str())?));
+        return Some(Before::Count(Amount::of_printed(m.as_str())?.0));
     }
     if let (Some(ones), Some(tens)) = (caps.get("cu"), caps.get("ct")) {
         return count(
@@ -613,25 +747,6 @@ fn arabic_before<'t>(caps: &Groups<'_, 't>) -> Option<Before<'t>> {
         caps.get("frac")
             .map_or(Before::Nothing, |f| Before::Fraction(f.as_str())),
     )
-}
-
-/// An amount in Western or Arabic-Indic digits, its decimal mark a dot, a
-/// comma or the Arabic decimal separator.
-fn arabic_digits(text: &str) -> Option<Amount> {
-    let mut mantissa: u64 = 0;
-    let mut scale: u32 = 0;
-    let mut decimal = false;
-    for c in text.chars() {
-        if let Some(d) = digit_value(c) {
-            mantissa = mantissa.checked_mul(10)?.checked_add(u64::from(d))?;
-            if decimal {
-                scale = scale.checked_add(1)?;
-            }
-        } else {
-            decimal = true;
-        }
-    }
-    Some(Amount { mantissa, scale })
 }
 
 /// `unit` times the fraction `word` names: a half, a quarter, three
@@ -702,7 +817,8 @@ fn joined_after(text: &str, end: usize) -> bool {
 /// The part a match of the Arabic pattern writes, if it is one. A unit alone
 /// counts one only with `واحد`, a fraction after it, or another amount
 /// joined to it, since "يوم" and "ساعة" alone are as often "the day of" and
-/// "the clock"; a dual counts two by itself.
+/// "the clock"; a dual counts two by itself, and a number before it ("2
+/// ساعتين") as a plural does.
 fn read_arabic(text: &str, caps: &Groups<'_, '_>) -> Option<Part> {
     let whole = caps.whole()?;
     if !arabic_starts_clean(text, whole.start()) {
@@ -726,8 +842,20 @@ fn read_arabic(text: &str, caps: &Groups<'_, '_>) -> Option<Part> {
     }
     let suffixed = plus.is_some() || minus.is_some();
     let mut place = unit.one();
-    let base = match (arabic_before(caps)?, form) {
-        (Before::Count(count), Form::Singular | Form::Plural) if one.is_none() => {
+    let before = arabic_before(caps)?;
+    // A unit with no amount right after digits is the end of a number this
+    // pattern did not take ("x97-ساعتان"), not a count of its own.
+    if matches!(before, Before::Nothing)
+        && text
+            .get(..whole.start())
+            .map(|t| t.strip_suffix([' ', '-']).unwrap_or(t))
+            .and_then(|t| t.chars().next_back())
+            .is_some_and(char::is_numeric)
+    {
+        return None;
+    }
+    let base = match (before, form) {
+        (Before::Count(count), Form::Singular | Form::Plural | Form::Dual) if one.is_none() => {
             place = unit.times(Amount {
                 mantissa: 1,
                 scale: count.scale,

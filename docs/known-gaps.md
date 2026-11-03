@@ -161,16 +161,13 @@ it stands; a contribution that closes one should remove it here.
 
 ## Durations
 
-- Finnish and Ukrainian units are not read, though the weekday check reads
-  those languages.
-- Number words outside English, French, Spanish, Italian, Portuguese and
-  Arabic are not read ("fünf Minuten", "пять минут"), nor are days, weeks,
-  months and years in the languages whose seconds, minutes and hours are
-  read by their CLDR names. Russian and Polish case forms past CLDR's
-  ("минутах", "godzinach") are not read either.
+- Days, weeks, months and years are read only in English, French, Spanish,
+  Italian, Portuguese and Arabic, and number words only in those languages
+  ("fünf Minuten", "пять минут" are not read). Russian and Polish case forms
+  past CLDR's and the accusative ("минутах", "godzinach") are not read.
 - Some CLDR short names are words too: "jam" (Indonesian hours), "tim"
-  (Swedish), "std" (German) and "sa" (Turkish), so "3 jam sessions" reads as
-  three hours.
+  (Swedish), "std" (German) and "sa" (Turkish), so "3 jam sessions" and "3
+  std above" read as three hours, as the host's TypeScript reads them.
 - Arabic: number words past ninety-nine ("مئة ساعة"), dialect numbers
   ("تلات ساعات"), and units written with their short vowels are not read. A
   lone singular unit ("استغرق ساعة", "it took an hour") is not read either,
@@ -179,10 +176,9 @@ it stands; a contribution that closes one should remove it here.
   decimal in words is misread: "one point five hours" reads as five hours.
 - "An hour" alone is not read, only "an hour and a half", since "once a day"
   uses the same article.
-- A range is read only with a bare number in digits and a dash before a
-  part in digits: "2 to 3 hours", "between 2 and 3 hours" and "two-three
-  hours" read their upper end only, as does a range whose low is not below
-  its high ("30-10 minutes" reads "10 minutes").
+- A range is read only with a bare number and a dash before a part in
+  digits: "2 to 3 hours", "between 2 and 3 hours" and "two-three hours"
+  read their upper end only, as the host's TypeScript reads them.
 - Minutes after a spaced hour are dropped ("2h 30" is 2 hours), and "1h30s"
   is not read.
 - Calendar lengths do not convert to days: "4 weeks" is not "1 month", and
@@ -191,6 +187,47 @@ it stands; a contribution that closes one should remove it here.
 - A printed length rounds to a reply's at the reply's place, so a long unit
   is loose: "2 hours" is grounded by any printed length from 1:30:01 to
   2:29:59, and "1 year" by 6.01 to 17.99 months.
+- A reply's duration is reported without the full stop after its unit
+  ("5 minutes", where the host's TypeScript reports "5 minutes."), unless
+  the unit's own abbreviation takes the dot ("2 Std.").
+- A number straddling the end of a link ("https://x.io/11 528 seconds") is
+  read whole, so it starts inside the link and is not checked.
+
+### Where this library reads durations more strictly than the host's TypeScript
+
+Each of these is a reading the TypeScript check gets wrong; the library's
+is pinned in `tests/it/durations.rs`.
+
+- A decimal is held to the place it is written to: "1.5 hours" is the half
+  hour, so 70 minutes, nearer an hour, does not ground it, and "0.5 hours"
+  is not grounded by 50 seconds. The TypeScript check rounds every length at
+  its unit, so any length from 61 to 119 minutes grounds "1.5 hours".
+- Parts "and" joins are one length: "2 minutes and 30 seconds" is grounded
+  by 150 seconds, where the TypeScript check reads two lengths and flags
+  both.
+- A full stop ends a length: "2 hours. 30 minutes" is two lengths, where the
+  TypeScript check joins them across the sentence.
+- A range written high to low ("30-10 minutes", "step 3 - 2 minutes") is
+  read as the span between its numbers, where the TypeScript check drops it
+  and so holds the reply to nothing; "18-18 seconds" is 18 seconds.
+- A dash after a line break opens a list item: "Total: 10\n- 30 min" is no
+  range from 10 to 30 minutes.
+- A unit after a fraction slash or inside a longer word is not read: "1/2
+  hours" is not two hours, "x7,59 min" not 59 minutes, and "วินาทีly" or
+  "ساعتانly" hold no unit, where the TypeScript check reads "วิ" and "ساعت"
+  inside them.
+- Two numbers a plain space sets apart are two ("1:52:39 1.75 seconds"
+  prints 1.75 seconds), where the TypeScript check reads one token and
+  neither number.
+- A number before a one-letter symbol ("24 h", "30 s") grounds a reply's
+  duration ("3 hours" by "took 3h"); neither the TypeScript check nor this
+  library holds a reply to one, since "à 15 h" is a time of day.
+- A printed part that only a space joins to the next is one length with it
+  in a corpus: "30 minutes" is not grounded by "130 minutes", nor by "1 hour
+  30 minutes", nor by the upper bound of "10-30 minutes".
+- A corpus also prints a length as an ISO 8601 duration, a clock reading or
+  a field named for its unit, and each part a comma joins on its own, as a
+  list may: "Breaks: 1 hour, 30 minutes" grounds "30 minutes".
 
 ## Rows under a date window
 

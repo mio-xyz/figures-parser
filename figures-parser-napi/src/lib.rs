@@ -559,3 +559,39 @@ pub fn fabricated_urls(reply: String, corpus: String, hosts: Option<Vec<String>>
         .map(str::to_owned)
         .collect()
 }
+
+/// The figures, ratios and opaque ids of a page's `text` that `corpus`, what
+/// the run read, does not carry; `said`, what people wrote, grounds a ratio
+/// between their own numbers.
+#[napi(catch_unwind)]
+#[must_use]
+pub fn ungrounded_on_page(text: String, corpus: String, said: Option<String>) -> Vec<String> {
+    figures_parser::ungrounded_on_page(&text, &corpus, said.as_deref().unwrap_or_default())
+}
+
+/// Which of a turn's rendered pages to hold back, file by file: a page is
+/// held back for a claim the run was not told about for that file, and a
+/// file at most three times.
+#[napi]
+#[derive(Default)]
+pub struct PageHolds {
+    /// The library's bookkeeping.
+    inner: figures_parser::PageHolds,
+}
+
+#[napi]
+impl PageHolds {
+    /// No page held back yet.
+    #[napi(constructor, catch_unwind)]
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Whether to hold back the page `filename` names, whose check found
+    /// `claims`; a hold records them as told for that file.
+    #[napi(catch_unwind)]
+    pub fn hold(&mut self, filename: String, claims: Vec<String>) -> bool {
+        self.inner.hold(&filename, &claims)
+    }
+}

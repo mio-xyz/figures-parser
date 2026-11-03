@@ -74,6 +74,7 @@ what a text states, with byte spans.
 | [Email addresses](#email-addresses) | `ungrounded_emails` | `emails` | the corpus or the prompt carries it, case aside |
 | [Identifiers](#identifiers) | `ungrounded_identifiers`, `unprinted_ids` | `identifiers` | the corpus or the prompt carries it |
 | [Durations](#durations) | `ungrounded_durations` | `durations` | the corpus carries the same length, in any form |
+| [Pages](#pages) | `ungrounded_on_page`, `PageHolds` | | the corpus carries its figures, ratios and ids |
 
 ### Numbers
 
@@ -463,7 +464,9 @@ seconds", which rounds to it; "~5 minutes" takes a minute either way, and
 "10–30 min" any length inside it. Words and phrases are read in English,
 French, Spanish, Italian, Portuguese and Arabic ("an hour and a half",
 "deux heures et demie", "ساعة ونصف"), and a second, a minute and an hour in
-fifteen more languages ("5 Minuten", "2 часа", "3時間").
+seventeen more languages ("5 Minuten", "2 часа", "3時間", "5 minuuttia"),
+in the digits of any script and the grouping of any locale ("३ घंटे", "1 250
+secondes").
 
 ```rust
 use figures_parser::ungrounded_durations;
@@ -482,6 +485,28 @@ assert_eq!(
 ```
 
 `durations(text)` reads them, each with its length.
+
+### Pages
+
+`ungrounded_on_page(text, corpus, said)` returns the figures, ratios and
+opaque ids of a page rendered for a person that the corpus does not carry:
+the page is held to what was read, as a sent message is. `PageHolds` decides
+which renders to hold back for them, file by file: a page is held back for a
+claim the run was not told about for that file, and a file at most
+`HOLDS_PER_PAGE` times, so a page whose figures are placeholders on purpose
+costs one render more, never a loop.
+
+```rust
+use figures_parser::{PageHolds, ungrounded_on_page};
+
+let page = "Activation up 12% on 1,840 sign-ups.";
+let claims = ungrounded_on_page(page, "signups 1840", "");
+assert_eq!(claims, ["12%"]);
+
+let mut holds = PageHolds::default();
+assert!(holds.hold("mockup.png", &claims));
+assert!(!holds.hold("mockup.png", &claims));
+```
 
 ## From Node
 
@@ -519,6 +544,8 @@ fp.misdatedWeekdays(reply, "2026-10-09");
 fp.ungroundedEmails(reply, corpus, prompt);
 fp.ungroundedIdentifiers(reply, corpus, prompt); // also unseenTokens
 fp.ungroundedDurations(reply, corpus, prompt);
+fp.ungroundedOnPage(text, corpus, said);
+new fp.PageHolds().hold("mockup.png", claims); // true: hold the page back
 
 // Every item with its place in the input; kinds: number, url, email, id, duration.
 fp.extract("Fee $1,250 at https://acme.io/x", { kinds: ["number", "url"] });

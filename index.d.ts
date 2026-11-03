@@ -10,6 +10,21 @@
 export declare const __napiBindingTarget: 'native' | 'wasm32-wasi' | 'wasm32-wasip1'
 
 /**
+ * Which of a turn's rendered pages to hold back, file by file: a page is
+ * held back for a claim the run was not told about for that file, and a
+ * file at most three times.
+ */
+export declare class PageHolds {
+  /** No page held back yet. */
+  constructor()
+  /**
+   * Whether to hold back the page `filename` names, whose check found
+   * `claims`; a hold records them as told for that file.
+   */
+  hold(filename: string, claims: Array<string>): boolean
+}
+
+/**
  * For each of `texts`, the amounts `reply` states that it carries, as the
  * reply wrote them; the reply is read once.
  */
@@ -274,6 +289,13 @@ export declare function ungroundedFigures(reply: string, corpus: string): Array<
  * `corpus` carries another of its prefix.
  */
 export declare function ungroundedIdentifiers(reply: string, corpus: string, prompt?: string | undefined | null): Array<string>
+
+/**
+ * The figures, ratios and opaque ids of a page's `text` that `corpus`, what
+ * the run read, does not carry; `said`, what people wrote, grounds a ratio
+ * between their own numbers.
+ */
+export declare function ungroundedOnPage(text: string, corpus: string, said?: string | undefined | null): Array<string>
 
 /**
  * Ratios in `reply` (percentages and multiples) that neither `corpus` nor

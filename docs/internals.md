@@ -690,20 +690,35 @@ corpus with a Kelvin sign or a capital dotted I, which lowercase to `k` and
 
 ## Durations
 
-`durations(text)` reads an amount and a unit: digits, decimals with a point
-or a comma, "1½", number words ("forty-five", "vingt et un",
-"trentacinque"), glued runs of units ("1h30", "1h5m30s"), and fixed phrases
-("half an hour", "un quart d'heure", "mezz'ora", "a fortnight"). Parts in
-falling units join into one length ("1 hour and 30 minutes",
-"5-minute-50-second", "2 jours, 4 heures"). A bare number and one dash
-before a part in digits open a range ("10–30 min", "2 - 3 hours"), when the
-number is below the part's amount; otherwise the part reads alone ("step 3 -
-2 minutes"). The words are curated from rustling-ontology's grammar.
+`durations(text)` reads an amount and a unit: a printed number, "1½", number
+words ("forty-five", "vingt et un", "trentacinque"), glued runs of units
+("1h30", "1h5m30s"), and fixed phrases ("half an hour", "un quart d'heure",
+"mezz'ora", "a fortnight"). A printed number is digits of any script in
+groups joined by the symbols a locale prints ("1,250", "1.234,5", "1'250",
+"1 250", "12,50,000", "٣٫٥", "३"), read as the figure reader reads one: a
+lone dot or comma before three digits reads both ways ("1.250 Sekunden" is
+1,250 seconds or 1.25), and groups that fit no one number are none. A part
+does not start inside a word or right after a number's symbol or a fraction
+slash ("x7,59 min", "1/2 hours"), and a letter of a script written without
+spaces is no word ("合計5分钟", "30 minutes後").
+
+Parts in falling units join into one length when a space, a hyphen, a comma
+or "and" alone stands between them, within a line ("1 hour and 30
+minutes", "5-minute-50-second", "2 hours - 30 minutes", "2 jours, 4
+heures"); a full stop ends the length ("2 hours. 30 minutes" is two). A bare
+number and one dash within the line before a part in digits open a range
+("10–30 min", "2 - 3 hours"); written high to low ("30-10 minutes", "step 3
+- 2 minutes") it is read as the span between the two numbers, and two equal
+numbers ("18-18 seconds") as the part alone. A dash after a line break opens
+a list item, not a range. The words are curated from rustling-ontology's
+grammar.
 
 A second, a minute and an hour are also read under the names CLDR prints
 them with, long and short, in the figure reader's locales (German, Dutch,
 Polish, Swedish, Turkish, Indonesian, Vietnamese, Russian, Hebrew, Persian,
-Hindi, Japanese, Korean, Chinese, Thai). A name that ends in ASCII joins the
+Hindi, Japanese, Korean, Chinese, Thai) and in Finnish and Ukrainian, with
+the Finnish genitive ("3 tunnin kokous") and the Russian and Ukrainian
+accusative ("за 1 хвилину"). A name that ends in ASCII joins the
 part pattern; one that ends outside it ("минут", "時間", "giờ") has a
 pattern of its own, run only over a text that is not all ASCII, since the
 part pattern's ASCII word boundary cannot end it. Such a name ends before
@@ -715,10 +730,10 @@ it still joins ("2 Std. 30 min").
 Arabic has a pattern of its own, run only over a text that holds Arabic
 letters (one `memchr` scan decides):
 
-- an amount in Western or Arabic-Indic digits (`٫` as the decimal mark), or
-  a number word up to ninety-nine ("خمس", "خمس عشرة", "خمس وأربعون");
+- an amount in digits of any script, a space or a hyphen after it, or a
+  number word up to ninety-nine ("خمس", "خمس عشرة", "خمس وأربعون");
 - a unit in its singular, plural or dual form; a dual counts two by itself
-  ("ساعتين"), while a lone singular counts one only with "واحد" after it,
+  ("ساعتين") and a number before it as a plural does ("2 ساعتين"), while a lone singular counts one only with "واحد" after it,
   a fraction after it ("ساعة ونصف", "ساعة إلا ربع"), or another amount
   joined to it ("ساعة و20 دقيقة"), since "يوم" and "ساعة" alone are as often
   "the day of" and "the clock";
@@ -730,10 +745,11 @@ letters (one `memchr` scan decides):
 A length keeps its clock part in milliseconds and its calendar part in
 hundredths of a month, since a month and a year have no fixed length. Each
 duration also keeps its place, the step it is written to: its smallest unit
-("6 minutes" to the minute), the decimal place its digits stop at ("1.5
+("6 minutes" to the minute), the decimal place its digits stop at ("1.2
 hours" to the tenth of an hour), or the fraction added to it ("1½ hours",
-"an hour and a half" to the half hour; "half an hour" to the half hour, "a
-fortnight" to the week).
+"1.5 hours", "an hour and a half" to the half hour; "2.25 hours" to the
+quarter; "half an hour" to the half hour, "a fortnight" to the week), since
+"1.5" is "1½" spelled in digits.
 
 `ungrounded_durations` grounds a reply's duration with a printed length that
 rounds to it at its place: within half a step ("6 minutes" takes 5:31 to
@@ -745,10 +761,12 @@ printed range only when both bounds round to it. Only the component of the
 step rounds: the other one, clock or calendar, must match. The corpus
 prints a length in any of these forms:
 
-- written out, or as one part of a longer duration, a range as its two
-  bounds (its upper part is not also read alone), and a comma before three
-  digits as a decimal comma too ("1,250 secondes" is 1.25 seconds as well as
-  1,250);
+- written out, a range as its two bounds (its upper part is not also read
+  alone), a lone dot or comma before three digits both ways ("1,250
+  secondes" is 1.25 seconds as well as 1,250), and each part of a duration
+  a comma or a word joins on its own too, since "1 hour, 30 minutes, 15
+  minutes" may be a list; a part only spaces or hyphens join is one length
+  with its neighbour ("1 hour 30 minutes" does not print "30 minutes");
 - as ISO 8601 (`PT1H30M`);
 - as a clock reading (`1:30:00`; `12:30` reads both as hours and minutes and
   as minutes and seconds);
@@ -758,12 +776,24 @@ prints a length in any of these forms:
 
 A clock reading right after a date (`2026-10-09 14:30`) is a time of day,
 not a length. Rates ("once a day"), dimensions ("3D") and a bare `m`, as
-often a metre or a million, are not durations. A number glued to a
-one-letter symbol ("30s", "24h", "3d") may be a plural ("the 90s"), a time
-of day ("15h") or a size, so it grounds a reply's duration but is never
-reported itself; spaced from it ("24 h") it is a unit symbol and is held.
-`Duration::stated` says which readings a reply is held to. A duration that
-starts inside one of the reply's links is never reported either.
+often a metre or a million, are not durations, nor is a spaced "y", the
+Spanish "and" ("entre 1 y 2 horas"). A number before a one-letter symbol
+("30s", "24h", "3d", "24 h") may be a plural ("the 90s"), a time of day
+("15h", "à 15 h") or a size, so it grounds a reply's duration but is never
+reported itself. `Duration::stated` says which readings a reply is held to.
+A part inside one of the reply's links is the link's: it is never reported
+and joins no part after it, and a range whose low is inside a link is the
+part after the link alone.
+
+## Pages
+
+`ungrounded_on_page(text, corpus, said)` is the figure, ratio and opaque-id
+checks run over a page's text, their findings in that order: a page made
+for a person is held to what was read, its links, dates and wording left to
+its design. `PageHolds` keeps, per file name, the claims a run was told
+about and how many times the file was held back; `hold` holds a page back
+when one of its claims is new for that file and the file was held back
+fewer than `HOLDS_PER_PAGE` (three) times, and records the claims.
 
 ## The Node binding
 

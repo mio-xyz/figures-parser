@@ -52,6 +52,7 @@ mod email;
 pub mod id;
 mod kind;
 pub mod number;
+mod page;
 mod text;
 mod url;
 pub mod utf16;
@@ -66,6 +67,7 @@ pub use number::{
     Amounts, Figure, MispairedFigure, Number, Reading, Sign, extract_numbers, mispaired_per_unit,
     numbers, prose_arithmetic, shares_amount, states_figure, ungrounded_figures, ungrounded_ratios,
 };
+pub use page::{HOLDS_PER_PAGE, PageHolds, ungrounded_on_page};
 pub use url::{
     LinkFindings, Mended, Url, fabricated_urls, link_findings, mended_links, ungrounded_urls,
     url_printed_in, urls,

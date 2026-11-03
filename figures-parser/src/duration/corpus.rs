@@ -10,7 +10,7 @@ use regex::Regex;
 use rustc_hash::FxHashMap;
 
 use super::grammar::{Amount, Part, Unit, parts};
-use super::{Length, Want, join};
+use super::{Duration, Length, Want, join};
 use crate::text::{compile, is_ascii_word_byte, is_iso_date, run_end, run_start, same_word};
 
 /// An ISO 8601 duration (`P1Y2M`, `PT1H30M`, `P3W`).
@@ -232,6 +232,52 @@ fn at_separator(text: &str, at: usize) -> [Option<Length>; 2] {
     field_at(text, at).map_or([None, None], |(key, number)| field_lengths(key, number))
 }
 
+/// Whether the part at `index` of `parts`, inside `duration`, is a length a
+/// corpus printed on its own: not a range's upper bound, which bounds the
+/// range, and not a part that only spaces and hyphens join to the part
+/// before or after it ("5 minutes 40 seconds", "5-minute-50-second"), which
+/// is one length with it. Parts a comma or a word joins may be a list ("1
+/// hour, 30 minutes, 15 minutes"), so each also stands alone.
+fn stands_alone(text: &str, duration: &Duration<'_>, parts: &[Part], index: usize) -> bool {
+    let Some(part) = parts.get(index) else {
+        return true;
+    };
+    let inside = |p: &Part| duration.span.start <= p.span.start && p.span.end <= duration.span.end;
+    let tight = |a: &Part, b: &Part| {
+        text.get(a.span.end..b.span.start)
+            .is_some_and(|gap| gap.chars().all(is_tight_joiner))
+    };
+    let previous = index
+        .checked_sub(1)
+        .and_then(|i| parts.get(i))
+        .filter(|p| inside(p));
+    if let Some(from) = duration.from
+        && previous.is_none()
+    {
+        // The first part of a range is its upper bound, unless the range is
+        // written high to low ("step 3 - 2 minutes"), where it is the low.
+        let rest = parts
+            .get(index.saturating_add(1)..)
+            .unwrap_or_default()
+            .iter()
+            .take_while(|p| inside(p))
+            .fold(Length::default(), |sum, p| {
+                sum.checked_add(p.length).unwrap_or(sum)
+            });
+        if Some(from) != part.length.checked_add(rest) {
+            return false;
+        }
+    }
+    let next = parts.get(index.saturating_add(1)).filter(|p| inside(p));
+    !previous.is_some_and(|p| tight(p, part)) && !next.is_some_and(|n| tight(part, n))
+}
+
+/// Whether `c` joins two parts into one length beyond doubt: a space or a
+/// hyphen.
+const fn is_tight_joiner(c: char) -> bool {
+    matches!(c, ' ' | '\t' | '\u{a0}' | '\u{202f}' | '\u{2009}' | '-')
+}
+
 /// Marks each duration in `wanted` that a length `text` prints grounds, a
 /// range printed as its two bounds and each part of a longer duration as a
 /// length of its own, a part's thousands comma read as a decimal one too. The written durations are read first,
@@ -244,10 +290,9 @@ pub fn mark(text: &str, wanted: &mut [Want]) {
     let found = parts(text);
     let joined = join(text, &found);
     let single = |l: Length| (l, l);
-    // A range's upper part is a bound, not a length the corpus printed. Parts
-    // and durations both run in order, so one cursor finds each part's.
+    // Parts and durations both run in order, so one cursor finds each part's.
     let mut cursor = 0;
-    let mut in_range = |p: &&Part| {
+    let mut alone = |(index, p): &(usize, &Part)| {
         while joined
             .get(cursor)
             .is_some_and(|d| d.span.end <= p.span.start)
@@ -256,12 +301,14 @@ pub fn mark(text: &str, wanted: &mut [Want]) {
         }
         joined
             .get(cursor)
-            .is_some_and(|d| d.from.is_some() && d.span.start <= p.span.start)
+            .filter(|d| d.span.start <= p.span.start)
+            .is_none_or(|d| stands_alone(text, d, &found, *index))
     };
     let readings = found
         .iter()
-        .filter(|p| !in_range(p))
-        .flat_map(|p| [Some(p.length), p.loose])
+        .enumerate()
+        .filter(|p| alone(p))
+        .flat_map(|(_, p)| [Some(p.length), p.loose.map(|(length, _)| length)])
         .flatten()
         .map(single)
         .chain(

@@ -145,3 +145,12 @@ this library reads it as written. Each case is pinned by a test in
 - **A two-digit year before a Chinese date is this century's.** chrono keeps
   "03 11月5日" in the year 3; this library reads 2003, as chrono reads a
   two-digit year everywhere else.
+
+The duration check replaces a TypeScript original that reads a second, a
+minute and an hour after digits, and was fuzzed against it on 75,000
+generated replies and corpora. Every difference that remained is a
+deliberate one, listed under [known gaps](known-gaps.md#where-this-library-reads-durations-more-strictly-than-the-hosts-typescript):
+days to years, words, phrases and glued runs are read too; a decimal is held
+to its place; "and" joins parts; a full stop, a line break, a fraction slash
+and a longer word end what the original reads on through; a range written
+high to low is read as a span.
