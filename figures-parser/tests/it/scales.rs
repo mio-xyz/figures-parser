@@ -106,7 +106,7 @@ fn carries_the_sign_and_the_mark_through_the_word() {
         .unwrap_or_else(|| panic!("no reading"));
     assert_eq!((n.sign, n.full_text), (Sign::Minus, "-$1.2M"));
     assert_eq!(
-        ungrounded_figures("It fell -$1.2M.", "delta: 1234567"),
+        ungrounded_figures("It fell -$1.2M.", "delta: +1234567"),
         ["-$1.2M"]
     );
     assert_eq!(
@@ -141,16 +141,41 @@ fn grounds_an_exact_figure_by_a_scaled_corpus_value_of_the_same_value() {
 }
 
 #[test]
-fn grounds_a_scaled_figure_that_fits_two_readings_by_either() {
-    let reply = "Debt of €12,500 million.";
-    for corpus in ["12500000000", "12500000"] {
+fn reads_a_scaled_run_that_groups_as_a_decimal_where_the_word_writes_that_mark() {
+    // A comma decimal before a word of a language that writes one, or before
+    // a currency after the scale, as the continental locales write it; a
+    // point before an English word.
+    for (reply, corpus) in [
+        ("Долг 8,566 млрд.", "8566000000"),
+        ("Budget 1,250 M€.", "1250000"),
+        ("Budget 1,250 M€.", "1250000000"),
+        ("Revenue of 1.250 million.", "1250000"),
+        ("Revenue of 1.250 million.", "1250000000"),
+        ("Pendapatan 12,500 rb.", "12500"),
+    ] {
         assert_eq!(
             ungrounded_figures(reply, corpus),
             Vec::<String>::new(),
-            "{corpus}"
+            "{reply} | {corpus}"
         );
     }
-    assert_eq!(ungrounded_figures(reply, "12600000"), ["12,500 million"]);
+    // Elsewhere the run is thousands, as "$206,788" is.
+    for (reply, corpus) in [
+        ("Debt of €12,500 million.", "12500000"),
+        ("Debt of £1,250 million.", "1250000"),
+        ("Budget 1.250 M€.", "1250000"),
+        ("Umsatz 1.250 Mio. Euro.", "1250000"),
+    ] {
+        assert_eq!(
+            ungrounded_figures(reply, corpus).len(),
+            1,
+            "{reply} | {corpus}"
+        );
+    }
+    assert_eq!(
+        ungrounded_figures("Debt of €12,500 million.", "12500000000"),
+        Vec::<String>::new()
+    );
 }
 
 #[test]

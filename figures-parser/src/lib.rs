@@ -10,7 +10,7 @@
 //!
 //! | Kind | Reader | Comparison |
 //! |---|---|---|
-//! | Numbers | [`numbers`], [`extract_numbers`] | [`ungrounded_figures`], [`ungrounded_ratios`], [`prose_arithmetic`], [`mispaired_per_unit`], [`Amounts`], [`states_figure`] |
+//! | Numbers | [`numbers`], [`extract_numbers`], [`stated_figures`], [`printed_figures`], [`numeric_tokens`], [`without_links`] | [`ungrounded_figures`], [`ungrounded_ratios`], [`prose_arithmetic`], [`mispaired_per_unit`], [`Amounts`], [`states_figure`], [`sheet_findings`] |
 //! | Links | [`urls`], [`placeholder_targets`], [`unopened_links`] | [`ungrounded_urls`], [`link_findings`], [`fabricated_urls`], [`built_from_corpus`], [`mended_links`], [`undotted_slack_link`], [`url_printed_in`] |
 //! | Weekdays beside dates | | [`misdated_weekdays`] |
 //! | Rows beside a date window | | [`rows_outside_window`] |
@@ -71,8 +71,11 @@ pub use jiff::civil::Date;
 pub use kind::{Kind, UnknownKind};
 pub use memory::{MemoryGrounding, grounding_tokens, memory_grounding};
 pub use number::{
-    Amounts, Figure, MispairedFigure, Number, Reading, Sign, extract_numbers, mispaired_per_unit,
-    numbers, prose_arithmetic, shares_amount, states_figure, ungrounded_figures, ungrounded_ratios,
+    Amounts, Figure, ListedFigure, MispairedFigure, Number, NumericToken, PrintedFigures, Reading,
+    SheetFindings, SheetRun, Sign, StatedFigure, UncheckedFigures, extract_numbers,
+    mispaired_per_unit, mispaired_per_unit_with, numbers, numeric_tokens, printed_figures,
+    prose_arithmetic, shares_amount, sheet_findings, stated_figures, states_figure,
+    ungrounded_figures, ungrounded_ratios, ungrounded_ratios_with, without_links,
 };
 pub use page::{HOLDS_PER_PAGE, PageHolds, ungrounded_on_page};
 

@@ -89,7 +89,7 @@ fn a_run_signs_its_whole_readings_and_its_first_group_only() {
 #[test]
 fn holds_a_signed_figure_to_its_sign() {
     let reply = "Revenue moved by -12,500 this week.";
-    assert_eq!(ungrounded_figures(reply, "delta: 12500"), ["-12,500"]);
+    assert_eq!(ungrounded_figures(reply, "delta: +12500"), ["-12,500"]);
     assert_eq!(
         ungrounded_figures(reply, "delta: -12500"),
         Vec::<String>::new()
@@ -111,9 +111,26 @@ fn holds_a_signed_figure_to_its_sign() {
         Vec::<String>::new()
     );
     assert_eq!(
-        ungrounded_figures("It moved by −1.17853.", "rate 1.17853"),
+        ungrounded_figures("It moved by −1.17853.", "rate +1.17853"),
         ["−1.17853"]
     );
+}
+
+#[test]
+fn grounds_a_signed_figure_by_the_same_value_printed_unsigned() {
+    // A source puts the sign in words as often as in digits.
+    for (reply, corpus) in [
+        ("Revenue moved by -12,500 this week.", "fell by 12500"),
+        ("Net cash -$2,000 after the fee.", "fee: 2,000"),
+        ("A gain of +12,500.", "rose 12,500"),
+        ("From 12,500 to -12,500.", "delta: 12500"),
+    ] {
+        assert_eq!(
+            ungrounded_figures(reply, corpus),
+            Vec::<String>::new(),
+            "{reply} | {corpus}"
+        );
+    }
 }
 
 #[test]
@@ -127,7 +144,7 @@ fn takes_an_unsigned_or_parenthesized_figure_from_either_sign() {
         Vec::<String>::new()
     );
     assert_eq!(
-        ungrounded_figures("From 12,500 to -12,500.", "delta: 12500"),
+        ungrounded_figures("From 12,500 to -12,500.", "delta: +12500"),
         ["-12,500"]
     );
 }

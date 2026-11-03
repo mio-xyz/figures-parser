@@ -118,22 +118,29 @@ What to expect:
   printed 3,225, any value that rounds to it at two significant digits. A
   figure of one significant digit is read at two as well, so "$3,000" takes
   2,950 to 3,049 and not 3,148. "$3,250" states a value and is matched whole.
-- **Signs count.** "-12,500" needs a negative value in the corpus. An
-  unsigned figure takes either sign, since prose often says "fell by 12,500".
+- **Signs count against a sign.** "-12,500" is not grounded by a printed
+  "+12,500", nor "+12,500" by "-12,500". An unsigned value grounds either,
+  since a source says "fell by 12,500" as often as it prints "-12500".
 - **Rounded figures match what they round.** "$1.2 million" and "twelve
   thousand five hundred" are grounded by any value that rounds to them, such
-  as 1,234,567 and 12,487. A figure behind an approximation mark ("~12,500",
+  as 1,234,567 and 12,487; a scaled figure rounds at the last digit written,
+  so "34,0M" is 33,950,000 to 34,049,999. A figure behind an approximation mark ("~12,500",
   "≈ $12,500", "~3M") is grounded within a whole unit of its last nonzero
   digit, 12,400 to 12,600, since "~" is written as often before a figure cut
   as before one rounded.
 - **A corpus's scale words are read widely.** "38.08 M", "2,5 Mio", "12 k
   rows" and "43Kmembers" in a result print values in units, and ground
   "$38M", "€2,5 Mio.", "$12,000" and "43K"; the digits keep their own reading
-  too. In a reply, a lone letter that also names a unit needs a currency or
-  must be glued on: "3.2M" and "7B" scale, "5m" (minutes) and "500 m" do
-  not.
-- **Ambiguous notations match either reading.** "1.250" is 1,250 in Berlin
-  and 1.25 in Boston; either value in the corpus grounds it.
+  too, and a name reads at every power a locale gives it ("billion" is also
+  10¹² in French). In a reply, a lone letter that also names a unit needs a
+  currency or must be glued on: "3.2M" and "7B" scale, "5m" (minutes) and
+  "500 m" do not; an abbreviation that is also a word or a unit ("bin",
+  "mm", "mi") needs its currency.
+- **Ambiguous notations.** "1.250" is 1,250 in Berlin and 1.25 in Boston;
+  either value in the corpus grounds a figure. A reply's "$1,250" states
+  1,250, and before a scale word it is a decimal too where the word's
+  language writes that mark: "8,566 млрд", "1,250 M€" (a currency after the
+  scale is continental writing) and "1.250 million".
 - **A space groups only thousands.** "12 500" is one figure; "1,250,000
   980,000", as a script prints two values, is two.
 
@@ -190,6 +197,10 @@ assert_eq!(ungrounded_ratios(reply, corpus, ""), ["30%"]);
 // The person's own numbers give the share.
 let said = "the funnel: 1000 trials, 420 activated";
 assert!(ungrounded_ratios("58% never activate.", "", said).is_empty());
+
+// Built only when a ratio is left that the corpus does not carry.
+let found = figures_parser::ungrounded_ratios_with("58% never activate.", "", || said);
+assert!(found.is_empty());
 ```
 
 What to expect:
@@ -205,9 +216,9 @@ What to expect:
   percent"), or plain arithmetic over two of their numbers: a quotient or a
   change, as is or in percent.
 - **The size is compared.** "fell 30%" is grounded by "-29.9%".
-- **None and all pass.** 0% and 100% are read off a count, with no division.
 - **One ratio is named once** however its mark is written ("11 %", "11%",
-  "%11").
+  "%11"). A sign one space after a figure is that figure's: "84 % 8,322"
+  states 84%, "2027 %95" states %95.
 - **A size, a hex literal and a product are no multiples:** "1920x1080",
   "0x1F", "3 x 4".
 
@@ -274,6 +285,30 @@ What to expect:
   digits ("$100") is one some amount over some count lands on by chance.
 - **Two per-unit amounts side by side are two**, not a total and its
   quotient.
+- **The corpus may come late.** `mispaired_per_unit_with(reply, || corpus)`
+  builds it only once a clause holds a candidate.
+
+### Readers for other checks
+
+`stated_figures(clause)` gives the figures a reply's clause states, with
+their values, places and currency marks; `printed_figures(line)` every value
+a printed line holds, and apart its amounts; `numeric_tokens(text, loose)`
+each numeric token of a result with its values; `without_links(text)` the
+text with its links blanked. `sheet_findings(reply, runs)` walks a turn's
+script runs for the worksheet checks: the rows a run listed beside a total
+that the reply leaves unstated, and the amounts it took from a worksheet no
+check listed.
+
+```rust
+use figures_parser::{ListedFigure, SheetRun, sheet_findings, stated_figures};
+
+let read: Vec<_> = stated_figures("$74.74 spend, 2 leads").iter().map(|f| f.value).collect();
+assert_eq!(read, [74.74, 2.0]);
+
+let listed = [ListedFigure { figure: "19,851".into(), name: "row 6 TOTAL".into() }];
+let run = SheetRun { stdout: "total | 19,850", lists_rows: true, listed: &listed, ..SheetRun::default() };
+assert_eq!(sheet_findings("2027 holds $19,850.", &[run]).unstated, listed);
+```
 
 ### Links
 
@@ -574,9 +609,11 @@ const fp = require("@mio-xyz/figures-parser");
 
 fp.ungroundedFigures(reply, corpus);             // ["48,200"]
 fp.amountsSharedWith(reply, [print1, print2]);   // [["19,850"], []]; also sharesAmount, statesFigure
-fp.ungroundedRatios(reply, corpus, said);        // ["30%"]
+fp.ungroundedRatios(reply, corpus, said);        // ["30%"]; said may be () => string
 fp.proseArithmetic(reply, message, corpus);      // ["61,300"]
-fp.mispairedPerUnit(reply, corpus);              // [{ perUnit, stated, printed }]
+fp.mispairedPerUnit(reply, corpus);              // [{ perUnit, stated, printed }]; corpus may be () => string
+fp.sheetFindings(reply, runs);                   // { listed, unstated, unchecked }
+fp.statedFigures(clause);                        // also printedFigures, numericTokens, withoutLinks
 fp.ungroundedUrls(reply, corpus, prompt, hosts); // also fabricatedUrls, linkFindings
 fp.mendedLinks(reply, corpus); // { text, mends }; also undottedSlackLink, builtFromCorpus
 fp.unopenedLinks(message, opened);               // also placeholderTargets, urlPrintedIn

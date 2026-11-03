@@ -135,6 +135,27 @@ struct LineState {
 /// ```
 #[must_use]
 pub fn mispaired_per_unit(reply: &str, corpus: &str) -> Vec<MispairedFigure> {
+    mispaired_per_unit_with(reply, || corpus)
+}
+
+/// [`mispaired_per_unit`] with the corpus given by `corpus`, called only once
+/// a clause of the reply holds a candidate per-unit amount.
+///
+/// # Examples
+///
+/// ```
+/// let mut read = false;
+/// let found = figures_parser::mispaired_per_unit_with("Spend held at $74.74.", || {
+///     read = true;
+///     "LT: $91.65 / 2 leads / CPL $45.83"
+/// });
+/// assert!(found.is_empty() && !read);
+/// ```
+#[must_use]
+pub fn mispaired_per_unit_with<S: AsRef<str>>(
+    reply: &str,
+    corpus: impl FnOnce() -> S,
+) -> Vec<MispairedFigure> {
     let clauses = read_clauses(reply);
     if clauses.is_empty() {
         return Vec::new();
@@ -167,7 +188,7 @@ pub fn mispaired_per_unit(reply: &str, corpus: &str) -> Vec<MispairedFigure> {
             }
         }
     }
-    answer(&clauses, &mut queries, corpus);
+    answer(&clauses, &mut queries, corpus().as_ref());
     let found = |clause: usize, amount: usize, count: usize, total: Option<usize>| {
         queries
             .iter()
@@ -216,9 +237,10 @@ fn mispaired(
 ) -> MispairedFigure {
     let mark = per_unit.mark;
     let worked = amount(mark, total.value / count.value, per_unit.places.max(2));
+    let gap = gap_after(mark);
     MispairedFigure {
-        per_unit: format!("{mark}{}", per_unit.text),
-        stated: format!("{mark}{} / {} = {worked}", total.text, count.text),
+        per_unit: format!("{mark}{gap}{}", per_unit.text),
+        stated: format!("{mark}{gap}{} / {} = {worked}", total.text, count.text),
         printed: format!(
             "{} / {}",
             amount(mark, source, total.places.max(2)),
@@ -345,7 +367,7 @@ fn stated_in<'r>(
 /// The value of `integer.fraction`, both ASCII digits, parsed as written so
 /// it rounds as the host's `Number` does. A figure that fits a small buffer,
 /// as nearly every one does, is parsed without allocating.
-fn value_of(integer: &str, fraction: Option<&str>) -> Option<f64> {
+pub(super) fn value_of(integer: &str, fraction: Option<&str>) -> Option<f64> {
     let Some(fraction) = fraction else {
         return integer.parse().ok().filter(|v: &f64| v.is_finite());
     };
@@ -560,6 +582,16 @@ fn skip_while(
     end
 }
 
+/// The space a currency code needs before the figure it marks ("USD 45.83");
+/// a sign is written against it ("$45.83").
+fn gap_after(mark: &str) -> &'static str {
+    if mark.ends_with(|c: char| c.is_ascii_alphabetic()) {
+        " "
+    } else {
+        ""
+    }
+}
+
 /// `value` as English prints an amount, behind `mark`: thousands grouped by
 /// commas, at `places` decimal places, a half rounded away from zero on the
 /// shortest decimal that reads back as the value ("1.005" is "1.01").
@@ -589,6 +621,7 @@ fn amount(mark: &str, value: f64, places: usize) -> String {
     }
     let integer_len = kept.saturating_sub(places);
     let mut out = String::from(mark);
+    out.push_str(gap_after(mark));
     for (i, &d) in digits.iter().enumerate() {
         if i == integer_len {
             out.push('.');
@@ -596,6 +629,57 @@ fn amount(mark: &str, value: f64, places: usize) -> String {
             out.push(',');
         }
         out.push(char::from(d));
+    }
+    out
+}
+
+/// A figure as a reply states it, for the checks that read figures beside
+/// their neighbours.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StatedFigure<'r> {
+    /// As written, without its currency mark ("45.83").
+    pub text: &'r str,
+    /// Its value.
+    pub value: f64,
+    /// The decimal places written, which set how far an exact value may round
+    /// to it.
+    pub places: usize,
+    /// The currency mark written before it ("$", "US$", "USD"), or "" for
+    /// none.
+    pub mark: &'r str,
+}
+
+/// The figures `text`, a clause of a reply, states, in order.
+///
+/// Its links, ratios and figures with a scale word ("$1.2M") are left out, a
+/// run that groups reads as thousands ("1,250" is 1250), and a run that fits
+/// neither thousands nor a decimal as the figures it sets side by side.
+///
+/// # Examples
+///
+/// ```
+/// let stated = figures_parser::stated_figures("$74.74 spend, 2 leads, 12% CTR, $1.2M budget");
+/// let read: Vec<_> = stated.iter().map(|f| (f.mark, f.text, f.places)).collect();
+/// assert_eq!(read, [("$", "74.74", 2), ("", "2", 0)]);
+/// ```
+#[must_use]
+pub fn stated_figures(text: &str) -> Vec<StatedFigure<'_>> {
+    let mut skip = link_spans(text);
+    skip.extend(ratios(text).map(|ratio| ratio.span));
+    let mut scratch = Scratch::default();
+    let mut out = Vec::new();
+    for token in tokens(text) {
+        if token.magnitude > 0 || skipped(&skip, token.start) {
+            continue;
+        }
+        stated_in(text, &token, &mut scratch, |figure| {
+            out.push(StatedFigure {
+                text: figure.text,
+                value: figure.value,
+                places: figure.places,
+                mark: figure.mark,
+            });
+        });
     }
     out
 }

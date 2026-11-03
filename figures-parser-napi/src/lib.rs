@@ -12,7 +12,7 @@ use std::borrow::Cow;
 
 use figures_parser::utf16::{Utf16Cursor, units};
 use figures_parser::{Kind, Length, durations, emails, identifiers, numbers, urls};
-use napi::bindgen_prelude::Either5;
+use napi::bindgen_prelude::{Either, Either5, Function};
 use napi_derive::napi;
 
 /// A number reading's comparable value.
@@ -39,6 +39,10 @@ pub struct NumberValue {
     /// Stated as rounded: an approximation mark before it ("~12,500") or a
     /// scale word after its digits ("1.2 million").
     pub approximate: bool,
+    /// The decimal reading of a run that also reads as thousands ("1,250"
+    /// as 1.25): grounds, and is stated only before a scale word whose
+    /// language writes that decimal mark.
+    pub ambiguous: bool,
 }
 
 /// One reading of one number, with where it sits in the input.
@@ -226,6 +230,7 @@ pub fn extract(
                         derived: n.derived,
                         sign: n.sign.name().to_owned(),
                         approximate: n.approximate,
+                        ambiguous: n.ambiguous,
                     },
                 })
             })),
@@ -294,10 +299,41 @@ pub fn ungrounded_figures(reply: String, corpus: String) -> Vec<String> {
 /// No printed ratio or decimal rounds to one at the places the reply wrote,
 /// and no number the person stated, nor plain arithmetic over two of them,
 /// gives it.
+///
+/// `said` may be a function returning them, called only when a ratio is left
+/// that the corpus does not carry.
+///
+/// # Errors
+///
+/// What `said` throws.
 #[napi(catch_unwind)]
-#[must_use]
-pub fn ungrounded_ratios(reply: String, corpus: String, said: Option<String>) -> Vec<String> {
-    figures_parser::ungrounded_ratios(&reply, &corpus, said.as_deref().unwrap_or_default())
+pub fn ungrounded_ratios(
+    reply: String,
+    corpus: String,
+    #[napi(ts_arg_type = "string | (() => string)")] said: Option<
+        Either<String, Function<(), String>>,
+    >,
+) -> napi::Result<Vec<String>> {
+    let mut thrown = None;
+    let found =
+        figures_parser::ungrounded_ratios_with(&reply, &corpus, || called(said, &mut thrown));
+    thrown.map_or(Ok(found), Err)
+}
+
+/// The text `given` holds, or the one it returns when it is a function, an
+/// error it throws kept in `thrown`.
+fn called(
+    given: Option<Either<String, Function<(), String>>>,
+    thrown: &mut Option<napi::Error>,
+) -> String {
+    match given {
+        None => String::new(),
+        Some(Either::A(text)) => text,
+        Some(Either::B(function)) => function.call(()).unwrap_or_else(|e| {
+            *thrown = Some(e);
+            String::new()
+        }),
+    }
 }
 
 /// Whether `reply` states an amount that `text` carries: a figure the gate
@@ -356,19 +392,218 @@ pub struct MispairedFigure {
 }
 
 /// Per-unit amounts in `reply` stated beside a total and a count they are
-/// not the quotient of, when a line of `corpus` shows them as another
-/// amount over that count.
+/// not the quotient of.
+///
+/// A line of `corpus` shows each as another amount over that count.
+/// `corpus` may be a function returning it, called only once a clause holds
+/// a candidate.
+///
+/// # Errors
+///
+/// What `corpus` throws.
+#[napi(catch_unwind)]
+pub fn mispaired_per_unit(
+    reply: String,
+    #[napi(ts_arg_type = "string | (() => string)")] corpus: Either<String, Function<(), String>>,
+) -> napi::Result<Vec<MispairedFigure>> {
+    let mut thrown = None;
+    let found =
+        figures_parser::mispaired_per_unit_with(&reply, || called(Some(corpus), &mut thrown));
+    thrown.map_or_else(
+        || {
+            Ok(found
+                .into_iter()
+                .map(|m| MispairedFigure {
+                    per_unit: m.per_unit,
+                    stated: m.stated,
+                    printed: m.printed,
+                })
+                .collect())
+        },
+        Err,
+    )
+}
+
+/// A figure as a reply's clause states it.
+#[napi(object)]
+pub struct StatedFigure {
+    /// As written, without its currency mark ("45.83").
+    pub text: String,
+    /// Its value.
+    pub value: f64,
+    /// The decimal places written.
+    pub places: u32,
+    /// The currency mark written before it ("$", "USD"), or "" for none.
+    pub mark: String,
+}
+
+/// The figures `text`, a clause of a reply, states, in order: its links,
+/// ratios and scaled figures left out, a run that groups read as thousands.
 #[napi(catch_unwind)]
 #[must_use]
-pub fn mispaired_per_unit(reply: String, corpus: String) -> Vec<MispairedFigure> {
-    figures_parser::mispaired_per_unit(&reply, &corpus)
+pub fn stated_figures(text: String) -> Vec<StatedFigure> {
+    figures_parser::stated_figures(&text)
         .into_iter()
-        .map(|m| MispairedFigure {
-            per_unit: m.per_unit,
-            stated: m.stated,
-            printed: m.printed,
+        .map(|f| StatedFigure {
+            text: f.text.to_owned(),
+            value: f.value,
+            places: u32::try_from(f.places).unwrap_or(u32::MAX),
+            mark: f.mark.to_owned(),
         })
         .collect()
+}
+
+/// The values a printed line holds, in each reading, and apart the amounts.
+#[napi(object)]
+pub struct PrintedFigures {
+    /// Every value, in order.
+    pub values: Vec<f64>,
+    /// The values behind a currency mark or with a decimal part.
+    pub amounts: Vec<f64>,
+}
+
+/// The figures `text`, a printed line, holds, in each reading ("1,250" is
+/// 1250 and 1.25), a letter allowed after one and no scale word read.
+#[napi(catch_unwind)]
+#[must_use]
+pub fn printed_figures(text: String) -> PrintedFigures {
+    let printed = figures_parser::printed_figures(&text);
+    PrintedFigures {
+        values: printed.values,
+        amounts: printed.amounts,
+    }
+}
+
+/// One numeric token as a result prints it.
+#[napi(object)]
+pub struct NumericToken {
+    /// UTF-16 offset of its first digit.
+    pub start: u32,
+    /// One past its last UTF-16 unit.
+    pub end: u32,
+    /// The values it reads as.
+    pub values: Vec<f64>,
+}
+
+/// The numeric tokens of `text` as a result prints them, each with the
+/// values it reads as; with `loose`, the decimal reading of a run that also
+/// groups too.
+#[napi(catch_unwind)]
+#[must_use]
+pub fn numeric_tokens(text: String, loose: Option<bool>) -> Vec<NumericToken> {
+    let mut cursor = Utf16Cursor::new(&text);
+    figures_parser::numeric_tokens(&text, loose.unwrap_or(false))
+        .into_iter()
+        .map(|t| {
+            let written = text.get(t.span.clone()).unwrap_or_default();
+            let (start, end) = place(&mut cursor, t.span.start, written);
+            NumericToken {
+                start,
+                end,
+                values: t.values,
+            }
+        })
+        .collect()
+}
+
+/// `text` with each link it holds replaced by a space.
+#[napi(catch_unwind)]
+#[must_use]
+pub fn without_links(text: String) -> String {
+    figures_parser::without_links(&text)
+}
+
+/// A row a script listed with the amount the reply states beside its total.
+#[napi(object)]
+pub struct ListedFigure {
+    /// The amount as the script printed it ("19,851").
+    pub figure: String,
+    /// The script's line for the row.
+    pub name: String,
+}
+
+/// What one script run did with a worksheet.
+#[napi(object)]
+pub struct SheetRun {
+    /// What the run printed.
+    pub stdout: String,
+    /// It ran a check whose print lists the rows its figures rest on.
+    pub lists_rows: Option<bool>,
+    /// It took a ledger frame from a worksheet.
+    pub frames: Option<bool>,
+    /// It read a worksheet's grid itself.
+    pub grid_read: Option<bool>,
+    /// The rows it listed with their amounts.
+    pub listed: Option<Vec<ListedFigure>>,
+}
+
+/// The amounts a reply took from a worksheet without the checks.
+#[napi(object)]
+pub struct UncheckedFigures {
+    /// The amounts as the reply writes them.
+    pub figures: Vec<String>,
+    /// Whether a run took a ledger frame and summed it by hand.
+    pub framed: bool,
+}
+
+/// What a reply owes the runs it drew a worksheet's amounts from.
+#[napi(object)]
+pub struct SheetFindings {
+    /// Every row listed by a run the reply draws on.
+    pub listed: Vec<ListedFigure>,
+    /// The listed rows whose amount the reply leaves unstated.
+    pub unstated: Vec<ListedFigure>,
+    /// The amounts taken from a worksheet that no check listed.
+    pub unchecked: UncheckedFigures,
+}
+
+/// What `reply` owes `runs`, the turn's script runs in order: the rows they
+/// listed, those the reply leaves unstated, and the amounts it took from a
+/// worksheet no check listed.
+#[napi(catch_unwind)]
+#[must_use]
+pub fn sheet_findings(reply: String, runs: Vec<SheetRun>) -> SheetFindings {
+    let listed: Vec<Vec<figures_parser::ListedFigure>> = runs
+        .iter()
+        .map(|run| {
+            run.listed
+                .iter()
+                .flatten()
+                .map(|l| figures_parser::ListedFigure {
+                    figure: l.figure.clone(),
+                    name: l.name.clone(),
+                })
+                .collect()
+        })
+        .collect();
+    let read: Vec<figures_parser::SheetRun<'_>> = runs
+        .iter()
+        .zip(&listed)
+        .map(|(run, listed)| figures_parser::SheetRun {
+            stdout: &run.stdout,
+            lists_rows: run.lists_rows.unwrap_or(false),
+            frames: run.frames.unwrap_or(false),
+            grid_read: run.grid_read.unwrap_or(false),
+            listed,
+        })
+        .collect();
+    let found = figures_parser::sheet_findings(&reply, &read);
+    let rows = |rows: Vec<figures_parser::ListedFigure>| {
+        rows.into_iter()
+            .map(|l| ListedFigure {
+                figure: l.figure,
+                name: l.name,
+            })
+            .collect()
+    };
+    SheetFindings {
+        listed: rows(found.listed),
+        unstated: rows(found.unstated),
+        unchecked: UncheckedFigures {
+            figures: found.unchecked.figures,
+            framed: found.unchecked.framed,
+        },
+    }
 }
 
 /// A list the caller passed (hosts, links), as `&str`s; empty when absent.

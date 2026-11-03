@@ -9,13 +9,15 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use figures_parser::number::scan::{Scratch, tokens};
 use figures_parser::utf16::{Utf16Cursor, units};
 use figures_parser::{
-    Date, PageHolds, built_from_corpus, durations, emails, extract_numbers, fabricated_urls,
-    grounding_tokens, identifiers, link_findings, memory_claim, memory_grounding, mended_links,
-    misdated_weekdays, mispaired_per_unit, numbers, placeholder_targets, prose_arithmetic,
-    rows_outside_window, silent_signal, speaker_prefix, undotted_slack_link, ungrounded_durations,
-    ungrounded_emails, ungrounded_figures, ungrounded_identifiers, ungrounded_on_page,
-    ungrounded_ratios, ungrounded_urls, unopened_links, unprinted_ids, unseen_tokens,
-    url_printed_in, urls,
+    Amounts, Date, ListedFigure, PageHolds, SheetRun, built_from_corpus, durations, emails,
+    extract_numbers, fabricated_urls, grounding_tokens, identifiers, link_findings, memory_claim,
+    memory_grounding, mended_links, misdated_weekdays, mispaired_per_unit, mispaired_per_unit_with,
+    numbers, numeric_tokens, placeholder_targets, printed_figures, prose_arithmetic,
+    rows_outside_window, sheet_findings, silent_signal, speaker_prefix, stated_figures,
+    states_figure, undotted_slack_link, ungrounded_durations, ungrounded_emails,
+    ungrounded_figures, ungrounded_identifiers, ungrounded_on_page, ungrounded_ratios,
+    ungrounded_ratios_with, ungrounded_urls, unopened_links, unprinted_ids, unseen_tokens,
+    url_printed_in, urls, without_links,
 };
 
 /// Calls every entry point on the three texts, and returns a sum the
@@ -40,6 +42,11 @@ fn exercise(reply: &str, corpus: &str, prompt: &str) -> usize {
             + usize::from(built_from_corpus(text, reply, &["github.com"]))
             + grounding_tokens(text).len()
             + extract_numbers(text).len()
+            + stated_figures(text).len()
+            + printed_figures(text).values.len()
+            + numeric_tokens(text, false).len()
+            + numeric_tokens(text, true).len()
+            + without_links(text).len()
             + emails(text).len()
             + identifiers(text).len()
             + durations(text).len()
@@ -60,6 +67,32 @@ fn exercise(reply: &str, corpus: &str, prompt: &str) -> usize {
         + misdated_weekdays(corpus, today_for(corpus)).len()
         + rows_outside_window(reply, today_for(reply)).len()
         + rows_outside_window(corpus, today_for(corpus)).len();
+    let listed = [ListedFigure {
+        figure: prompt.to_owned(),
+        name: corpus.to_owned(),
+    }];
+    let runs = [
+        SheetRun {
+            stdout: corpus,
+            lists_rows: true,
+            listed: &listed,
+            ..SheetRun::default()
+        },
+        SheetRun {
+            stdout: prompt,
+            frames: true,
+            grid_read: true,
+            ..SheetRun::default()
+        },
+    ];
+    let amounts = Amounts::of(reply);
+    n += sheet_findings(reply, &runs).listed.len()
+        + amounts.shared_with(corpus).len()
+        + amounts.shared_with(prompt).len()
+        + usize::from(states_figure(corpus, reply))
+        + usize::from(states_figure(reply, prompt))
+        + ungrounded_ratios_with(reply, corpus, || prompt).len()
+        + mispaired_per_unit_with(prompt, || reply).len();
     n + ungrounded_figures(reply, corpus).len()
         + ungrounded_figures(corpus, reply).len()
         + ungrounded_ratios(reply, corpus, "").len()
@@ -485,6 +518,33 @@ const POOL: &[&str] = &[
     " tysiące",
     "हज़ार",
     "$74.74 spend, 2 leads, $45.83 CPL",
+    " rb",
+    "jt",
+    " tr",
+    " nt",
+    " lcr",
+    " tri",
+    " bi",
+    " bin",
+    " Mr",
+    " Md",
+    " mn",
+    "₺",
+    " L",
+    "l",
+    " n",
+    " nghìn tỷ",
+    " mille miliardi",
+    " d'euros",
+    " de ",
+    " billion",
+    " Tn",
+    " % ",
+    "0,850",
+    " 万",
+    "USD ",
+    " अ\u{970}",
+    "57.37M",
     "LT: $91.65 / 2 leads / CPL $45.83",
     "?, ",
     ". ",

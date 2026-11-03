@@ -8,7 +8,7 @@ use rustc_hash::FxBuildHasher;
 
 use super::digits::digit_value;
 use super::ratio::ratios;
-use super::scan::{Scratch, Token, currency_start, tokens};
+use super::scan::{Scratch, Token, Tokens, currency_start, mark_after_end, tokens};
 use super::spelled::spelled;
 use super::{Key, Reading, Sign, Value, for_each_reading_in};
 use crate::url::urls;
@@ -68,6 +68,9 @@ struct Needle {
     /// [`hash_of`] its integer; 0 for an approximate figure, which is not
     /// searched by hash.
     hash: u64,
+    /// Whether a scale word sets its precision, which a printed value that
+    /// rounds at two significant digits does not meet ("34,0M").
+    scaled: bool,
 }
 
 /// What a corpus reading does to a needle.
@@ -202,7 +205,8 @@ struct Rounded {
     value: u128,
     /// The power of ten it is read at.
     unit: u128,
-    /// The needle that states it.
+    /// The needle that states it, by index into the exact needles and then
+    /// the approximate ones.
     needle: usize,
 }
 
@@ -210,6 +214,10 @@ struct Rounded {
 /// dash between them, spaces and the token's currency mark aside ("$200-300",
 /// "$200 – $300", "1,500 - 2,000").
 fn dashed(text: &str, prev_end: usize, token: &Token<'_>) -> bool {
+    // A bound written with its own sign ("$16 - +$200") is a signed figure.
+    if token.sign != Sign::Unsigned {
+        return false;
+    }
     let full_start = token.end().saturating_sub(token.full.len());
     let lead = currency_start(text, token.start).map_or(full_start, |at| at.min(full_start));
     let between = text.get(prev_end..lead).unwrap_or_default().trim();
@@ -218,6 +226,16 @@ fn dashed(text: &str, prev_end: usize, token: &Token<'_>) -> bool {
         .next()
         .is_some_and(|c| matches!(c, '-' | '\u{2013}' | '\u{2014}'))
         && chars.next().is_none()
+}
+
+/// The text of `reading`, a scaled figure of `reply`, through the currency
+/// mark written after its scale word ("500 k€", "1,250 M€").
+fn with_mark_after<'r>(reply: &'r str, reading: &Reading<'r, '_>) -> &'r str {
+    let end = reading.span.end;
+    let start = end.saturating_sub(reading.full_text.len());
+    mark_after_end(reply, end)
+        .and_then(|mark_end| reply.get(start..mark_end))
+        .unwrap_or(reading.full_text)
 }
 
 /// The byte ranges of the links in `text`: a link's digits (a Slack ts, an
@@ -283,6 +301,7 @@ impl Needles {
     /// claims all open.
     fn read<'r>(
         reply: &'r str,
+        read: Tokens<'r>,
         skip: &[Range<usize>],
         scratch: &mut Scratch,
         stated: impl Fn(&Reading<'_, '_>) -> Option<Key>,
@@ -293,11 +312,16 @@ impl Needles {
             ..Self::default()
         };
         let mut claims = Claims::default();
-        for_each_reading_in(reply, tokens(reply), scratch, |r| {
+        for_each_reading_in(reply, read, scratch, |r| {
             if !skipped(skip, r.span.start)
                 && let Some(key) = stated(&r)
             {
-                needles.add(&mut claims, key, r.full_text, r.span);
+                let text = if r.scaled {
+                    with_mark_after(reply, &r)
+                } else {
+                    r.full_text
+                };
+                needles.add(&mut claims, key, text, r.span, r.scaled);
             }
         });
         needles.seal();
@@ -306,7 +330,14 @@ impl Needles {
 
     /// Adds a stated reading: to the claim before it when it is another
     /// reading of the same written figure, else as a claim of its own.
-    fn add<'r>(&mut self, claims: &mut Claims<'r>, key: Key, text: &'r str, span: Range<usize>) {
+    fn add<'r>(
+        &mut self,
+        claims: &mut Claims<'r>,
+        key: Key,
+        text: &'r str,
+        span: Range<usize>,
+        scaled: bool,
+    ) {
         let same_figure = claims.list.last().is_some_and(|last| last.span == span);
         if !same_figure {
             claims.list.push(Claim {
@@ -336,7 +367,12 @@ impl Needles {
         for len in lengths_of_key {
             *lengths |= length_bit(len);
         }
-        list.push(Needle { key, claim, hash });
+        list.push(Needle {
+            key,
+            claim,
+            hash,
+            scaled,
+        });
     }
 
     /// Orders the needles by hash, once the reply is read.
@@ -556,11 +592,14 @@ impl Needles {
     /// turn printing thousands of prices still grounds few round figures.
     /// A signed figure is held to its sign.
     fn ground_rounded(&self, claims: &mut Claims<'_>, corpus: &str, scratch: &mut Scratch) {
+        // An approximate figure rounds a printed value as an exact one does:
+        // "~$1,000.7" is grounded by 1,001.7 as "$1,000.7" is.
         let mut wanted: Vec<Rounded> = self
             .all
             .iter()
+            .chain(&self.around)
             .enumerate()
-            .filter(|(_, n)| claims.is_open(n.claim))
+            .filter(|(_, n)| claims.is_open(n.claim) && !n.scaled)
             .filter_map(|(needle, n)| {
                 let Value::Integer(integer) = &n.key.value else {
                     return None;
@@ -584,7 +623,8 @@ impl Needles {
             token.for_each_reading(scratch, |r| {
                 let mut sign: Option<Sign> = None;
                 wanted.retain(|target| {
-                    let Some(needle) = self.all.get(target.needle) else {
+                    let Some(needle) = self.all.iter().chain(&self.around).nth(target.needle)
+                    else {
                         return false;
                     };
                     if !claims.is_open(needle.claim) {
@@ -683,8 +723,8 @@ fn shared<'r>(claims: &Claims<'r>) -> Vec<&'r str> {
 /// let reply = "Revenue was 1,250,000 on 4,812 orders, up from 1,180,000.";
 /// assert_eq!(figures_parser::ungrounded_figures(reply, corpus), ["1,180,000"]);
 ///
-/// // The corpus has the value, not its sign.
-/// assert_eq!(figures_parser::ungrounded_figures("It moved by -12,500.", "delta: 12500"), ["-12,500"]);
+/// // The corpus has the value with the other sign.
+/// assert_eq!(figures_parser::ungrounded_figures("It moved by -12,500.", "delta: +12500"), ["-12,500"]);
 ///
 /// // A round range brackets what a result printed, and a round figure rounds it.
 /// assert!(figures_parser::ungrounded_figures("CPMs of $200-300.", "CPM=$244.49").is_empty());
@@ -699,7 +739,8 @@ fn shared<'r>(claims: &Claims<'r>) -> Vec<&'r str> {
 pub fn ungrounded_figures(reply: &str, corpus: &str) -> Vec<String> {
     let skip = link_spans(reply);
     let mut scratch = Scratch::default();
-    let (needles, mut claims) = Needles::read(reply, &skip, &mut scratch, |r| r.stated());
+    let (needles, mut claims) =
+        Needles::read(reply, tokens(reply), &skip, &mut scratch, |r| r.stated());
     // Most replies state no large figure at all, and the corpus is the whole
     // turn: it is read only once there is something to look for, and only
     // until everything is found.
@@ -726,7 +767,7 @@ pub(super) fn ungrounded_by(
     grounds: impl Fn(&Reading<'_, '_>) -> bool,
 ) -> Vec<String> {
     let mut scratch = Scratch::default();
-    let (needles, mut claims) = Needles::read(reply, &[], &mut scratch, stated);
+    let (needles, mut claims) = Needles::read(reply, tokens(reply), &[], &mut scratch, stated);
     if claims.open == 0 {
         return Vec::new();
     }
@@ -765,8 +806,15 @@ impl<'r> Amounts<'r> {
         let mut skip = link_spans(reply);
         skip.extend(ratios(reply).map(|ratio| ratio.span));
         let mut scratch = Scratch::default();
-        let (needles, claims) =
-            Needles::read(reply, &skip, &mut scratch, |r| r.stated_amount(true));
+        // A print that carries a scaled figure's digits ("9,162 jt" against
+        // 9,162) vouches for the amount as much as one that carries its value.
+        let (needles, claims) = Needles::read(
+            reply,
+            tokens(reply).keep_digits(),
+            &skip,
+            &mut scratch,
+            |r| r.stated_amount(true),
+        );
         Self { needles, claims }
     }
 
@@ -829,8 +877,11 @@ pub fn states_figure(text: &str, figure: &str) -> bool {
     let Some(wanted) = wanted else {
         return false;
     };
+    // A scaled figure states its digits as printed ("57.37M" states 57.37)
+    // and its value in units.
     for token in tokens(text)
         .against_letters()
+        .loose_scales()
         .without_currency()
         .without_signs()
     {

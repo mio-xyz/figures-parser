@@ -63,6 +63,9 @@ struct Shape {
     run: Run,
     /// Whether the groups before the last one are thousands grouping.
     head_thousands: bool,
+    /// The first group is all zeros, which no grouping writes ("0,850" is a
+    /// decimal).
+    zero_lead: bool,
 }
 
 impl Shape {
@@ -72,6 +75,11 @@ impl Shape {
         let mut len = 0;
         for (at, c) in text.char_indices() {
             if is_symbol(c) {
+                if shape.first.is_none() {
+                    shape.zero_lead = text
+                        .get(..at)
+                        .is_some_and(|lead| lead.chars().all(|d| digit_value(d) == Some(0)));
+                }
                 shape.run.push(len);
                 len = 0;
                 match shape.first {
@@ -84,7 +92,7 @@ impl Shape {
                 len += 1;
             }
         }
-        shape.head_thousands = shape.run.thousands();
+        shape.head_thousands = shape.run.thousands() && !shape.zero_lead;
         shape.run.push(len);
         shape
     }
@@ -135,10 +143,12 @@ impl Scratch {
             grouped: false,
             currency: marked_before(text, start) || marked_after(text, end),
             derived: number.idiom,
+            ambiguous: false,
             sign,
             approximate: true,
             scaled: false,
             full_text,
+            place: None,
         }
     }
 }
@@ -230,10 +240,12 @@ impl<'a> Token<'a> {
             grouped,
             currency: self.currency(),
             derived: false,
+            ambiguous: false,
             sign: self.sign,
             approximate: self.approximate || self.magnitude > 0,
             scaled: self.magnitude > 0,
             full_text: self.full,
+            place: None,
         }
     }
 
@@ -260,8 +272,8 @@ impl<'a> Token<'a> {
     /// derived readings, since a printed table may mean either. A single dot
     /// or comma before three digits fits both ("1.250" is 1,250 in Berlin and
     /// 1.25 in Boston) and yields both. A scale word after the digits
-    /// ("1.2 million") moves the whole readings' digits; the neighbours keep
-    /// theirs.
+    /// ("1.2 million") moves the whole readings' digits, once for each power
+    /// it stands for; the neighbours keep theirs.
     pub fn for_each_reading(&self, scratch: &mut Scratch, mut f: impl FnMut(Reading<'a, '_>)) {
         let Scratch { digits, scaled } = scratch;
         if self.magnitude == 0 {
@@ -280,41 +292,53 @@ impl<'a> Token<'a> {
                     ..r.clone()
                 });
             }
-            let (integer, fraction) = scale_into(r.integer, r.fraction, self.magnitude, scaled);
-            // The sections after a Han multiplier are read after whole digits
-            // only, whose scaled value the scanner checked fits.
-            let with_rest = (self.rest > 0)
-                .then(|| {
-                    integer
-                        .parse::<u128>()
-                        .ok()?
-                        .checked_add(u128::from(self.rest))
-                })
-                .flatten();
-            #[expect(
-                clippy::option_if_let_else,
-                reason = "the else arm keeps the borrow of the buffer the other arm rewrites"
-            )]
-            let (integer, fraction) = if let Some(value) = with_rest {
-                scaled.clear();
-                push_decimal(value, scaled);
-                (scaled.as_str(), None)
-            } else {
-                (integer, fraction)
-            };
-            f(Reading {
-                text: r.text,
-                span: r.span,
-                integer,
-                fraction,
-                grouped: r.grouped,
-                currency: r.currency,
-                derived: r.derived,
-                sign: r.sign,
-                approximate: r.approximate,
-                scaled: r.scaled,
-                full_text: r.full_text,
-            });
+            // The run's last symbol is the scale word's decimal mark.
+            let decimal_before_scale = r.ambiguous
+                && self.decimal_mark.is_some_and(|mark| {
+                    self.text.chars().rev().find(|&c| is_symbol(c)) == Some(mark)
+                });
+            let others = (0..16_u32).filter(|&p| self.also & (1 << p) != 0 && p != self.magnitude);
+            for power in std::iter::once(self.magnitude).chain(others) {
+                let (integer, fraction) = scale_into(r.integer, r.fraction, power, scaled);
+                // The sections after a Han multiplier are read after whole
+                // digits only, whose scaled value the scanner checked fits.
+                let with_rest = (self.rest > 0 && power == self.magnitude)
+                    .then(|| {
+                        integer
+                            .parse::<u128>()
+                            .ok()?
+                            .checked_add(u128::from(self.rest))
+                    })
+                    .flatten();
+                #[expect(
+                    clippy::option_if_let_else,
+                    reason = "the else arm keeps the borrow of the buffer the other arm rewrites"
+                )]
+                let (integer, fraction) = if let Some(value) = with_rest {
+                    scaled.clear();
+                    push_decimal(value, scaled);
+                    (scaled.as_str(), None)
+                } else {
+                    (integer, fraction)
+                };
+                f(Reading {
+                    text: r.text,
+                    span: r.span.clone(),
+                    integer,
+                    fraction,
+                    grouped: r.grouped,
+                    currency: r.currency,
+                    derived: r.derived,
+                    ambiguous: r.ambiguous && !decimal_before_scale,
+                    sign: r.sign,
+                    approximate: r.approximate,
+                    scaled: r.scaled,
+                    full_text: r.full_text,
+                    place: u32::try_from(r.fraction.map_or(0, |written| written.chars().count()))
+                        .ok()
+                        .and_then(|places| power.checked_sub(places)),
+                });
+            }
         });
     }
 
@@ -330,7 +354,8 @@ impl<'a> Token<'a> {
             return;
         };
         let groups = shape.run.groups;
-        let thousands = !shape.mixed_lead && last == first && shape.run.thousands();
+        let thousands =
+            !shape.mixed_lead && last == first && !shape.zero_lead && shape.run.thousands();
         let decimal = is_decimal_symbol(last)
             && (groups == 2 || (first != last && !shape.mixed_lead && shape.head_thousands));
 
@@ -345,7 +370,10 @@ impl<'a> Token<'a> {
                 .get(shape.last_at + last.len_utf8()..)
                 .unwrap_or_default();
             if groups == 2 && self.text.is_ascii() {
-                f(self.whole(head, Some(tail), false));
+                f(Reading {
+                    ambiguous: thousands,
+                    ..self.whole(head, Some(tail), false)
+                });
             } else {
                 join_groups(head, scratch);
                 let integer_len = scratch.len();
@@ -353,7 +381,10 @@ impl<'a> Token<'a> {
                 let (integer, fraction) = scratch
                     .split_at_checked(integer_len)
                     .unwrap_or((scratch.as_str(), ""));
-                f(self.whole(integer, Some(fraction), groups > 2));
+                f(Reading {
+                    ambiguous: thousands,
+                    ..self.whole(integer, Some(fraction), groups > 2)
+                });
             }
         }
         if thousands || !decimal {
@@ -372,6 +403,7 @@ impl<'a> Token<'a> {
                     currency: (leading && self.marked_before)
                         || (i == last_group && self.marked_after),
                     derived: thousands,
+                    ambiguous: false,
                     sign: if leading { self.sign } else { Sign::Unsigned },
                     approximate: leading && self.approximate,
                     scaled: false,
@@ -380,6 +412,7 @@ impl<'a> Token<'a> {
                     } else {
                         group
                     },
+                    place: None,
                 });
                 at += piece.len();
             }

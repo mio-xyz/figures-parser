@@ -50,28 +50,78 @@ so a change that adds one per token shows.
 ## Parity where an original exists
 
 The number, link and date readers replace TypeScript implementations, and
-were fuzzed against them with generated inputs: 150,000 for numbers, 120,000
-for links, 220,000 for weekdays (60,000 of them with a time of day, a length
+were fuzzed against them with generated inputs. For numbers the last round
+ran every call the TypeScript tests make (246 of them, for figures, ratios,
+shared amounts, stated figures and per-unit amounts) and 20,000 generated
+inputs or more per function: single figures in every notation and scale word
+the TypeScript reads, mixed replies, ratios with and without the person's
+words, per-unit clauses in every grouping, worksheet runs, and the readers
+the other checks use (stated and printed figures, numeric tokens). The
+library flags every input the TypeScript flags and passes every input it
+passes, except where the TypeScript reads the text wrongly, listed below;
+where the library flags more, it is a value no source carries (an amount
+behind a currency code, a scale word the TypeScript does not know, "Tsd",
+"Mds", "MM", "crores", a Han multiplier after a space, a number in words,
+an approximation mark before a bare run, a sign against the opposite sign),
+and where it passes more, a value a source carries in the
+reading the reply's language gives it. Links were fuzzed with 120,000
+inputs, weekdays with 220,000 (60,000 of them with a time of day, a length
 from now or a zone after a bare day, in all fourteen of chrono's languages),
-65,000 for the time-of-day reading alone and 112,000 for date windows (40,000
-of them with times beside the dates). The per-unit check was run beside its
-TypeScript original on 28,000 generated replies and prints, and agrees on
-all of them once a plain space between two figures sets them apart, as it
-does everywhere in the library. Every difference that remained is a
-deliberate one:
+the time-of-day reading alone with 65,000 and date windows with 112,000
+(40,000 of them with times beside the dates). The per-unit check was run
+beside its TypeScript original on 28,000 generated replies and prints, and
+agrees on all of them once a plain space between two figures sets them
+apart, as it does everywhere in the library.
+
+## Where the library reads more accurately than the TypeScript
+
+Each of these is pinned by a test in `figures-parser/tests/it/host.rs` or
+`scales.rs`.
+
+- **A unit or a word is no scale.** "took 5m" (minutes), "5t" (tonnes),
+  "300l" (litres), "5 mi" (miles), "5 mn" (French minutes), "5 bin bags",
+  "92 cr" (credits), "3,000 CR" (a credit), "5 md files", "5 Mr", "5 tn" of
+  tonnes, "Bio" (organic) and "Mio" without its dot are read as scales only
+  beside a currency; the TypeScript reads each as a multiplier anywhere, and
+  holds "took 5m" as five million.
+- **English reads its own scale.** "2tn" is 10¹² and "$2 billion" 10⁹, as
+  English writes them; the TypeScript also reads them at the Swedish thousand
+  and the French 10¹², so "2tn" is grounded by a printed 2,000. Written as the
+  continental locales write it ("2 tn €", "1 billion d'euros"), a name reads
+  at every power they give it, as the TypeScript does.
+- **A decimal comma before a continental scale.** "1,250 M€" is 1.25 million
+  as well as 1,250 million, since a currency after the scale is how the
+  continental locales write an amount and all of them write a decimal comma;
+  so is "8,566 млрд", Russian writing a decimal comma, and "1.250 million",
+  English a decimal point. The TypeScript reads such a run as thousands only.
+- **A compound scale after a plain space.** "2 lakh crore" is 2 × 10¹²; the
+  TypeScript joins the compound only with the no-break space a locale
+  formats it with, and reads "2 lakh".
+- **A figure is held on its own.** "Paid $500 of a 500 k€ budget" holds the
+  $500, which the TypeScript lets the scaled figure of the same digits cover.
+- **A plain space joins only thousands.** "3442 12,480" in a print, or "95.11
+  57.44x" in a reply, are two figures; the TypeScript joins any groups a
+  space sets side by side into one token, and so misses a value a script
+  printed beside another, or names "95.1157.44x".
+- **An approximation mark before a currency written with letters.** "≈
+  R$3,000", "~US$882,915" and "≈ EUR 466,841" are approximate; the
+  TypeScript reads the mark only right before a currency sign.
+- **The piece of a version or a hex literal.** "5" of "v2.5" and "32" of
+  "0x66.32" are no figures; the TypeScript reads them.
+- **A percent sign is one figure's.** "2027 %95.24" is the Turkish "%95.24",
+  and a sign on the next line marks nothing; the TypeScript reads "2027%",
+  and "2,343\n%" as a percentage.
+
+Other deliberate differences, which change what is named, not what is
+flagged:
 
 - digit groups are counted in code points, so astral digits group;
-- a sign before a figure is part of its value;
-- a figure marked approximate is grounded by a value that rounds to it;
-- a scale abbreviation reads at the one scale of the language that writes it
-  so ("2tn" is never 2,000), and a lowercase "m" or "t" glued to the digits
-  reads as a scale only beside a currency ("took 5m" is minutes);
-- a figure is held on its own when a scaled figure beside it shares its
-  digits: "Paid $500 of a 500 k€ budget" still holds the $500;
-- a scale word after the digits multiplies the figure;
-- a reply's figure that fits two readings is grounded by either;
-- a number written in words is read;
-- a currency code or a sign after a figure marks it too;
+- a figure is named as written, from its sign or approximation mark on, and
+  a scaled one through the currency after it ("~$1.2M", "500 k€");
+- a ratio's percent sign is named as written ("19％"), a percent word after
+  a space ("12 percent");
+- a per-unit amount is named with its currency mark as written ("R$45.83",
+  "USD 45.83");
 - a link right after a backtick or an unspaced script is read;
 - a `<url|label>` wrapped link is unwrapped whatever the case of its scheme;
 - both ends of a weekday range are checked;

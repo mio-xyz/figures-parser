@@ -145,20 +145,36 @@ fn is_currency_code(run: &str, edge: Option<char>) -> bool {
 }
 
 /// Whether a currency sign or code ends the text before byte `start`, with
-/// at most one space between ("$729", "€ 1,458", "USD 99").
+/// at most one space between ("$729", "€ 1,458", "USD 99"). A code set apart
+/// from the figure that also follows another figure is that figure's ("2,685
+/// USD 2026").
 pub(super) fn marked_before(text: &str, start: usize) -> bool {
-    let before = text.get(..start).unwrap_or_default();
-    let before = before.strip_suffix(char::is_whitespace).unwrap_or(before);
-    match char_before(before, before.len()) {
+    let all = text.get(..start).unwrap_or_default();
+    let before = all.strip_suffix(char::is_whitespace).unwrap_or(all);
+    let spaced = before.len() < all.len();
+    let mark_start = match char_before(before, before.len()) {
         Some(c) if c.is_ascii_uppercase() => {
             let head = before.trim_end_matches(|w: char| w.is_ascii_alphanumeric());
-            before
+            let code = before
                 .get(head.len()..)
-                .is_some_and(|run| is_currency_code(run, char_before(head, head.len())))
+                .is_some_and(|run| is_currency_code(run, char_before(head, head.len())));
+            if !code {
+                return false;
+            }
+            head.len()
         }
-        Some(c) => is_currency_sign(c),
-        None => false,
-    }
+        Some(c) => return is_currency_sign(c),
+        None => return false,
+    };
+    !(spaced && follows_figure(text, mark_start))
+}
+
+/// Whether a figure ends right before byte `at` of `text`, with at most one
+/// space between.
+fn follows_figure(text: &str, at: usize) -> bool {
+    let before = text.get(..at).unwrap_or_default();
+    let before = before.strip_suffix(char::is_whitespace).unwrap_or(before);
+    char_before(before, before.len()).is_some_and(is_digit)
 }
 
 /// Whether `c` is a bidi mark a locale writes around a sign: the left-to-right
@@ -366,22 +382,45 @@ pub(super) fn look_back(text: &str, start: usize, end: usize) -> Prefix {
     }
 }
 
+/// Where the currency mark [`marked_after`] reads after byte `end` ends.
+pub(super) fn mark_after_end(text: &str, end: usize) -> Option<usize> {
+    if !marked_after(text, end) {
+        return None;
+    }
+    let after = text.get(end..)?;
+    let after = after.strip_prefix(char::is_whitespace).unwrap_or(after);
+    let lead = char_at(after, 0)?;
+    let len = if lead.is_ascii_uppercase() {
+        3
+    } else {
+        lead.len_utf8()
+    };
+    Some(text.len().saturating_sub(after.len()).saturating_add(len))
+}
+
 /// Whether a currency sign or code opens the text after byte `end`, with at
-/// most one space between ("99 USD", "12 €").
+/// most one space between ("99 USD", "12 €"), and marks no figure after it.
 pub(super) fn marked_after(text: &str, end: usize) -> bool {
     let after = text.get(end..).unwrap_or_default();
     let after = after.strip_prefix(char::is_whitespace).unwrap_or(after);
-    match char_at(after, 0) {
+    let rest = match char_at(after, 0) {
         Some(c) if c.is_ascii_uppercase() => {
             let rest = after.trim_start_matches(|w: char| w.is_ascii_alphanumeric());
             let run_len = after.len() - rest.len();
-            after
+            let code = after
                 .get(..run_len)
-                .is_some_and(|run| is_currency_code(run, char_at(rest, 0)))
+                .is_some_and(|run| is_currency_code(run, char_at(rest, 0)));
+            if !code {
+                return false;
+            }
+            rest
         }
-        Some(c) => is_currency_sign(c),
-        None => false,
-    }
+        Some(c) if is_currency_sign(c) => after.get(c.len_utf8()..).unwrap_or_default(),
+        _ => return false,
+    };
+    // A mark before another figure is that figure's ("12 $13", "12 USD 13").
+    let rest = rest.strip_prefix(char::is_whitespace).unwrap_or(rest);
+    !char_at(rest, 0).is_some_and(is_digit)
 }
 
 /// One numeric token, borrowed from the text it was found in.
@@ -408,6 +447,12 @@ pub struct Token<'a> {
     /// The power of ten a scale word after the digits multiplies it by
     /// ("1.2 million", "12.5K"); 0 without one.
     pub magnitude: u32,
+    /// The other powers the scale word stands for, a bit per power, where
+    /// the token is read at each ("2 billion €" is also 2 × 10¹²).
+    pub(super) also: u16,
+    /// The decimal mark the scale word's language writes, before which a run
+    /// that also reads as thousands reads as a decimal too.
+    pub(super) decimal_mark: Option<char>,
     /// What the sections written after a Han multiplier add to the scaled
     /// digits ("5000万" in "3億5000万"); 0 without them.
     pub(super) rest: u64,
@@ -454,6 +499,8 @@ pub struct Tokens<'a> {
     loose: bool,
     /// Whether scale words are read at all.
     scales: bool,
+    /// Whether a scaled token also yields its digits as printed.
+    keep_digits: bool,
 }
 
 /// The numeric tokens of `text`, in order.
@@ -475,6 +522,7 @@ pub const fn tokens(text: &str) -> Tokens<'_> {
         letters: false,
         loose: false,
         scales: true,
+        keep_digits: false,
     }
 }
 
@@ -516,6 +564,14 @@ impl Tokens<'_> {
     #[must_use]
     pub const fn loose_scales(mut self) -> Self {
         self.loose = true;
+        self
+    }
+
+    /// These tokens with a scaled one also read as its digits as printed:
+    /// "1,250 M€" is 1,250 too, as a print that carries the digits shows.
+    #[must_use]
+    pub const fn keep_digits(mut self) -> Self {
+        self.keep_digits = true;
         self
     }
 
@@ -655,7 +711,9 @@ impl<'a> Iterator for Tokens<'a> {
                 sign: prefix.sign,
                 approximate: prefix.approximate,
                 magnitude: scale.map_or(0, |scale| scale.magnitude),
-                keeps_digits: self.loose && scale.is_some(),
+                also: scale.map_or(0, |scale| scale.also),
+                decimal_mark: scale.and_then(|scale| scale.mark),
+                keeps_digits: (self.loose || self.keep_digits) && scale.is_some(),
                 rest: scale.map_or(0, |scale| scale.rest),
                 written,
                 full: if prefix.from == start {

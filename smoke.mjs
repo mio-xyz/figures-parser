@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
-const { extract, ungroundedFigures, ungroundedRatios, mispairedPerUnit, amountsSharedWith, sharesAmount, statesFigure, proseArithmetic, ungroundedUrls, linkFindings, mendedLinks, fabricatedUrls, ungroundedEmails, misdatedWeekdays, rowsOutsideWindow, ungroundedIdentifiers, unseenTokens, ungroundedDurations, unprintedIds, urlPrintedIn, ungroundedOnPage, PageHolds, undottedSlackLink, placeholderTargets, unopenedLinks, memoryGrounding, groundingTokens, builtFromCorpus, speakerPrefix, memoryClaim, silentSignal } = createRequire(import.meta.url)("./index.js");
+const { extract, ungroundedFigures, ungroundedRatios, mispairedPerUnit, amountsSharedWith, sharesAmount, statesFigure, proseArithmetic, ungroundedUrls, linkFindings, mendedLinks, fabricatedUrls, ungroundedEmails, misdatedWeekdays, rowsOutsideWindow, ungroundedIdentifiers, unseenTokens, ungroundedDurations, unprintedIds, urlPrintedIn, ungroundedOnPage, PageHolds, undottedSlackLink, placeholderTargets, unopenedLinks, memoryGrounding, groundingTokens, builtFromCorpus, speakerPrefix, memoryClaim, silentSignal, statedFigures, printedFigures, numericTokens, withoutLinks, sheetFindings } = createRequire(import.meta.url)("./index.js");
 
 const entities = extract("Total $1,250 and ١٢", { kinds: ["number"] });
 const has = (text, integer) => entities.some((e) => e.text === text && e.value.integer === integer);
@@ -51,7 +51,8 @@ assert.deepEqual(ungroundedDurations("45 minutes, then 2 hours", '{"duration": 2
 assert.deepEqual(ungroundedDurations("a 6-minute walkthrough, then a 2-minute recap, each 10–30 min", "350 seconds; the longest ran 25 minutes"), ["2-minute"]);
 assert.deepEqual(extract("~10–30 min", { kinds: ["duration"] }).map((e) => [e.text, e.from, e.place, e.approximate]), [["10–30 min", { milliseconds: 600000, centimonths: 0 }, { milliseconds: 60000, centimonths: 0 }, true]]);
 assert.deepEqual(extract("-$12,500 and (1,250)", { kinds: ["number"] }).filter((e) => !e.value.derived).map((e) => [e.text, e.value.sign]), [["12,500", "minus"], ["12,500", "minus"], ["1,250", "parenthesized"], ["1,250", "parenthesized"]]);
-assert.deepEqual(ungroundedFigures("Moved by -12,500.", "delta: 12500"), ["-12,500"]);
+assert.deepEqual(ungroundedFigures("Moved by -12,500.", "delta: +12500"), ["-12,500"]);
+assert.deepEqual(ungroundedFigures("Moved by -12,500.", "fell by 12500"), []);
 assert.deepEqual(extract("~$12,500", { kinds: ["number"] }).map((e) => e.value.approximate), [true, true, true, false]);
 assert.deepEqual(ungroundedFigures("About ~12,500 and ~14,000.", "signups: 12487"), ["~14,000"]);
 assert.deepEqual(extract("Revenue hit $1.2 million", { kinds: ["number"] }).filter((e) => !e.value.derived).map((e) => [e.text, e.value.integer, e.value.approximate]), [["1.2 million", "1200000", true]]);
@@ -89,3 +90,16 @@ assert.deepEqual(extract("https://acme.io/q?family=Roboto|Inter -> used", { kind
 assert.equal(builtFromCorpus("https://www.facebook.com/ads/library/?view_all_page_id=%31%32", "page 12"), true);
 assert.deepEqual(unprintedIds("utm_campaign_BlackFriday2024 and sk_live_51HxQz9KdLmN2pQr", ""), ["sk_live_51HxQz9KdLmN2pQr"]);
 console.log("ok");
+let asked = 0;
+assert.deepEqual(ungroundedRatios("No ratio.", "", () => { asked += 1; return "1000 trials"; }), []);
+assert.deepEqual(ungroundedRatios("58% never activate", "", () => { asked += 1; return "1000 trials, 420 activated"; }), []);
+assert.equal(asked, 1);
+assert.throws(() => ungroundedRatios("58% never activate", "", () => { throw new Error("no thread"); }), /no thread/);
+assert.deepEqual(mispairedPerUnit("$74.74 spend, 2 leads, $45.83 CPL.", () => "LT: $91.65 / 2 leads / CPL $45.83"), [{ perUnit: "$45.83", stated: "$74.74 / 2 = $37.37", printed: "$91.65 / 2" }]);
+assert.deepEqual(ungroundedFigures("Budget 1,250 M€ and 500 k€.", "budget 1250000"), ["500 k€"]);
+assert.deepEqual(ungroundedFigures("Pendapatan 35 rb dan ₺5 bin.", "35000 5000"), []);
+assert.deepEqual(statedFigures("USD 6 951 spend, 3 leads, 12% CTR").map((f) => [f.mark, f.value]), [["USD", 6951], ["", 3]]);
+assert.deepEqual(printedFigures("LT: $91.65 / 2 leads"), { values: [91.65, 2], amounts: [91.65] });
+assert.deepEqual(numericTokens("😀 took 1,250s", true).map((t) => [t.start, t.end, t.values]), [[8, 13, [1250, 1.25]]]);
+assert.equal(withoutLinks("x https://a.io/1 y"), "x   y");
+assert.deepEqual(sheetFindings("2027 holds $19,850.", [{ stdout: "total | 19,850", listsRows: true, listed: [{ figure: "19,851", name: "row 6 TOTAL" }] }]), { listed: [{ figure: "19,851", name: "row 6 TOTAL" }], unstated: [{ figure: "19,851", name: "row 6 TOTAL" }], unchecked: { figures: [], framed: false } });

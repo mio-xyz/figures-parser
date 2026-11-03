@@ -166,6 +166,14 @@ export interface LinkFindings {
   unlinked: Array<string>
 }
 
+/** A row a script listed with the amount the reply states beside its total. */
+export interface ListedFigure {
+  /** The amount as the script printed it ("19,851"). */
+  figure: string
+  /** The script's line for the row. */
+  name: string
+}
+
 /**
  * The other reading of a duration whose digits fit two, and the step it is
  * written to.
@@ -247,10 +255,17 @@ export interface MispairedFigure {
 
 /**
  * Per-unit amounts in `reply` stated beside a total and a count they are
- * not the quotient of, when a line of `corpus` shows them as another
- * amount over that count.
+ * not the quotient of.
+ *
+ * A line of `corpus` shows each as another amount over that count.
+ * `corpus` may be a function returning it, called only once a clause holds
+ * a candidate.
+ *
+ * # Errors
+ *
+ * What `corpus` throws.
  */
-export declare function mispairedPerUnit(reply: string, corpus: string): Array<MispairedFigure>
+export declare function mispairedPerUnit(reply: string, corpus: string | (() => string)): Array<MispairedFigure>
 
 /** One reading of one number, with where it sits in the input. */
 export interface NumberEntity {
@@ -288,6 +303,43 @@ export interface NumberValue {
    * scale word after its digits ("1.2 million").
    */
   approximate: boolean
+  /**
+   * The decimal reading of a run that also reads as thousands ("1,250"
+   * as 1.25): grounds, and is stated only before a scale word whose
+   * language writes that decimal mark.
+   */
+  ambiguous: boolean
+}
+
+/** One numeric token as a result prints it. */
+export interface NumericToken {
+  /** UTF-16 offset of its first digit. */
+  start: number
+  /** One past its last UTF-16 unit. */
+  end: number
+  /** The values it reads as. */
+  values: Array<number>
+}
+
+/**
+ * The numeric tokens of `text` as a result prints them, each with the
+ * values it reads as; with `loose`, the decimal reading of a run that also
+ * groups too.
+ */
+export declare function numericTokens(text: string, loose?: boolean | undefined | null): Array<NumericToken>
+
+/**
+ * The figures `text`, a printed line, holds, in each reading ("1,250" is
+ * 1250 and 1.25), a letter allowed after one and no scale word read.
+ */
+export declare function printedFigures(text: string): PrintedFigures
+
+/** The values a printed line holds, in each reading, and apart the amounts. */
+export interface PrintedFigures {
+  /** Every value, in order. */
+  values: Array<number>
+  /** The values behind a currency mark or with a decimal part. */
+  amounts: Array<number>
 }
 
 /**
@@ -346,11 +398,67 @@ export interface SilentSignal {
  */
 export declare function speakerPrefix(reply: string): string | null
 
+ * What `reply` owes `runs`, the turn's script runs in order: the rows they
+ * listed, those the reply leaves unstated, and the amounts it took from a
+ * worksheet no check listed.
+ */
+export declare function sheetFindings(reply: string, runs: Array<SheetRun>): SheetFindings
+
+/** What a reply owes the runs it drew a worksheet's amounts from. */
+export interface SheetFindings {
+  /** Every row listed by a run the reply draws on. */
+  listed: Array<ListedFigure>
+  /** The listed rows whose amount the reply leaves unstated. */
+  unstated: Array<ListedFigure>
+  /** The amounts taken from a worksheet that no check listed. */
+  unchecked: UncheckedFigures
+}
+
+/** What one script run did with a worksheet. */
+export interface SheetRun {
+  /** What the run printed. */
+  stdout: string
+  /** It ran a check whose print lists the rows its figures rest on. */
+  listsRows?: boolean
+  /** It took a ledger frame from a worksheet. */
+  frames?: boolean
+  /** It read a worksheet's grid itself. */
+  gridRead?: boolean
+  /** The rows it listed with their amounts. */
+  listed?: Array<ListedFigure>
+}
+
+/** A figure as a reply's clause states it. */
+export interface StatedFigure {
+  /** As written, without its currency mark ("45.83"). */
+  text: string
+  /** Its value. */
+  value: number
+  /** The decimal places written. */
+  places: number
+  /** The currency mark written before it ("$", "USD"), or "" for none. */
+  mark: string
+}
+
+/**
+ * The figures `text`, a clause of a reply, states, in order: its links,
+ * ratios and scaled figures left out, a run that groups read as thousands.
+ */
+export declare function statedFigures(text: string): Array<StatedFigure>
+
 /**
  * Whether `text` states `figure` ("19,851", "1,234.50"), however it groups
  * it: the figure's whole part is matched.
  */
 export declare function statesFigure(text: string, figure: string): boolean
+
+/** The amounts a reply took from a worksheet without the checks. */
+export interface UncheckedFigures {
+  /** The amounts as the reply writes them. */
+  figures: Array<string>
+  /** Whether a run took a ledger frame and summed it by hand. */
+  framed: boolean
+}
 
 /**
  * `url` with the dot its Slack message ts kept dropped
@@ -395,8 +503,15 @@ export declare function ungroundedOnPage(text: string, corpus: string, said?: st
  * No printed ratio or decimal rounds to one at the places the reply wrote,
  * and no number the person stated, nor plain arithmetic over two of them,
  * gives it.
+ *
+ * `said` may be a function returning them, called only when a ratio is left
+ * that the corpus does not carry.
+ *
+ * # Errors
+ *
+ * What `said` throws.
  */
-export declare function ungroundedRatios(reply: string, corpus: string, said?: string | undefined | null): Array<string>
+export declare function ungroundedRatios(reply: string, corpus: string, said?: string | (() => string)): Array<string>
 
 /**
  * The parts of `reply` that neither `corpus` nor `prompt` grounds.
@@ -448,3 +563,6 @@ export interface UrlEntity {
  * page links it by, the address parsed as a browser parses it.
  */
 export declare function urlPrintedIn(url: string, read: string): boolean
+
+/** `text` with each link it holds replaced by a space. */
+export declare function withoutLinks(text: string): string

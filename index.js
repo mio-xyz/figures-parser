@@ -791,11 +791,17 @@ module.exports.mendedLinks = nativeBinding.mendedLinks
 module.exports.misdatedWeekdays = nativeBinding.misdatedWeekdays
 module.exports.mispairedPerUnit = nativeBinding.mispairedPerUnit
 module.exports.placeholderTargets = nativeBinding.placeholderTargets
+
+module.exports.numericTokens = nativeBinding.numericTokens
+module.exports.printedFigures = nativeBinding.printedFigures
 module.exports.proseArithmetic = nativeBinding.proseArithmetic
 module.exports.rowsOutsideWindow = nativeBinding.rowsOutsideWindow
 module.exports.sharesAmount = nativeBinding.sharesAmount
 module.exports.silentSignal = nativeBinding.silentSignal
 module.exports.speakerPrefix = nativeBinding.speakerPrefix
+
+module.exports.sheetFindings = nativeBinding.sheetFindings
+module.exports.statedFigures = nativeBinding.statedFigures
 module.exports.statesFigure = nativeBinding.statesFigure
 module.exports.undottedSlackLink = nativeBinding.undottedSlackLink
 module.exports.ungroundedDurations = nativeBinding.ungroundedDurations
@@ -809,3 +815,4 @@ module.exports.unopenedLinks = nativeBinding.unopenedLinks
 module.exports.unprintedIds = nativeBinding.unprintedIds
 module.exports.unseenTokens = nativeBinding.unseenTokens
 module.exports.urlPrintedIn = nativeBinding.urlPrintedIn
+module.exports.withoutLinks = nativeBinding.withoutLinks

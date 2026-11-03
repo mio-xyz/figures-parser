@@ -15,26 +15,10 @@ it stands; a contribution that closes one should remove it here.
   "五千万", and so do digits after a Han multiplier that follows a decimal
   ("1.2万5000"). Korean sections a space parts ("3억 5천만") read as two
   figures, 300,000,000 and 50,000,000.
-- "billion" is read on the short scale, 10⁹, as English writes it; the
-  French "billion" and the German "Billion" are 10¹², so "1 billion" in a
-  French reply is read a thousand times too small. The plural forms that only
-  those languages write ("Billionen", "billones") are read as 10¹².
+- A name some locale gives another power ("billion" is 10¹² in French) reads
+  at that power only where a currency or the "of" of a Romance language
+  follows the scale, so a French "1 billion" with neither is read at 10⁹.
 - A scale word after more than one space is not read.
-- An abbreviation reads at one scale, the one the language that writes it so
-  gives it: "tn" and "bn" are 10¹² and 10⁹ as English reads them, "b" and
-  "m" are never a thousand or a billion, though Swedish writes a thousand
-  "tn" and Turkish "B", so "2tn" is not grounded by 2,000. The host's
-  TypeScript reads each name at every scale a locale gives it.
-- In a reply, a lowercase letter that also names a unit ("5m", "5t") reads as
-  a scale only beside a currency, so "took 5m" is not held; the host's
-  TypeScript holds it as 5 million. A multi-letter abbreviation that is also a
-  word or a unit ("2 Mio messages", "5 mn", "5 cr") needs its currency too.
-- The short forms of Indonesian, Vietnamese, Turkish and Indian English ("jt",
-  "rb", "tr", "n", "Mr", "l", "lcr") and Turkish "bin", an English word, are
-  not read, nor Vietnamese "nghìn tỷ".
-- A scaled figure whose digits also group ("1,250 M€") is grounded by either
-  reading, 1,250 million or 1.25 million, as any figure that fits two
-  readings is; the host's TypeScript holds it to the grouped one.
 - A sign written in words ("minus 12,500"), with an en dash ("–12,500"), after
   the figure ("12,500-") or as an accounting suffix ("12,500 CR") is not
   read, so such a figure holds the corpus to no sign.
@@ -82,6 +66,10 @@ it stands; a contribution that closes one should remove it here.
   3,118.38%), as French and SI write it.
 - A ratio is reported as written, so a fullwidth or small percent sign
   ("５０％", "50﹪") is not folded to "%" in what is named.
+- A percent sign between two figures, set apart from the first and glued to
+  the second ("18.65 %59.01"), is read as the second's, as Turkish writes
+  it; the host's TypeScript reads it as the first's. Only one of the two is
+  checked.
 - The person's numbers are read at most thirty at a time, and a ratio of
   three of them (a share of a sum) is not derived.
 

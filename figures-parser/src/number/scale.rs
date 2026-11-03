@@ -6,13 +6,23 @@ use std::ops::Range;
 
 use super::digits::digit_value;
 use super::scan::{is_boundary, is_inline_space, is_symbol, marked_after, marked_before};
-use crate::text::{char_at, is_letter, lookup, same_word};
+use crate::text::{char_at, is_letter, lookup, same_word, starts_with_lowercase};
 
 /// A scale written after a figure's digits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Scale {
     /// The power of ten it multiplies the figure by.
     pub magnitude: u32,
+    /// The other powers the name stands for in a locale that writes it so,
+    /// a bit per power ("billion" is also 10¹² in French): read in a corpus,
+    /// and in a reply where the figure is written as those locales write it.
+    pub also: u16,
+    /// The decimal mark the language of the word writes, where a run that
+    /// also reads as thousands ("1,250", "8,566") is a decimal before it
+    /// too: a comma before "млрд" or where a currency follows ("1,250 M€"),
+    /// a dot before "million". None where the word is written alike in
+    /// languages that differ ("M", "k").
+    pub mark: Option<char>,
     /// The byte it ends at, past the sections written after a Han
     /// multiplier ("5000万" in "3億5000万").
     pub end: usize,
@@ -127,7 +137,9 @@ const NON_LATIN_WORDS: &[(&str, u32)] = &[
     ("\u{939}\u{95b}\u{93e}\u{930}", 3),
     ("लाख", 5),
     ("अरब", 9),
+    ("अ\u{970}", 9),
     ("खरब", 11),
+    ("ख\u{970}", 11),
     ("พัน", 3),
     ("ล้าน", 6),
     ("พันล้าน", 9),
@@ -136,7 +148,8 @@ const NON_LATIN_WORDS: &[(&str, u32)] = &[
 
 /// A word after a scale that multiplies it, by the scale it follows: what
 /// Spanish and Portuguese write after "mil" for a thousand million, Italian
-/// after "mila" for a thousand billion, and Indian English after "lakh".
+/// after "mila" for a thousand billion, Indian English after "lakh", and
+/// Vietnamese after "nghìn" for a thousand billion.
 const COMPOUNDS: &[(u32, &str, u32)] = &[
     (3, "millones", 9),
     (3, "milhões", 9),
@@ -144,42 +157,69 @@ const COMPOUNDS: &[(u32, &str, u32)] = &[
     (3, "miliardi", 12),
     (5, "crore", 12),
     (5, "crores", 12),
+    (3, "tỷ", 12),
 ];
 
-/// The power of ten an abbreviation stands for, read with its case, glued
-/// to the digits or after a space, and when it reads.
-fn abbreviation(word: &str) -> Option<(u32, Needs)> {
+/// A bit per power of ten, for [`Scale::also`].
+const fn powers(list: &[u32]) -> u16 {
+    let mut bits = 0_u16;
+    let mut rest = list;
+    while let [power, tail @ ..] = rest {
+        if *power < 16 {
+            bits |= 1 << *power;
+        }
+        rest = tail;
+    }
+    bits
+}
+
+/// The power of ten an abbreviation stands for, when it reads, and the
+/// other powers a locale gives it: a single letter read with its case, glued
+/// to the digits or after a space ("K" and "k", but "m" is minutes as often
+/// as millions), a longer one case aside.
+fn abbreviation(word: &str) -> Option<(u32, Needs, u16)> {
     let found = match word {
-        "K" | "k" => (3, Needs::CurrencyWhenSpaced),
-        "Tsd" | "tsd" | "tys" => (3, Needs::Nothing),
-        "M" => (6, Needs::CurrencyWhenSpaced),
-        "MM" | "mm" | "m" | "Mn" | "mn" | "mi" => (6, Needs::Currency),
-        "Mio" => (6, Needs::DotOrCurrency),
-        "Mln" | "mln" => (6, Needs::Nothing),
-        "Cr" | "cr" => (7, Needs::Currency),
-        "B" | "b" => (9, Needs::CurrencyWhenSpaced),
-        "bi" | "Md" => (9, Needs::Currency),
-        "bn" | "Bn" | "BN" | "Mds" | "Mrd" | "Mld" | "mld" => (9, Needs::Nothing),
-        "T" | "tn" | "Tn" => (12, Needs::CurrencyWhenSpaced),
-        "Bln" | "bln" => (12, Needs::Nothing),
-        "Bio" => (12, Needs::DotOrCurrency),
-        _ => return None,
+        "K" | "k" => (3, Needs::CurrencyWhenSpaced, 0),
+        "M" => (6, Needs::CurrencyWhenSpaced, powers(&[9])),
+        "m" => (6, Needs::Currency, powers(&[9])),
+        "B" | "b" => (9, Needs::CurrencyWhenSpaced, powers(&[3, 12])),
+        "T" => (12, Needs::CurrencyWhenSpaced, powers(&[9])),
+        "t" => (12, Needs::Currency, powers(&[9])),
+        "L" | "l" => (5, Needs::Currency, 0),
+        "N" | "n" => (3, Needs::Currency, 0),
+        "Cr" => (7, Needs::Nothing, 0),
+        "Mn" => (6, Needs::Nothing, 0),
+        "Md" => (9, Needs::Nothing, 0),
+        _ => return longer_abbreviation(word),
     };
     Some(found)
 }
 
-/// The power of an abbreviation read in a corpus, its ASCII letters already
-/// lowercased: every one [`abbreviation`] reads, whatever its case.
-const fn loose_abbreviation(lower: &[u8]) -> Option<u32> {
-    let magnitude = match lower {
-        b"k" | b"tsd" | b"tys" => 3,
-        b"m" | b"mm" | b"mn" | b"mi" | b"mio" | b"mln" => 6,
-        b"cr" => 7,
-        b"b" | b"bi" | b"md" | b"bn" | b"mds" | b"mrd" | b"mld" => 9,
-        b"t" | b"tn" | b"bio" | b"bln" => 12,
+/// [`abbreviation`] for a name of two letters or more, case aside: those that
+/// are also a word, a title or a unit ("bin", "Mr", "mm" and "mi" of
+/// millimetres and miles, "mn" of French minutes, "CR" of a credit, "md" of
+/// a file or a doctor) read only beside a currency.
+fn longer_abbreviation(word: &str) -> Option<(u32, Needs, u16)> {
+    let mut lower = [0_u8; 3];
+    let lower = lower.get_mut(..word.len()).filter(|l| l.len() >= 2)?;
+    lower.copy_from_slice(word.as_bytes());
+    lower.make_ascii_lowercase();
+    let found = match &*lower {
+        b"tsd" | b"tys" | b"rb" => (3, Needs::Nothing, 0),
+        b"bin" => (3, Needs::Currency, 0),
+        b"mln" | b"jt" | b"tr" => (6, Needs::Nothing, 0),
+        b"mm" | b"mn" | b"mi" => (6, Needs::Currency, 0),
+        b"mio" => (6, Needs::DotOrCurrency, 0),
+        b"cr" => (7, Needs::Currency, 0),
+        b"bn" => (9, Needs::Nothing, powers(&[12])),
+        b"mds" | b"mrd" | b"mld" | b"bi" => (9, Needs::Nothing, 0),
+        b"md" | b"mr" => (9, Needs::Currency, 0),
+        b"tn" => (12, Needs::CurrencyWhenSpaced, powers(&[3])),
+        b"bln" | b"lcr" | b"nt" | b"tri" => (12, Needs::Nothing, 0),
+        b"bio" => (12, Needs::DotOrCurrency, 0),
         _ => return None,
     };
-    Some(magnitude)
+    Some(found)
 }
 
 /// The power of ten a Han or Hangul multiplier stands for: the small ones
@@ -216,14 +256,16 @@ impl Multipliers {
     }
 }
 
-/// The Han multipliers glued after the digits `digits` ("1.2万", "3億",
-/// "5千万", "2万亿"), and, after digits alone, the sections written after
+/// The Han multipliers from byte `from`, glued after the digits `digits` or
+/// one space past them ("1.2万", "3億", "5千万", "2万亿", "200 万"), and, after digits alone, the sections written after
 /// them ("3億5000万", "1億2345万6789", "1千200万"). The sections are kept
 /// only when the whole fits the integer type the readings add them in.
-fn han_scale(text: &str, digits: Range<usize>) -> Option<Scale> {
-    let head = han_multipliers(text, digits.end)?;
+fn han_scale(text: &str, digits: Range<usize>, from: usize) -> Option<Scale> {
+    let head = han_multipliers(text, from)?;
     let plain = Scale {
         magnitude: head.magnitude(),
+        also: 0,
+        mark: Some('.'),
         end: head.end,
         rest: 0,
     };
@@ -241,6 +283,8 @@ fn han_scale(text: &str, digits: Range<usize>) -> Option<Scale> {
     match u64::try_from(rest) {
         Ok(rest) if fits => Some(Scale {
             magnitude,
+            also: 0,
+            mark: Some('.'),
             end,
             rest,
         }),
@@ -411,11 +455,13 @@ fn may_start_word(bytes: &[u8], at: usize) -> bool {
             .is_some_and(u8::is_ascii_alphanumeric)
     };
     match (lower(0), lower(1), lower(2)) {
-        (Some(b'k' | b'm' | b'b' | b't'), ..) if ends(1) => true,
-        (Some(b'm'), Some(b'm' | b'n' | b'i' | b'd'), _)
+        (Some(b'k' | b'm' | b'b' | b't' | b'l' | b'n'), ..) if ends(1) => true,
+        (Some(b'm'), Some(b'm' | b'n' | b'i' | b'd' | b'r'), _)
         | (Some(b'b'), Some(b'n' | b'i'), _)
         | (Some(b'c'), Some(b'r'), _)
-        | (Some(b't'), Some(b'n'), _)
+        | (Some(b't'), Some(b'n' | b'r'), _)
+        | (Some(b'r'), Some(b'b'), _)
+        | (Some(b'j' | b'n'), Some(b't'), _)
             if ends(2) =>
         {
             true
@@ -436,6 +482,8 @@ fn may_start_word(bytes: &[u8], at: usize) -> bool {
                 | b"mds"
                 | b"mld"
                 | b"bil"
+                | b"bin"
+                | b"lcr"
                 | b"bio"
                 | b"bln"
                 | b"tys"
@@ -488,7 +536,9 @@ fn may_scale_unicode(text: &str, end: usize) -> bool {
         }
         let after = end.saturating_add(c.len_utf8());
         is_inline_space(c)
-            && (may_start_word(text.as_bytes(), after) || non_latin_word(text, after).is_some())
+            && (may_start_word(text.as_bytes(), after)
+                || non_latin_word(text, after).is_some()
+                || char_at(text, after).is_some_and(|h| han_magnitude(h).is_some()))
     })
 }
 
@@ -549,28 +599,95 @@ fn word_end(text: &str, start: usize) -> usize {
     at
 }
 
-/// The power of ten a long form stands for, case aside.
-fn word_magnitude(word: &str) -> Option<u32> {
+/// The power of ten a long form stands for, case aside, and the other
+/// powers a locale gives it.
+fn word_magnitude(word: &str) -> Option<(u32, u16)> {
     if !word.is_ascii() {
-        return lookup(ACCENTED_WORDS, word);
+        return lookup(ACCENTED_WORDS, word).map(|magnitude| (magnitude, 0));
     }
     let mut lower = [0_u8; LONGEST_WORD];
     let lower = lower.get_mut(..word.len())?;
     lower.copy_from_slice(word.as_bytes());
     lower.make_ascii_lowercase();
-    ascii_word(lower)
+    let magnitude = ascii_word(lower)?;
+    let also = if &*lower == b"billion" {
+        powers(&[12])
+    } else {
+        0
+    };
+    Some((magnitude, also))
+}
+
+/// The power an abbreviation stands for in a corpus, case aside, and the
+/// other powers a locale gives it: every one [`abbreviation`] reads.
+fn loose_name(word: &str) -> Option<(u32, u16)> {
+    let mut lower = [0_u8; 1];
+    if let Some(single) = lower.get_mut(..word.len()) {
+        single.copy_from_slice(word.as_bytes());
+        single.make_ascii_lowercase();
+        let found = match &*single {
+            b"k" | b"n" => (3, 0),
+            b"m" => (6, powers(&[9])),
+            b"b" => (9, powers(&[3, 12])),
+            b"t" => (12, powers(&[9])),
+            b"l" => (5, 0),
+            _ => return None,
+        };
+        return Some(found);
+    }
+    longer_abbreviation(word).map(|(magnitude, _, also)| (magnitude, also))
+}
+
+/// Whether the scale word ending at byte `end` is written as the locales
+/// that give its name another power write it: a currency mark after it ("2
+/// Md €", "1 billion EUR"), or the "of" of French, Spanish, Italian or
+/// Portuguese ("1 billion d'euros", "2 bn de reais"). English puts the
+/// currency first ("$2 billion").
+fn continental(text: &str, end: usize) -> bool {
+    if marked_after(text, end) {
+        return true;
+    }
+    let Some(rest) = text.get(end..) else {
+        return false;
+    };
+    let Some(rest) = rest.strip_prefix(is_inline_space) else {
+        return false;
+    };
+    ["d'", "d\u{2019}", "de ", "di "]
+        .iter()
+        .any(|of| starts_with_lowercase(rest, of))
+}
+
+/// The decimal mark the language of the scale word `word` writes: a point
+/// after an English word; a comma after any other Latin word; after a letter
+/// every locale writes alike ("M", "k"), a comma where it is written as the
+/// continental locales write it ("M€"), all of which write a decimal comma,
+/// and none otherwise.
+fn word_mark(word: &str, continental: bool) -> Option<char> {
+    const POINT: [&str; 14] = [
+        "hundred", "thousand", "million", "billion", "trillion", "lakh", "lakhs", "crore",
+        "crores", "bn", "tn", "cr", "lcr", "l",
+    ];
+    const EITHER: [&str; 6] = ["k", "m", "b", "t", "mm", "mn"];
+    if POINT.iter().any(|w| w.eq_ignore_ascii_case(word)) {
+        Some('.')
+    } else if continental || !EITHER.iter().any(|w| w.eq_ignore_ascii_case(word)) {
+        Some(',')
+    } else {
+        None
+    }
 }
 
 /// The scale written after the digits `start..end`, `next` being the
 /// character at `end`: glued ("12.5K", "3bn", "1,2万", "12million"), or after
-/// one space ("1.2 million", "3 Mrd.", "12 k€", "3 млн"). A word reads only
-/// when nothing but a letterless character follows it.
+/// one space ("1.2 million", "3 Mrd.", "12 k€", "3 млн", "200 万"). A word
+/// reads only when nothing but a letterless character follows it.
 ///
 /// With `loose`, as a corpus is read, an abbreviation reads in any case and
 /// without the currency or the dot that tells it from a unit in a reply
-/// ("5 m", "38.08 Mio"), and a name glued to the digits may run into the next
-/// word, as a scraped page prints "43Kmembers": a reading taken more widely
-/// only ever grounds more.
+/// ("5 m", "38.08 Mio"), at every power a locale gives it, and a name glued
+/// to the digits may run into the next word, as a scraped page prints
+/// "43Kmembers": a reading taken more widely only ever grounds more.
 pub(super) fn scale_after(
     text: &str,
     start: usize,
@@ -579,7 +696,7 @@ pub(super) fn scale_after(
     loose: bool,
 ) -> Option<Scale> {
     if han_magnitude(next).is_some() {
-        return han_scale(text, start..end);
+        return han_scale(text, start..end, end);
     }
     let spaced = is_inline_space(next);
     let word_start = if spaced {
@@ -587,11 +704,19 @@ pub(super) fn scale_after(
     } else {
         end
     };
+    if spaced && char_at(text, word_start).is_some_and(|c| han_magnitude(c).is_some()) {
+        return han_scale(text, start..end, word_start);
+    }
     let open_ended = loose && !spaced;
     if let Some((magnitude, stop)) = non_latin_word(text, word_start) {
         let ends = open_ended || !char_at(text, stop).is_some_and(is_boundary);
+        // Russian writes a decimal comma; Arabic, Hebrew, Hindi and Thai a point.
+        let cyrillic =
+            char_at(text, word_start).is_some_and(|c| ('\u{400}'..='\u{4ff}').contains(&c));
         return ends.then_some(Scale {
             magnitude,
+            also: 0,
+            mark: Some(if cyrillic { ',' } else { '.' }),
             end: stop,
             rest: 0,
         });
@@ -609,47 +734,46 @@ pub(super) fn scale_after(
     if char_at(text, word_stop).is_some_and(is_boundary) {
         return None;
     }
-    if let Some(magnitude) = word_magnitude(word) {
-        return Some(compound(text, word_stop, magnitude).unwrap_or(Scale {
+    let continental = loose || continental(text, word_stop);
+    let others = |also: u16| if continental { also } else { 0 };
+    let mark = word_mark(word, continental);
+    if let Some((magnitude, also)) = word_magnitude(word) {
+        let plain = Scale {
             magnitude,
+            also: others(also),
+            mark,
             end: word_stop,
             rest: 0,
-        }));
-    }
-    let (magnitude, needs) = abbreviation(word).or_else(|| {
-        loose
-            .then(|| lowercase_abbreviation(word))
-            .flatten()
-            .map(|magnitude| (magnitude, Needs::Nothing))
-    })?;
-    let currency = || marked_before(text, start) || marked_after(text, word_stop);
-    let reads = loose
-        || match needs {
-            Needs::Nothing => true,
-            Needs::CurrencyWhenSpaced => !spaced || currency(),
-            Needs::Currency => currency(),
-            Needs::DotOrCurrency => bytes.get(word_stop) == Some(&b'.') || currency(),
         };
+        return Some(
+            compound(text, word_stop, magnitude).map_or(plain, |scale| Scale { mark, ..scale }),
+        );
+    }
+    let (magnitude, needs, also) = if loose {
+        loose_name(word).map(|(magnitude, also)| (magnitude, Needs::Nothing, also))?
+    } else {
+        abbreviation(word)?
+    };
+    let currency = || marked_before(text, start) || marked_after(text, word_stop);
+    let reads = match needs {
+        Needs::Nothing => true,
+        Needs::CurrencyWhenSpaced => !spaced || currency(),
+        Needs::Currency => currency(),
+        Needs::DotOrCurrency => bytes.get(word_stop) == Some(&b'.') || currency(),
+    };
     reads.then_some(Scale {
         magnitude,
+        also: others(also),
+        mark,
         end: word_stop,
         rest: 0,
     })
 }
 
-/// [`loose_abbreviation`] for `word` as written.
-fn lowercase_abbreviation(word: &str) -> Option<u32> {
-    let mut lower = [0_u8; 3];
-    let lower = lower.get_mut(..word.len())?;
-    lower.copy_from_slice(word.as_bytes());
-    lower.make_ascii_lowercase();
-    loose_abbreviation(lower)
-}
-
 /// The longest name that starts `word`, a run of letters from byte `start`
 /// of `text` glued to the digits: a long form or an abbreviation, case
-/// aside. A long form that is the whole word may lead a compound, as a reply
-/// reads it.
+/// aside, at every power a locale gives it. A long form that is the whole
+/// word may lead a compound, as a reply reads it.
 fn glued_name(text: &str, word: &str, start: usize) -> Option<Scale> {
     word.char_indices()
         .rev()
@@ -658,18 +782,23 @@ fn glued_name(text: &str, word: &str, start: usize) -> Option<Scale> {
         .find_map(|len| {
             let name = word.get(..len)?;
             let end = start.saturating_add(len);
-            if let Some(magnitude) = word_magnitude(name) {
+            if let Some((magnitude, also)) = word_magnitude(name) {
                 let whole = (len == word.len())
                     .then(|| compound(text, end, magnitude))
                     .flatten();
                 return Some(whole.unwrap_or(Scale {
                     magnitude,
+                    also,
+                    mark: None,
                     end,
                     rest: 0,
                 }));
             }
+            let (magnitude, also) = loose_name(name)?;
             Some(Scale {
-                magnitude: lowercase_abbreviation(name)?,
+                magnitude,
+                also,
+                mark: None,
                 end,
                 rest: 0,
             })
@@ -692,6 +821,8 @@ fn compound(text: &str, end: usize, magnitude: u32) -> Option<Scale> {
         .find(|&&(head, next, _)| head == magnitude && same_word(next, word))?;
     Some(Scale {
         magnitude: total,
+        also: 0,
+        mark: None,
         end: stop,
         rest: 0,
     })

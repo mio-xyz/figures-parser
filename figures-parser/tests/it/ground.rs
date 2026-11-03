@@ -357,16 +357,20 @@ fn keeps_a_figure_apart_from_the_id_version_or_unit_it_sits_in() {
 }
 
 #[test]
-fn grounds_a_figure_that_fits_two_readings_by_either() {
+fn holds_a_figure_that_also_groups_to_its_thousands_reading() {
+    // "$206,788" never states $206.788, so the decimal reading's whole part
+    // is no amount either.
     let reply = "Paid $123.456 in total.";
-    for corpus in ["amount 123456", "amount 123.456", "amount 123"] {
+    for corpus in ["amount 123456", "amount 123.456"] {
         assert_eq!(
             ungrounded_figures(reply, corpus),
             Vec::<String>::new(),
             "{corpus}"
         );
     }
-    assert_eq!(ungrounded_figures(reply, "amount 124"), ["123.456"]);
+    for corpus in ["amount 123", "amount 123.457", "amount 124"] {
+        assert_eq!(ungrounded_figures(reply, corpus), ["123.456"], "{corpus}");
+    }
 }
 
 #[test]
@@ -487,7 +491,7 @@ fn grounds_a_lone_round_figure_by_a_printed_value_it_rounds_at_two_significant_d
     );
     // A round figure keeps its sign, and a link's digits round nothing.
     assert_eq!(
-        ungrounded_figures("It moved by -3,200.", "delta 3225"),
+        ungrounded_figures("It moved by -3,200.", "delta +3225"),
         ["-3,200"]
     );
     assert_eq!(

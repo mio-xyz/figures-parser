@@ -109,15 +109,15 @@ fn grounds_whatever_grounds_the_exact_figure() {
 }
 
 #[test]
-fn takes_a_scaled_power_of_ten_from_where_a_value_rounds_up_to_it() {
-    for corpus in ["9500000", "9960000", "14999999"] {
+fn takes_a_scaled_figure_to_the_place_its_digits_are_written_to() {
+    for corpus in ["9500000", "9960000", "10499999"] {
         assert_eq!(
             ungrounded_figures("10 million users", corpus),
             Vec::<String>::new(),
             "{corpus}"
         );
     }
-    for corpus in ["9499999", "7213000", "15000000"] {
+    for corpus in ["9499999", "7213000", "10500000", "14999999"] {
         assert_eq!(
             ungrounded_figures("10 million users", corpus),
             ["10 million"],
@@ -175,7 +175,14 @@ fn holds_an_approximate_figure_to_its_sign() {
         ungrounded_figures("~-12,500", "delta: -12487"),
         Vec::<String>::new()
     );
-    assert_eq!(ungrounded_figures("~-12,500", "delta: 12487"), ["~-12,500"]);
+    assert_eq!(
+        ungrounded_figures("~-12,500", "delta: +12487"),
+        ["~-12,500"]
+    );
+    assert_eq!(
+        ungrounded_figures("~-12,500", "delta: 12487"),
+        Vec::<String>::new()
+    );
     assert_eq!(
         ungrounded_figures("~12,500", "delta: -12487"),
         Vec::<String>::new()

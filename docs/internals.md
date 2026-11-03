@@ -59,7 +59,9 @@ make the digits after it part of a word.
 A token records what stands around it:
 
 - a currency sign (`\p{Sc}`) or an ISO 4217 code before or after it, with at
-  most one space between;
+  most one space between. A mark before another figure is that figure's
+  ("12 $750"), and a code set apart between two figures marks neither
+  ("2,685 USD 2026");
 - a sign before it, read by a fast one-byte check, then a full look-back
   that crosses a currency mark and the bidi marks Arabic and Persian print
   ("-€1,234.50", "€ -1.234,50", "EUR-1'234.50"). A dash after a digit or a
@@ -90,7 +92,10 @@ A thousands run also yields its groups as neighbours, marked `derived`: they
 ground a reply's figure, since a printed table may mean either, but a reply
 is never held to them. A single dot or comma before three digits fits both
 thousands and a decimal ("1.250" is 1,250 in Berlin and 1.25 in Boston) and
-yields both.
+yields both, the decimal marked `ambiguous`: it grounds, and a reply states
+it only before a scale word whose language writes that decimal mark (see
+[Scale words](#scale-words)), since "$206,788" never states $206.788. No
+grouping writes a zero lead, so "0,850" is a decimal only.
 
 ### What a reply is held to
 
@@ -113,11 +118,12 @@ of them and reported once.
 
 ### Signs
 
-A reply's "-12,500" needs a negative value in the corpus, and its "+12,500"
-a value that is not negative. An unsigned figure takes either sign, since a
-reply may put the sign in words ("fell by 12,500"). Accounting's parentheses,
-"($1,234.50)", ground a negative in the corpus, but hold a reply to no sign,
-since prose writes an aside the same way.
+A reply's "-12,500" is not grounded by a printed "+12,500", nor its
+"+12,500" by a printed "-12,500". An unsigned value grounds either, since a
+source puts the sign in words ("fell by 12,500", "fee: 2,000") as often as in
+digits, and an unsigned reply figure takes either sign. Accounting's
+parentheses, "($1,234.50)", ground a negative in the corpus, but hold a reply
+to no sign, since prose writes an aside the same way.
 
 The corpus walk reads no sign up front. A corpus token's sign is read only
 when one of its readings matches a signed reply figure's value, so a signed
@@ -125,11 +131,14 @@ reply costs no more than an unsigned one.
 
 ### Approximation
 
-A figure scaled or written in words is grounded by any corpus value that
-rounds to it at the precision it is written with: its last nonzero digit for
-a whole number, its last digit for a decimal. "1.2 million" takes 1,150,000
-to 1,249,999. A power of ten with one significant digit takes from where a
-value rounds up to it, so "10 million" takes 9,500,000 to 14,999,999.
+A figure written in words is grounded by any corpus value that rounds to it
+at the precision it is written with: its last nonzero digit for a whole
+number, its last digit for a decimal. A scaled figure rounds at the last
+digit its digits are written to, which the zeros the scale adds do not show:
+"1.2 million" takes 1,150,000 to 1,249,999, "34,0M" 33,950,000 to
+34,049,999 and "10 million" 9,500,000 to 10,499,999. A power of ten with one
+significant digit takes from where a value rounds up to it, so "1 million"
+takes 950,000 to 1,499,999.
 
 A figure behind an approximation mark takes a whole unit of that digit on
 either side, both ends included, since a model writes "~3,440" for a 3,449 it
@@ -139,7 +148,10 @@ cut as often as for one it rounded: "~12,500" takes 12,400 to 12,600,
 with it.
 
 The range is added to the exact key, so a mark never grounds less than the
-bare figure. An approximate figure is reported as written, mark included.
+bare figure, and an approximate figure that is not scaled rounds a printed
+value at two significant digits as an exact one does ("~$1,000.7" is
+grounded by 1,001.7). An approximate figure is reported as written, mark
+included.
 
 ### Scale words
 
@@ -150,13 +162,20 @@ in English, French, German, Spanish, Italian and Portuguese; the CLDR
 abbreviations are read with their case. A scaled figure is stated as rounded,
 so "$1.2 million" is grounded by 1,150,000 to 1,249,999.
 
-An abbreviation that also names a unit reads as a scale in a reply only
-beside a currency: "$5m" scales, "5m" (minutes), "5mm" and "5 mi" do not. The
-capitals "M", "K", "B" and "T", and "k", "b" and "tn", read glued to the
-digits ("3.2M", "7B", "2.8T"), and after a space only beside a currency ("5
-M€"), where a lone letter is otherwise a unit or a word ("500 m", "1750 N").
-"Mio" and "Bio" need their dot or a currency, since the bare letters are also
-a name. A long form reads glued to the digits too ("12million").
+The abbreviations are those of the CLDR compact formats of the locales the
+host reads, and a few more ("Tsd", "Mds", "MM", "crores"): "jt", "rb", "tr",
+"nt", "lcr", "tri", "bi", "Md", "Mn", "mln", "bn", "bln" and their kin read
+wherever they stand, a multi-letter one case aside. An abbreviation that
+also names a unit or is also a word reads as a scale in a reply only beside
+a currency: "$5m" scales, "5m" (minutes), "5t" (tonnes), "5l" (litres),
+"5mm", "5 mi" (miles), "5 mn" (French minutes), "5 bin bags", "5 Mr", "5 md"
+files, "5 cr" credits and "12,500 CR" (a credit) do not. The capitals "M",
+"K", "B" and "T", and "k", "b" and "tn", read glued to the digits ("3.2M",
+"7B", "2.8T"), and after a space only beside a currency ("5 M€"), where a
+lone letter is otherwise a unit or a word ("500 m", "1750 N", "5 tn" of
+tonnes). "Mio" and "Bio" need their dot or a currency, since the bare
+letters are also a name and a word ("Bio" is organic). A long form reads
+glued to the digits too ("12million").
 
 The long forms of Dutch, Polish, Swedish, Turkish, Indonesian and Vietnamese
 ("3 miljoen", "4 miliony", "5 milyar", "7 juta", "3 tỷ") are read with the
@@ -164,17 +183,38 @@ others, and the scale words of other scripts after the digits, glued or after
 a space: Russian ("3 млн", "2 миллиарда"), Arabic, Persian, Hebrew, Hindi
 ("2 लाख") and Thai, which glues them to the next word as well ("5ล้านคน"). A
 word after a thousand or a lakh can multiply it: "mil millones", "mila
-miliardi", "lakh crore". Each abbreviation reads at the one scale of the
-language that writes it so: "tn" is 10¹², though Swedish writes a thousand
-"tn".
+miliardi", "mille miliardi", "lakh crore", "nghìn tỷ". A Han or Hangul
+multiplier reads after a space too ("200 万"), since it is never a unit.
+
+A name some locale gives another power ("billion" is 10¹² in French and
+German, "bn" in French and Swedish, "b" a thousand in Turkish, "tn" a
+thousand in Swedish, "m" a billion in Indonesian, "t" a billion in
+Vietnamese) reads at each where the figure is written as those locales
+write it: a currency mark after the scale ("2 bn €", "1 billion EUR") or
+the "of" of French, Spanish, Italian or Portuguese ("1 billion d'euros").
+Elsewhere it reads at the power English gives it, as English puts the
+currency first ("$2 billion" is 10⁹, "2tn" 10¹²).
+
+A run that also groups ("1,250", "8.566") is a decimal before a scale word
+too where the word's language writes that decimal mark: a comma before a
+Latin word other than English ("8,566 Mrd.", "12,500 rb") or a Cyrillic one
+("8,566 млрд"), and before any word written with a currency after it, which
+is how the continental locales, all of which write a decimal comma, write an
+amount ("1,250 M€"); a point before an English word ("1.250 million") or a
+word of another script. The thousands reading is kept beside it, so the
+corpus grounds either. Elsewhere the run is thousands: "£1,250 million" is
+1,250 million.
 
 A corpus reads scale words loosely (`Tokens::loose_scales`): an abbreviation
 in any case and without the currency or the dot a reply needs ("38.08 M",
 "2,5 Mio", "took 5 m", "12 k rows"), and a name glued to the digits even when
 it runs into the next word, as a scraped page prints "43Kmembers" or
 "1.5bnviews", read as its longest name. Such a token yields its digits' own
-readings beside the scaled ones, since the letters may be a unit after all; a
-reading taken more widely only ever grounds more.
+readings beside the scaled ones, since the letters may be a unit after all,
+and every power a locale gives a name; a reading taken more widely only ever
+grounds more. A spelled number that starts inside a token's scale words
+("mil millones" of "78.78 mil millones") is that token's, and is not read
+again.
 
 Hangul writes the same multipliers (천, 만, 억, 조) and reads as Han does
 ("3억5000만" is 350,000,000).
@@ -277,19 +317,23 @@ amount; `Reading::stated_amount(true)` holds such a run from 10,000 up, for
 `Amounts`, which reads the reply once and grounds a clone of its claims, one
 vector, against each print (`shared_with`), ratios skipped as well. The keys
 stay apart from the claims for that: `Needles` holds what a walk reads,
-`Claims` what it closes.
+`Claims` what it closes. `Amounts` also reads a scaled figure's digits as
+printed (`Tokens::keep_digits`), since a print that carries "9.162" vouches
+for the reply's "9.162 jt" as much as one that carries 9,162,000,000.
+`states_figure` reads a text's scaled figures both ways too.
 
 Once the walk leaves a claim open, the reply's round ranges are read: two
 tokens with nothing but a dash between them (a currency mark and spaces
-aside), each a whole number of at most two significant digits, low to high.
-One corpus pass then marks each range a printed value falls inside, and the
+aside), each a whole number of at most two significant digits, low to high,
+the second written without a sign of its own. One corpus pass then marks each range a printed value falls inside, and the
 claims stated as exactly its bounds close.
 
 A claim still open after that, stated as a whole number of at most two
 significant digits ("$3,200", "45,000"), is then read at that precision: one
 more corpus pass rounds each printed value to the claim's unit (100 for a
 four-digit figure, halves up) and closes the claim the result equals, the
-claim's sign still held. A figure of one significant digit is read at two,
+claim's sign still held; a scaled claim keeps the place it is written to
+instead. A figure of one significant digit is read at two,
 so "3,000" takes 2,950 to 3,049 and never 2,500 to 3,499; a turn printing
 thousands of prices thus grounds few round figures by chance.
 
@@ -304,8 +348,13 @@ cento", "per cento"); or a multiplication sign glued after it (`x`, `X`,
 it ("8.9x" is a figure and a sign, "1920x1080" and "0x1F" are words); or a
 percent sign before it, as Turkish and Basque write one, standing after
 nothing, whitespace or an opening bracket or quote ("%11", never a link's
-"%20"). A letter or a digit right after a mark ends it ("50%off", "12
-percentage points"). The reading against the mark is the ratio's figure: the
+"%20"), unless a currency mark stands between ("% $45" is an amount) or the
+sign is set apart from the figure after it and stands one space after a
+figure, which it marks ("84 % 8,322"). A digit, or two hex digits of a
+link's escape, right after a sign ends it ("%25", "%2C"), and a letter after
+a percent word ("12 percentage points"); a word glued to a sign still
+follows a percentage ("50%off"). A sign on the next line marks nothing. The
+reading against the mark is the ratio's figure: the
 whole token, or of numbers a run sets side by side the one against the mark;
 a group of a thousands run is none.
 
@@ -322,14 +371,17 @@ claim whose whole part is more than one away from the printed value's is
 skipped before the exact comparison. The mark readers turn most tokens
 away on one byte: a percent mark, a times sign, a space before a sign or
 a bidi mark each start with one of a few bytes. A bare whole number
-never grounds one, since it may be either operand of the division, and 0%
-and 100% are never held. The person's words (`said`) ground a ratio too: the
+never grounds one, since it may be either operand of the division. The
+person's words (`said`) ground a ratio too: the
 numbers they stated, and for each pair the quotient and the change, each
 also in percent, compared in floating point with the same tolerance, over
 at most thirty numbers. The numbers are read once; the pairs are tried per
 stated ratio and never stored. Sizes are compared, so a sign on either side does
 not matter; the reply's sign is kept in what is reported, and one ratio is
-named once however its mark is written, by its figure's text.
+named once however its mark is written, by its figure's text, a sign against
+its figure and a word after a space ("12 percent"). `ungrounded_ratios_with`
+takes the person's words as a function, called only when a claim is left
+once the corpus is read.
 
 ### Arithmetic in prose
 
@@ -374,7 +426,8 @@ place, the quotient rounded to half of the per-unit amount's). The
 candidates and the questions they raise (is this amount, over this count, a
 printed quotient; and for each larger amount of the clause taken as its
 total, of what other printed amount) are set before the corpus is read, so
-a reply with none never reads it. The corpus is then read line by line, its
+a reply with none never reads it; `mispaired_per_unit_with` takes the
+corpus as a function, called only then. The corpus is then read line by line, its
 digits as printed (no scale word), each figure met against every open
 question as it is read, so nothing of the corpus is kept: a line answers a
 question when it carries the count, a value the amount rounds, and a larger
@@ -385,6 +438,29 @@ itself is no clause's total. The values are compared in floating point, as
 the host's TypeScript does, and the worked quotient is printed as English
 prints an amount, rounding half up on the shortest decimal that reads back
 as the value.
+
+### Readers for the host's other checks
+
+The host's other checks read figures the way these comparisons do, and the
+library gives them those readings. `stated_figures` reads a reply's clause
+as the per-unit check does: its links, ratios and scaled figures left out, a
+run that groups read as thousands, each figure with its value, its places
+and the currency mark before it. `printed_figures` reads a printed line as
+the per-unit check reads the corpus: every reading of every figure, a
+letter allowed after one, and apart the amounts (behind a currency mark, or
+with a decimal part). `numeric_tokens` gives each token of a result with its
+span and values, the decimal reading of a run that also groups only when
+read loosely. `without_links` blanks a text's links.
+
+`sheet_findings` walks a turn's script runs for the worksheet checks. The
+caller says what each run did (it listed its rows, took a ledger frame, read
+a grid by hand) and what rows it listed; a run sharing no amount with the
+reply (`Amounts`) holds it to nothing. An amount shared with a run that
+lists its rows is checked; one shared with a run that took a ledger frame,
+when some run read a grid, or with two amounts or more a run read off a grid
+itself, is unchecked. The rows listed by a run the reply draws on are owed,
+and those whose amount the reply does not state (`states_figure`) are
+returned apart.
 
 ## Links
 

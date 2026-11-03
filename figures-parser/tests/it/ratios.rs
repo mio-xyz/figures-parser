@@ -118,12 +118,14 @@ fn the_size_is_compared_and_the_sign_is_reported() {
 }
 
 #[test]
-fn none_and_all_are_never_held() {
+fn holds_none_and_all_as_any_ratio() {
+    // "up 100%" is a division as much as "up 12%" is.
     assert_eq!(
-        ungrounded_percentages(
-            "0% of the Brain leads came in, and 100% of the spend is on Add2Slack; 100.0% done.",
-            CPLS
-        ),
+        ungrounded_percentages("0% churn, and revenue up 100%; 100.0% done.", CPLS),
+        ["0%", "100%", "100.0%"]
+    );
+    assert_eq!(
+        ungrounded_percentages("Revenue up 100%.", "growth_rate = 1.0"),
         Vec::<String>::new()
     );
 }
@@ -135,9 +137,11 @@ fn a_sign_or_a_word_that_does_not_end_the_figure_is_no_percentage() {
         Vec::<String>::new()
     );
     assert_eq!(
-        ungrounded_percentages("Use code 50%off, up 12 percentage points.", CPLS),
+        ungrounded_percentages("Up 12 percentage points, see a.io/x?q=7%2C8.", CPLS),
         Vec::<String>::new()
     );
+    // A word glued to the sign still follows a percentage.
+    assert_eq!(ungrounded_percentages("Get 50%off today.", CPLS), ["50%"]);
     assert_eq!(
         ungrounded_percentages("Build v12% and id x50%", ""),
         Vec::<String>::new()

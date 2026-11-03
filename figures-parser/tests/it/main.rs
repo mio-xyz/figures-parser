@@ -16,6 +16,7 @@ mod digits;
 mod durations;
 mod emails;
 mod ground;
+mod host;
 mod ids;
 mod locales;
 mod pages;
