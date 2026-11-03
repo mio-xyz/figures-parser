@@ -1,4 +1,14 @@
-use figures_parser::{fabricated_urls, ungrounded_urls, urls};
+use figures_parser::urls;
+
+/// The link check with no integration hosts declared.
+fn fabricated_urls<'r>(reply: &'r str, corpus: &str) -> Vec<&'r str> {
+    figures_parser::fabricated_urls(reply, corpus, &[])
+}
+
+/// The reply check with no integration hosts declared.
+fn ungrounded_urls(reply: &str, corpus: &str, prompt: &str) -> Vec<String> {
+    figures_parser::ungrounded_urls(reply, corpus, prompt, &[])
+}
 
 fn texts(s: &str) -> Vec<&str> {
     urls(s).into_iter().map(|u| u.text).collect()
@@ -231,7 +241,7 @@ fn flags_an_item_named_without_its_link_when_a_tool_result_carried_its_url() {
             corpus,
             ""
         ),
-        ["#87 (named without its link, https://github.com/acme-co/frontend/issues/87)"]
+        ["#87 (https://github.com/acme-co/frontend/issues/87)"]
     );
 }
 
@@ -366,5 +376,328 @@ fn unwraps_a_slack_link_whatever_the_case_of_its_scheme() {
     assert_eq!(
         texts("<HTTPS://Acme.IO/a_b\\|label>"),
         ["HTTPS://Acme.IO/a_b"]
+    );
+}
+
+#[test]
+fn grounds_a_link_a_source_printed_without_its_scheme() {
+    assert_eq!(
+        fabricated_urls(
+            "See https://github.com/org/repo.",
+            "repo: github.com/org/repo"
+        ),
+        Vec::<&str>::new()
+    );
+    assert_eq!(
+        fabricated_urls(
+            "See https://github.com/org/repo.",
+            "repo: github.com/org/repository"
+        ),
+        Vec::<&str>::new()
+    );
+    assert_eq!(
+        fabricated_urls(
+            "See https://github.com/org/repo.",
+            "mail: x@github.com/org/repo"
+        ),
+        ["https://github.com/org/repo"]
+    );
+    assert_eq!(
+        fabricated_urls(
+            "See https://github.com/org/repo.",
+            "foo.github.com/org/repo"
+        ),
+        ["https://github.com/org/repo"]
+    );
+}
+
+const HOSTS: [&str; 3] = ["github.com", "linear.app", "notion.so"];
+
+fn built(url: &str, corpus: &str) -> bool {
+    figures_parser::fabricated_urls(url, corpus, &HOSTS).is_empty()
+}
+
+#[test]
+fn takes_a_page_naming_no_item_on_a_services_own_host() {
+    assert!(built("https://github.com/new", ""));
+    assert!(built("https://app.pipedrive.com", ""));
+    assert!(built("https://linear.app/", ""));
+    assert!(built("https://github.com/settings/security", ""));
+    assert!(built("https://github.com/settings", ""));
+    assert!(built("https://www.github.com/settings/security", ""));
+    assert!(!built("https://github.com/settings/tokens/12345", ""));
+    assert!(!built("https://github.com/settings/keys/new", ""));
+    // An owner and a repo, an id, or an unknown host hold to the turn's own print.
+    assert!(!built("https://github.com/mio-xyz/invented-repo", ""));
+    assert!(!built("https://github.com/mio-xyz/settings", ""));
+    assert!(!built("https://github.com/pull/12", ""));
+    assert!(!built("https://www.google.com", ""));
+    // A query or a fragment too.
+    assert!(!built("https://github.com/new?x=1", ""));
+    assert!(!built("https://github.com/new#setup", ""));
+    assert!(!built("https://app.pipedrive.com/?x=1", ""));
+    // A shape's host gets its root and never a page under it.
+    assert!(built("https://www.facebook.com/", ""));
+    assert!(!built("https://www.facebook.com/someinventedpage", ""));
+    assert!(!built("https://app.pipedrive.com/settings", ""));
+    assert!(!built(
+        "https://mioxyz.slack.com/archives",
+        "mioxyz.slack.com"
+    ));
+    assert_eq!(
+        figures_parser::fabricated_urls(
+            "https://www.facebook.com/someinventedpage",
+            "",
+            &["facebook.com"]
+        ),
+        ["https://www.facebook.com/someinventedpage"]
+    );
+}
+
+#[test]
+fn builds_a_slack_message_link_from_its_channel_and_ts_on_the_workspace_the_turn_printed() {
+    let corpus = "https://mioxyz.slack.com/archives/C09R2NX3D1R/p1791443682601779 | thread_ts: 1791180327.741099 in C09R2NX3D1R";
+    let reply = "https://mioxyz.slack.com/archives/C09R2NX3D1R/p1791180327741099";
+    assert!(built(reply, corpus));
+    assert!(built(
+        &format!("{reply}?thread_ts=1791180327.741099&cid=C09R2NX3D1R"),
+        corpus
+    ));
+    assert!(!built(
+        &format!("{reply}?thread_ts=1791180327.741100&cid=C09R2NX3D1R"),
+        corpus
+    ));
+    assert!(!built(&format!("{reply}?thread_ts="), corpus));
+    assert!(!built(&format!("{reply}?utm_source=mio"), corpus));
+    assert!(!built(&format!("{reply}#top"), corpus));
+    assert!(!built(
+        "https://mioxyz.slack.com/archives/C09R2NX3D1R/p1791180327.741099",
+        corpus
+    ));
+    assert!(!built(
+        "https://mioxyz.slack.com/archives/C09R2NX3D1R/p1791180327741100",
+        corpus
+    ));
+    assert!(!built(
+        "https://mioxyz.slack.com/archives/C0OTHER0001/p1791180327741099",
+        corpus
+    ));
+    assert!(!built(
+        "https://other.slack.com/archives/C09R2NX3D1R/p1791180327741099",
+        corpus
+    ));
+}
+
+#[test]
+fn builds_a_pipedrive_record_link_from_an_id_the_turn_printed() {
+    let corpus = "ID: 3 | Title: Acme renewal | URL: None\nID: 31 | Title: Beta";
+    assert!(built("https://app.pipedrive.com/deal/3", corpus));
+    assert!(built("https://app.pipedrive.com/person/31", corpus));
+    assert!(!built("https://app.pipedrive.com/deal/1", corpus));
+    assert!(!built("https://app.pipedrive.com/lead/3", corpus));
+    assert!(!built("https://acme.pipedrive.com/deal/3", corpus));
+    assert!(built(
+        "https://acme.pipedrive.com/deal/3",
+        &format!("{corpus}\nacme.pipedrive.com")
+    ));
+    assert!(!built("https://app.pipedrive.com/deal/3?x=1", corpus));
+    assert!(!built("https://app.pipedrive.com/deal/3#notes", corpus));
+}
+
+#[test]
+fn builds_a_pages_ad_library_link_from_the_page_id_the_turn_printed() {
+    let corpus = "{'id': '1219275764612649', 'name': 'Mio'}";
+    let library = "https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=US&view_all_page_id=";
+    assert!(built(
+        &format!("{library}1219275764612649&search_type=page"),
+        corpus
+    ));
+    assert!(!built(
+        &format!("{library}1219275764612650&search_type=page"),
+        corpus
+    ));
+}
+
+#[test]
+fn gives_an_items_page_link_never_its_api_one_and_each_item_an_id_names() {
+    let api = "https://api.github.com/repos/mio-xyz/coworker/issues/3647";
+    assert_eq!(ungrounded_urls("Open: #3647.", api, ""), none());
+    assert_eq!(
+        ungrounded_urls(
+            "Open: #3647.",
+            &format!("{api} https://github.com/mio-xyz/coworker/pull/3647"),
+            ""
+        ),
+        ["#3647 (https://github.com/mio-xyz/coworker/pull/3647)"]
+    );
+    assert_eq!(
+        ungrounded_urls(
+            "Open: #12.",
+            "https://github.com/a/one/issues/12 https://github.com/a/two/pull/12",
+            ""
+        ),
+        ["#12 (https://github.com/a/two/pull/12 or https://github.com/a/one/issues/12)"]
+    );
+    assert_eq!(
+        ungrounded_urls(
+            "Open: #12.",
+            "https://gitlab.com/api/v4/projects/1/issues/12",
+            ""
+        ),
+        none()
+    );
+}
+
+#[test]
+fn reads_an_id_inside_code_as_code_never_as_an_item_named() {
+    let corpus = "https://github.com/mio-xyz/coworker/pull/429";
+    assert_eq!(
+        ungrounded_urls("Run `gh pr checkout #429` first.", corpus, ""),
+        none()
+    );
+    assert_eq!(
+        ungrounded_urls("```\ngit log --grep '#429'\n```", corpus, ""),
+        none()
+    );
+    // A fence closes at a line with at least as many backticks, or at the end.
+    assert_eq!(
+        ungrounded_urls("```\ngit log --grep '#429'\n````\nThen #429.", corpus, ""),
+        [format!("#429 ({corpus})")]
+    );
+    assert_eq!(
+        ungrounded_urls("```\ngit log --grep '#429'", corpus, ""),
+        none()
+    );
+    assert_eq!(
+        ungrounded_urls("Run ``#429`` then #429.", corpus, ""),
+        [format!("#429 ({corpus})")]
+    );
+    assert_eq!(
+        ungrounded_urls("Run ``#429` then nothing.", corpus, ""),
+        [format!("#429 ({corpus})")]
+    );
+}
+
+#[test]
+fn takes_an_example_domain_link_the_prompt_illustrates_a_format_with_as_no_items_own() {
+    let prompt = "Inline by identifier: [#429](https://example.com/issues/429)";
+    assert_eq!(ungrounded_urls("Open: #429.", "", prompt), none());
+    assert_eq!(
+        ungrounded_urls("Open: #429.", "https://example.com/issues/429", prompt),
+        ["#429 (https://example.com/issues/429)"]
+    );
+    assert_eq!(
+        ungrounded_urls("Open: #429.", "", "Repo: https://github.com/o/r/pull/429"),
+        ["#429 (https://github.com/o/r/pull/429)"]
+    );
+}
+
+#[test]
+fn takes_a_number_linked_to_a_page_of_another_kind_as_that_pages_own() {
+    let sweep = "https://mfc-nyc.slack.com/archives/C0B9H0H1YJZ/p1791652457074079";
+    assert_eq!(
+        ungrounded_urls(&format!("Between Sweep #59 and [#60]({sweep})."), sweep, ""),
+        none()
+    );
+    let pr = "https://github.com/mio-xyz/coworker/pull/418";
+    assert_eq!(
+        ungrounded_urls(&format!("[#429]({pr})"), pr, ""),
+        [format!("[#429]({pr})")]
+    );
+    assert_eq!(
+        ungrounded_urls(&format!("[#429]({pr}/files)"), &format!("{pr}/files"), ""),
+        [format!("[#429]({pr}/files)")]
+    );
+}
+
+const PR: &str = "https://github.com/mio-xyz/coworker/pull/3647";
+const DOTTED: &str = "https://mioxyz.slack.com/archives/C09R2NX3D1R/p1791180327.741099";
+const UNDOTTED: &str = "https://mioxyz.slack.com/archives/C09R2NX3D1R/p1791180327741099";
+
+#[test]
+fn keeps_the_findings_apart_by_kind_and_lists_them_as_the_flat_check_does() {
+    let reply =
+        "See [#87](https://acme.io/repo), [PR 512](url) and https://acme.io/made-up; open #12.";
+    let corpus = "https://acme.io/repo https://github.com/a/one/issues/12";
+    let findings = figures_parser::link_findings(reply, corpus, "", &[]);
+    assert_eq!(findings.unprinted, ["https://acme.io/made-up"]);
+    assert_eq!(findings.placeholders, ["url"]);
+    assert_eq!(findings.misdirected, ["[#87](https://acme.io/repo)"]);
+    assert_eq!(
+        findings.unlinked,
+        ["#12 (https://github.com/a/one/issues/12)"]
+    );
+    assert!(!findings.is_empty());
+    assert_eq!(findings.all(), ungrounded_urls(reply, corpus, ""));
+    assert!(figures_parser::link_findings("Nothing linked.", "", "", &[]).is_empty());
+}
+
+#[test]
+fn mends_the_dot_a_slack_message_link_kept_from_its_ts_wherever_the_reply_writes_it() {
+    let reply = format!(
+        "[Axel]({DOTTED}) and <{DOTTED}|this one>, then {DOTTED}?thread_ts=1791180327.741099."
+    );
+    assert_eq!(
+        figures_parser::mended_links(&reply, "").text,
+        format!(
+            "[Axel]({UNDOTTED}) and <{UNDOTTED}|this one>, then {UNDOTTED}?thread_ts=1791180327.741099."
+        )
+    );
+    let right = format!("[Axel]({UNDOTTED})");
+    assert_eq!(figures_parser::mended_links(&right, "").text, right);
+    assert_eq!(
+        figures_parser::mended_links(&format!("{DOTTED}?q=$&x"), "").text,
+        format!("{UNDOTTED}?q=$&x")
+    );
+    // A ts of another length, or a link off Slack, is left as written.
+    for untouched in [
+        "https://mioxyz.slack.com/archives/C09R2NX3D1R/p1791180327.7410",
+        "https://example.com/archives/C09R2NX3D1R/p1791180327.741099",
+    ] {
+        let mended = figures_parser::mended_links(untouched, "");
+        assert_eq!(mended.text, untouched);
+        assert_eq!(mended.mends, none());
+    }
+}
+
+#[test]
+fn mends_an_item_named_without_its_link_where_the_reply_first_names_it_in_prose() {
+    let corpus = format!(
+        "{{\"issue_url\": \"https://api.github.com/repos/mio-xyz/coworker/issues/3647\", \"html_url\": \"{PR}\"}}\nCORE-4517 https://linear.app/mioxyz/issue/CORE-4517/fix-it"
+    );
+    assert_eq!(
+        figures_parser::mended_links(
+            "Pick up `#3647` (#3647, **CORE-4517**); #3647 is small.",
+            &corpus
+        )
+        .text,
+        format!(
+            "Pick up `#3647` ([#3647]({PR}), **[CORE-4517](https://linear.app/mioxyz/issue/CORE-4517)**); #3647 is small."
+        )
+    );
+    // An item linked once already, one the results do not link, and an id naming two items stay.
+    let linked = format!("[the PR]({PR}) is #3647.");
+    assert_eq!(figures_parser::mended_links(&linked, PR).text, linked);
+    assert_eq!(
+        figures_parser::mended_links("Open: #3648.", PR).text,
+        "Open: #3648."
+    );
+    let two = "https://github.com/a/one/issues/12 https://github.com/a/two/issues/12";
+    assert_eq!(
+        figures_parser::mended_links("Open: #12.", two).text,
+        "Open: #12."
+    );
+}
+
+#[test]
+fn a_mended_reply_passes_the_check_and_names_each_repair_made() {
+    let corpus = format!("{PR}\nthread_ts: 1791180327.741099 in C09R2NX3D1R on mioxyz.slack.com");
+    let reply = format!("#3647 came up in {DOTTED}.");
+    assert_eq!(ungrounded_urls(&reply, &corpus, "").len(), 2);
+    let mended = figures_parser::mended_links(&reply, &corpus);
+    assert_eq!(ungrounded_urls(&mended.text, &corpus, ""), none());
+    assert_eq!(
+        mended.mends,
+        [format!("{DOTTED} → {UNDOTTED}"), format!("#3647 → {PR}")]
     );
 }

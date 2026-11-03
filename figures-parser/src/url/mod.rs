@@ -4,8 +4,11 @@
 mod ground;
 mod items;
 mod scan;
+mod shapes;
 
-pub use ground::{fabricated_urls, ungrounded_urls};
+pub use ground::{
+    LinkFindings, Mended, fabricated_urls, link_findings, mended_links, ungrounded_urls,
+};
 pub use scan::{Url, urls};
 
 /// Whether `url` opens with `http://` or `https://`, its scheme in any case.

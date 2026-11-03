@@ -98,9 +98,10 @@ pub fn markdown_links(text: &str) -> Vec<Range<usize>> {
     out
 }
 
-/// Every item identifier named in `text` outside a link, once each, in order.
-pub fn bare_identifiers<'a>(text: &'a str, links: &[Range<usize>]) -> Vec<&'a str> {
-    let mut out: Vec<&str> = Vec::new();
+/// Every item identifier named in `text` outside a link, once each, in
+/// order, with the byte where it first stands.
+pub fn bare_identifiers<'a>(text: &'a str, links: &[Range<usize>]) -> Vec<(usize, &'a str)> {
+    let mut out: Vec<(usize, &str)> = Vec::new();
     let mut at = 0;
     while at < text.len() {
         let inside_link = links.iter().find(|link| link.contains(&at));
@@ -116,8 +117,8 @@ pub fn bare_identifiers<'a>(text: &'a str, links: &[Range<usize>]) -> Vec<&'a st
             .filter(|&len| !char_at(text, at + len).is_some_and(is_ascii_word));
         match found.and_then(|len| text.get(at..at + len)) {
             Some(id) => {
-                if !out.contains(&id) {
-                    out.push(id);
+                if !out.iter().any(|&(_, seen)| seen == id) {
+                    out.push((at, id));
                 }
                 at += id.len();
             }
@@ -153,33 +154,145 @@ pub fn placeholder_targets(text: &str) -> Vec<&str> {
     out
 }
 
-/// The first URL in `text` (`http://` or `https://` up to whitespace, a quote,
-/// `<`, `>`, `)` or `]`) that holds `fragment` not followed by a digit, cut
-/// after the last such `fragment` in it; None for an empty `fragment`.
-pub fn url_with_fragment<'a>(text: &'a str, fragment: &str) -> Option<&'a str> {
-    if fragment.is_empty() || !text.contains(fragment) {
-        return None;
-    }
-    let mut from = 0;
-    while let Some(found) = text.get(from..).and_then(|rest| rest.find("http")) {
-        let start = from + found;
-        from = start + 1;
-        let Some(scheme) = text.get(start..).and_then(|rest| scheme_len(rest, false)) else {
-            continue;
-        };
-        let body_start = start + scheme;
-        let body = text.get(body_start..).unwrap_or_default();
-        let body_len = body
-            .find(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | '<' | '>' | ')' | ']'))
-            .unwrap_or(body.len());
-        let mut end = body_len;
-        while let Some(at) = body.get(..end).and_then(|run| run.rfind(fragment)) {
-            let after = body_start + at + fragment.len();
-            if !char_at(text, after).is_some_and(|c| c.is_ascii_digit()) {
-                return text.get(start..after);
+/// Every URL in `text` (`http://` or `https://` up to whitespace, a quote,
+/// `<`, `>`, `)` or `]`) that holds `fragment` not followed by a digit, each
+/// cut after the last such `fragment` in it; none for an empty `fragment`.
+pub fn urls_with_fragment<'a, 'f>(
+    text: &'a str,
+    fragment: &'f str,
+) -> impl Iterator<Item = &'a str> + use<'a, 'f> {
+    let mut from = if fragment.is_empty() || !text.contains(fragment) {
+        text.len()
+    } else {
+        0
+    };
+    std::iter::from_fn(move || {
+        while let Some(found) = text.get(from..).and_then(|rest| rest.find("http")) {
+            let start = from + found;
+            from = start + 1;
+            let Some(scheme) = text.get(start..).and_then(|rest| scheme_len(rest, false)) else {
+                continue;
+            };
+            let body_start = start + scheme;
+            let body = text.get(body_start..).unwrap_or_default();
+            let body_len = body
+                .find(|c: char| {
+                    c.is_whitespace() || matches!(c, '"' | '\'' | '<' | '>' | ')' | ']')
+                })
+                .unwrap_or(body.len());
+            let mut end = body_len;
+            while let Some(at) = body.get(..end).and_then(|run| run.rfind(fragment)) {
+                let after = body_start + at + fragment.len();
+                if !char_at(text, after).is_some_and(|c| c.is_ascii_digit()) {
+                    from = body_start + body_len;
+                    return text.get(start..after);
+                }
+                end = at + fragment.len() - 1;
             }
-            end = at + fragment.len() - 1;
+            from = body_start + body_len;
         }
+        None
+    })
+}
+
+/// The first of [`urls_with_fragment`].
+pub fn url_with_fragment<'a>(text: &'a str, fragment: &str) -> Option<&'a str> {
+    urls_with_fragment(text, fragment).next()
+}
+
+/// Whether `url` is an API's link, which serves data, not the page: on an
+/// `api.` host (`api.github.com/repos/…`) or under an `/api/` path
+/// (`gitlab.com/api/v4/…`).
+pub fn is_api_link(url: &str) -> bool {
+    let Some(rest) = scheme_len(url, true).and_then(|n| url.get(n..)) else {
+        return false;
+    };
+    let host_len = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let authority = rest.get(..host_len).unwrap_or_default();
+    let host = authority.rsplit('@').next().unwrap_or(authority);
+    host.get(..4)
+        .is_some_and(|lead| lead.eq_ignore_ascii_case("api."))
+        || rest.get(host_len..).is_some_and(|path| {
+            path.get(..5)
+                .is_some_and(|lead| lead.eq_ignore_ascii_case("/api/"))
+        })
+}
+
+/// How many backticks run from byte `at` of `text`.
+fn backtick_run(text: &str, at: usize) -> usize {
+    run_end(text.as_bytes(), at, |b| b == b'`').saturating_sub(at)
+}
+
+/// Whether a run of backticks at byte `at` opens its line, behind at most
+/// three spaces.
+fn opens_line(text: &str, at: usize) -> bool {
+    let head = text.get(..at).unwrap_or_default();
+    let line_start = head.rfind('\n').map_or(0, |nl| nl + 1);
+    let lead = head.get(line_start..).unwrap_or_default();
+    lead.len() <= 3 && lead.bytes().all(|b| b == b' ')
+}
+
+/// A fence's end: the first later line opening with at least `length`
+/// backticks, or the end of the text when no line closes it.
+fn fence_end(text: &str, open: usize, length: usize) -> usize {
+    let bytes = text.as_bytes();
+    let mut line = text
+        .get(open..)
+        .and_then(|rest| rest.find('\n'))
+        .map(|nl| open + nl);
+    while let Some(nl) = line {
+        let mut at = nl + 1;
+        while at < nl + 4 && bytes.get(at) == Some(&b' ') {
+            at += 1;
+        }
+        let run = backtick_run(text, at);
+        if run >= length {
+            return at + run;
+        }
+        line = text
+            .get(nl + 1..)
+            .and_then(|rest| rest.find('\n'))
+            .map(|next| nl + 1 + next);
+    }
+    text.len()
+}
+
+/// A code span's end: the next run of exactly `length` backticks, or None.
+fn span_end(text: &str, open: usize, length: usize) -> Option<usize> {
+    let mut from = open + length;
+    while let Some(found) = text.get(from..)?.find('`') {
+        let close = from + found;
+        let run = backtick_run(text, close);
+        if run == length {
+            return Some(close + length);
+        }
+        from = close + run;
     }
     None
+}
+
+/// The byte ranges of the code in `text`, as `CommonMark` reads it: three or
+/// more backticks opening a line open a fence, and any other run a code
+/// span. An identifier inside either is code.
+pub fn code_spans(text: &str) -> Vec<Range<usize>> {
+    let mut out = Vec::new();
+    let next_tick = |from: usize| {
+        text.get(from..)
+            .and_then(|rest| rest.find('`'))
+            .map(|at| from + at)
+    };
+    let mut open = next_tick(0);
+    while let Some(at) = open {
+        let length = backtick_run(text, at);
+        let end = if length >= 3 && opens_line(text, at) {
+            Some(fence_end(text, at, length))
+        } else {
+            span_end(text, at, length)
+        };
+        if let Some(end) = end {
+            out.push(at..end);
+        }
+        open = next_tick(end.unwrap_or(at + length));
+    }
+    out
 }

@@ -5,9 +5,9 @@ use std::hint::black_box;
 
 use figures_parser::number::scan::tokens;
 use figures_parser::{
-    Date, extract_numbers, misdated_weekdays, prose_arithmetic, ungrounded_durations,
-    ungrounded_emails, ungrounded_figures, ungrounded_identifiers, ungrounded_percentages,
-    ungrounded_urls, urls,
+    Amounts, Date, extract_numbers, link_findings, mended_links, misdated_weekdays,
+    prose_arithmetic, ungrounded_durations, ungrounded_emails, ungrounded_figures,
+    ungrounded_identifiers, ungrounded_ratios, ungrounded_urls, urls,
 };
 
 /// The size every corpus is built to, in bytes.
@@ -52,8 +52,9 @@ pub struct Case {
 pub type Path<'c> = (&'static str, Box<dyn Fn() -> usize + 'c>);
 
 /// The hot paths both benches measure over `case`.
-pub fn paths(case: &Case) -> [Path<'_>; 13] {
+pub fn paths(case: &Case) -> [Path<'_>; 17] {
     let text = case.text.as_str();
+    let amounts = Amounts::of(UNGROUNDED_REPLY);
     [
         ("tokens", Box::new(move || tokens(black_box(text)).count())),
         (
@@ -75,7 +76,7 @@ pub fn paths(case: &Case) -> [Path<'_>; 13] {
         ("urls", Box::new(move || urls(black_box(text)).len())),
         (
             "ungrounded_urls",
-            Box::new(move || ungrounded_urls(LINK_REPLY, black_box(text), "").len()),
+            Box::new(move || ungrounded_urls(LINK_REPLY, black_box(text), "", &[]).len()),
         ),
         (
             "ungrounded_emails",
@@ -94,14 +95,34 @@ pub fn paths(case: &Case) -> [Path<'_>; 13] {
             Box::new(move || misdated_weekdays(black_box(text), Date::constant(2026, 10, 2)).len()),
         ),
         (
-            "ungrounded_percentages",
-            Box::new(move || ungrounded_percentages(PERCENT_REPLY, black_box(text)).len()),
+            "ungrounded_ratios",
+            Box::new(move || ungrounded_ratios(PERCENT_REPLY, black_box(text), "").len()),
         ),
         (
             "prose_arithmetic",
             Box::new(move || {
                 prose_arithmetic(UNGROUNDED_REPLY, ARITHMETIC_MESSAGE, black_box(text)).len()
             }),
+        ),
+        (
+            "ungrounded_ratios/said",
+            Box::new(move || ungrounded_ratios(PERCENT_REPLY, black_box(text), SAID).len()),
+        ),
+        (
+            "amounts/shared_with",
+            Box::new(move || amounts.shared_with(black_box(text)).len()),
+        ),
+        (
+            "link_findings",
+            Box::new(move || {
+                link_findings(LINK_REPLY, black_box(text), "", &[])
+                    .unlinked
+                    .len()
+            }),
+        ),
+        (
+            "mended_links",
+            Box::new(move || mended_links(MEND_REPLY, black_box(text)).mends.len()),
         ),
     ]
 }
@@ -146,6 +167,15 @@ const OTHER_REPLY: &str = "Mail zed.q@nowhere.example.org about 9f2e4c1a7b and C
 /// [`UNGROUNDED_REPLY`] with signs, so the corpus is read with its signs too.
 const SIGNED_REPLY: &str =
     "Revenue moved by -1,010,000, direct −26,171 and the rate -1.1785; +99,999 bytes.";
+
+/// A message giving the thirty numbers the ratio comparison reads at most,
+/// none of whose pairwise ratios a reply states, so every pair is tried.
+const SAID: &str = "Counts: 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, \
+     97, 101, 103, 107, 109, 113, 127, 131, 137, 139.";
+
+/// A reply with a dotted message link and an item named without its link,
+/// so the mend reads the whole corpus for the item and rewrites the text.
+const MEND_REPLY: &str = "#3647 came up in https://mioxyz.slack.com/archives/C09R2NX3D1R/p1791180327.741099, see CORE-1711.";
 
 /// A reply with percentages no corpus carries, so the comparison reads the
 /// whole corpus for each.

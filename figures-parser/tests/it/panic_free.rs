@@ -9,9 +9,10 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use figures_parser::number::scan::{Scratch, tokens};
 use figures_parser::utf16::{Utf16Cursor, units};
 use figures_parser::{
-    Date, durations, emails, extract_numbers, fabricated_urls, identifiers, misdated_weekdays,
-    numbers, prose_arithmetic, ungrounded_durations, ungrounded_emails, ungrounded_figures,
-    ungrounded_identifiers, ungrounded_percentages, ungrounded_urls, unseen_tokens, urls,
+    Date, durations, emails, extract_numbers, fabricated_urls, identifiers, link_findings,
+    mended_links, misdated_weekdays, numbers, prose_arithmetic, ungrounded_durations,
+    ungrounded_emails, ungrounded_figures, ungrounded_identifiers, ungrounded_ratios,
+    ungrounded_urls, unseen_tokens, urls,
 };
 
 /// Calls every entry point on the three texts, and returns a sum the
@@ -45,14 +46,19 @@ fn exercise(reply: &str, corpus: &str, prompt: &str) -> usize {
         + misdated_weekdays(corpus, today_for(corpus)).len();
     n + ungrounded_figures(reply, corpus).len()
         + ungrounded_figures(corpus, reply).len()
-        + ungrounded_percentages(reply, corpus).len()
-        + ungrounded_percentages(corpus, reply).len()
+        + ungrounded_ratios(reply, corpus, "").len()
+        + ungrounded_ratios(corpus, reply, "").len()
         + prose_arithmetic(reply, prompt, corpus).len()
         + prose_arithmetic(corpus, reply, prompt).len()
-        + fabricated_urls(reply, corpus).len()
-        + fabricated_urls(corpus, reply).len()
-        + ungrounded_urls(reply, corpus, prompt).len()
-        + ungrounded_urls(prompt, reply, corpus).len()
+        + fabricated_urls(reply, corpus, &[]).len()
+        + fabricated_urls(corpus, reply, &["github.com"]).len()
+        + ungrounded_urls(reply, corpus, prompt, &[]).len()
+        + ungrounded_urls(prompt, reply, corpus, &["github.com"]).len()
+        + link_findings(reply, corpus, prompt, &["github.com"])
+            .all()
+            .len()
+        + mended_links(reply, corpus).mends.len()
+        + mended_links(corpus, reply).text.len()
         + ungrounded_emails(reply, corpus, prompt).len()
         + ungrounded_identifiers(reply, corpus, prompt).len()
         + unseen_tokens(reply, corpus, prompt).len()

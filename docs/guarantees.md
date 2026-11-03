@@ -62,6 +62,6 @@ deliberate one:
 - a number written in words is read;
 - a currency code or a sign after a figure marks it too;
 - a link right after a backtick or an unspaced script is read;
-- a Slack link is unwrapped whatever the case of its scheme;
+- a `<url|label>` wrapped link is unwrapped whatever the case of its scheme;
 - both ends of a weekday range are checked;
 - a weekday pair is reported once, as written.

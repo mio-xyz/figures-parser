@@ -50,15 +50,13 @@ fn a_space_joins_only_thousands_but_a_double_space_or_a_dash_does_not() {
 }
 
 // A run gives back its last group when it ends against a letter: "12.5kg"
-// yields "12", "v3.1" yields "1", and an id's digits yield nothing.
+// yields "12", while "v3.1" and an id's digits yield nothing, the "1" of the
+// version continuing the number its "3" opened.
 #[test]
 fn stands_apart_from_the_letters_of_a_word_backtracking_by_group() {
-    assert_eq!(
-        texts("See p1789368220119 and v3.1, about 12.5kg."),
-        ["1", "12"]
-    );
+    assert_eq!(texts("See p1789368220119 and v3.1, about 12.5kg."), ["12"]);
     assert_eq!(texts("FY2026 revenue: $1,250,000."), ["1,250,000"]);
-    assert_eq!(texts("2026x and 1,250kW"), ["1"]);
+    assert_eq!(texts("2026h and 1,250kW"), ["1"]);
     assert_eq!(texts("12.5K9 then 7"), ["12", "7"]);
 }
 
@@ -165,4 +163,19 @@ fn reads_digits_after_an_arabic_proclitic() {
         ["١٢٠", "٣", "2", "300", "٤"]
     );
     assert_eq!(texts("نحو٣ ومو٥"), Vec::<&str>::new());
+}
+
+#[test]
+fn a_corpus_keeps_a_run_a_unit_is_glued_to_and_a_times_sign_ends_no_word() {
+    let corpus: Vec<&str> = tokens("expanding by 7,103MW to reach 26,455MW")
+        .against_letters()
+        .map(|t| t.text)
+        .collect();
+    assert_eq!(corpus, ["7,103", "26,455"]);
+    assert_eq!(
+        texts("roughly 8.9x more, 1,250,000X, 2026x"),
+        ["8.9", "1,250,000", "2026"]
+    );
+    assert_eq!(texts("at 1920x1080, mask 0x1F, v2.5x"), Vec::<&str>::new());
+    assert_eq!(texts("增长率为１２．５％"), ["１２．５"]);
 }

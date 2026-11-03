@@ -41,7 +41,7 @@ assert_eq!(ungrounded_figures(reply, corpus), ["48,200"]);
 
 // The link's path is not the one the result gave.
 assert_eq!(
-    ungrounded_urls(reply, corpus, ""),
+    ungrounded_urls(reply, corpus, "", &[]),
     ["https://crm.acme.io/reports/q3-final"]
 );
 
@@ -63,9 +63,10 @@ what a text states, with byte spans.
 | Kind | Check | Reader | A reply's item is grounded when |
 |---|---|---|---|
 | [Numbers](#numbers) | `ungrounded_figures` | `numbers`, `extract_numbers` | the corpus carries the same value, in any notation |
-| [Percentages](#percentages) | `ungrounded_percentages` | | a percentage or a printed fraction in the corpus rounds to it |
+| [Amounts against one print](#amounts-against-one-print) | `Amounts`, `shares_amount`, `states_figure` | | one print carries the amount |
+| [Ratios](#ratios) | `ungrounded_ratios` | | a ratio or a printed decimal rounds to it, or the person's numbers give it |
 | [Arithmetic in prose](#arithmetic-in-prose) | `prose_arithmetic` | | the corpus prints the same value |
-| [Links](#links) | `ungrounded_urls`, `fabricated_urls` | `urls` | the corpus holds the link, or its path under no other host |
+| [Links](#links) | `ungrounded_urls`, `fabricated_urls` | `urls` | the corpus holds the link, with or without its scheme, its path under no other host, or the ids it was built from |
 | [Weekdays](#weekdays) | `misdated_weekdays` | | the weekday is the date's own |
 | [Email addresses](#email-addresses) | `ungrounded_emails` | `emails` | the corpus or the prompt carries it, case aside |
 | [Identifiers](#identifiers) | `ungrounded_identifiers` | `identifiers` | the corpus or the prompt carries it |
@@ -88,10 +89,27 @@ assert_eq!(ungrounded_figures(reply, corpus), ["1,190,000"]);
 
 What to expect:
 
-- **Small figures pass.** A bare figure under 10,000 is usually a count or
-  the model's own arithmetic, so it is not checked. A thousands separator
-  lowers that floor to 1,000, a currency mark to 100, and a decimal with four
-  fractional digits or more is always checked.
+- **A bare digit run passes.** "541611" is a NAICS code, a zip or an order
+  number as often as an amount, and one the model knows is in no result, so
+  it is never checked against the whole turn (one print can vouch for it: see
+  [Amounts against one print](#amounts-against-one-print)). A thousands
+  separator states an amount and is checked from 1,000 up, a currency mark
+  from 100 up, and a decimal with four fractional digits or more always. A
+  number in words, with a scale word or after an approximation mark is an
+  amount too, checked from 10,000 up.
+- **A link's digits are the link check's.** A timestamp or an id inside a URL
+  is no figure; a link's label ("[$206,000](…)") still is.
+- **A printed decimal grounds what it rounds to.** "327.76" grounds "328" as
+  well as "327"; a decimal is matched as written, so "1.0842" grounds "1.084"
+  and not "1.085".
+- **A round range brackets a printed figure.** "$200-300" or "$1,500 – 2,000"
+  is grounded by any value printed inside it, when both bounds have at most
+  two significant digits and run low to high. "$8,093-8,220" states two
+  figures and is checked bound by bound.
+- **A lone round figure rounds a printed value.** "$3,200" is grounded by a
+  printed 3,225, any value that rounds to it at two significant digits. A
+  figure of one significant digit is read at two as well, so "$3,000" takes
+  2,950 to 3,049 and not 3,148. "$3,250" states a value and is matched whole.
 - **Signs count.** "-12,500" needs a negative value in the corpus. An
   unsigned figure takes either sign, since prose often says "fell by 12,500".
 - **Rounded figures match what they round.** "~12,500", "≈ $12,500", "$1.2
@@ -116,31 +134,65 @@ assert_eq!((first.fraction.as_deref(), first.currency), (Some("50"), true));
 assert_eq!(first.sign, Sign::Minus);
 ```
 
-### Percentages
+### Amounts against one print
 
-`ungrounded_percentages(reply, corpus)` returns the percentages the reply
-states that the corpus does not carry: a ratio worked out in prose, where the
-base is the step that slips.
+A bare digit run is never held to the whole turn, but one print can vouch
+for it: `Amounts::of(reply)` reads the reply's amounts once (the figures
+`ungrounded_figures` holds, plus bare runs from 10,000 up; a ratio's figure
+such as "7,789%" or "1,250x" is no amount), and `shared_with(text)` returns
+the ones a print carries, as the reply wrote them. `shares_amount(reply,
+text)` says whether there is one. `states_figure(text, figure)` says whether
+a text states a given figure, however it groups it, by its whole part. A
+host walking a run's results uses these to tell which result a reply's
+figures came from.
 
 ```rust
-use figures_parser::ungrounded_percentages;
+use figures_parser::{Amounts, shares_amount, states_figure};
 
-let corpus = "Sign-ups $19.16 per lead, Add2Slack $13.43; overall_rate = 0.1429";
+let amounts = Amounts::of("2027 holds $19,850 and Airbnb $729, up 7,789%.");
+assert_eq!(amounts.shared_with("Total 19850 | Airbnb 729"), ["19,850", "729"]);
+assert!(!shares_amount("Which tab, 2026 or 2027?", "2026 tab: 81 rows"));
+assert!(states_figure("the TOTAL row says 19851", "19,851"));
+```
+
+### Ratios
+
+`ungrounded_ratios(reply, corpus, said)` returns the ratios the reply states
+that neither the corpus nor `said`, the person's own words, supports: a
+share, a multiple or a change in percent worked out in prose, where the base
+is the step that slips. A ratio is a percentage ("11%", "11 %", Turkish
+"%11", "12 percent") or a multiple ("8.9x", "3×", "1,250,000X").
+
+```rust
+use figures_parser::ungrounded_ratios;
+
+let corpus = "Sign-ups $19.16 per lead, Referrals $13.43; overall_rate = 0.1429";
 let reply = "Overall 14.3% converted, and Sign-ups costs 30% more per lead.";
-assert_eq!(ungrounded_percentages(reply, corpus), ["30%"]);
+assert_eq!(ungrounded_ratios(reply, corpus, ""), ["30%"]);
+
+// The person's own numbers give the share.
+let said = "the funnel: 1000 trials, 420 activated";
+assert!(ungrounded_ratios("58% never activate.", "", said).is_empty());
 ```
 
 What to expect:
 
-- **A printed value grounds what rounds to it.** "42.67%" grounds "42.7%"
-  and "43%", not "42.6%". A fraction a script printed grounds its percentage:
-  "0.1429" grounds "14.3%".
-- **A bare number never grounds a percentage.** "leads: 30" does not ground
+- **A printed ratio grounds what rounds to it.** "42.67%" grounds "42.7%"
+  and "43%", not "42.6%"; "8.857x" grounds "8.9x".
+- **A printed decimal grounds a ratio as is or a hundred times it.** "0.1429"
+  and "14.29" both ground "14.3%", "8.857" grounds "8.9x". Money keeps its
+  grouping ("19,850") and grounds nothing here.
+- **A bare whole number never grounds a ratio.** "leads: 30" does not ground
   "30%"; it may be either operand of the division.
+- **The person's numbers ground a ratio.** A number they stated ("up 12
+  percent"), or plain arithmetic over two of their numbers: a quotient or a
+  change, as is or in percent.
 - **The size is compared.** "fell 30%" is grounded by "-29.9%".
 - **None and all pass.** 0% and 100% are read off a count, with no division.
-- **Every sign and word is read:** "12,5 %", "٥٠٪", "１２％", "12 percent",
-  "12 pour cent", "12 Prozent".
+- **One ratio is named once** however its mark is written ("11 %", "11%",
+  "%11").
+- **A size, a hex literal and a product are no multiples:** "1920x1080",
+  "0x1F", "3 x 4".
 
 ### Arithmetic in prose
 
@@ -173,25 +225,50 @@ What to expect:
 
 ### Links
 
-`fabricated_urls(reply, corpus)` returns the links no source gave. A link is
-grounded when the corpus holds it verbatim, or holds its path under no other
-host (as an API's `htmlPath` does).
+`fabricated_urls(reply, corpus, hosts)` returns the links no source gave. A
+link is grounded when the corpus holds it verbatim or without its scheme
+("acme.io/org/repo"), holds its path under no other host (as an API that
+gives a page's path without its host does), or when it is one a reply may
+build: a page naming no item on one of `hosts`, the hosts the caller trusts
+such pages on ("acme.io/new", a host root), or a link in one of the shapes
+the library knows, built from ids the corpus printed (a chat message link
+from its channel and timestamp, a record link from its id; the shapes are
+listed in [docs/internals.md](docs/internals.md#links)).
 
-`ungrounded_urls(reply, corpus, prompt)` is the stricter check for a reply
-about to be sent. It also flags a link on an example domain only the prompt
-carried, a link target that is not a URL (`[PR 512](url)`), an item's label
-on a link that is not the item's own, and an item named without the link a
-result gave for it.
+`ungrounded_urls(reply, corpus, prompt, hosts)` is the stricter check for a
+reply about to be sent. It also flags a link on an example domain only the
+prompt carried, a link target that is not a URL (`[PR 512](url)`), an item's
+label on a link that stands in for it (`[#429](…/repo)`, `[#429](…/pull/418)`;
+a number linked to a page of another kind, such as a chat message, is that
+page's own), and an item named
+in prose without the link a source gave for it, as "#87 (url)", or "#12 (url
+or url)" when the id names an item in two repositories. An id inside code is
+code, an API's link is no item's page, and "/pull/N" is given before
+"/issues/N".
+
+`link_findings(reply, corpus, prompt, hosts)` is the same check with its
+findings kept apart by kind (`unprinted`, `placeholders`, `misdirected`,
+`unlinked`), so a caller words each in its own way; a placeholder target is
+given as written, so a file the caller attached under that name can be told
+apart. `all()` lists them as `ungrounded_urls` does.
+
+`mended_links(reply, corpus)` puts right the link defects a rule can, so
+they cost no rewrite: a chat message link written with the dot of its
+timestamp kept loses it, and an item named in prose without its link is
+linked where the reply
+first names it, when the corpus gives that id one item's link. It returns
+the mended text and each repair as "from → to".
 
 ```rust
 use figures_parser::fabricated_urls;
 
-let corpus = r#"{"html_url": "https://github.com/acme/app/pull/429"}"#;
-let reply = "Merged https://github.com/acme/app/pull/429, next is https://github.com/acme/app/pull/430.";
-assert_eq!(fabricated_urls(reply, corpus), ["https://github.com/acme/app/pull/430"]);
+let corpus = r#"{"html_url": "https://acme.io/app/pull/429"}"#;
+let reply = "Merged https://acme.io/app/pull/429, next is https://acme.io/app/pull/430.";
+assert_eq!(fabricated_urls(reply, corpus, &[]), ["https://acme.io/app/pull/430"]);
+assert!(fabricated_urls("Open https://acme.io/new.", "", &["acme.io"]).is_empty());
 ```
 
-`urls(text)` finds http(s) links, Slack's `<url|label>` and markdown links
+`urls(text)` finds http(s) links, the `<url|label>` wrapping chat apps use and markdown links
 included, without the markup around them.
 
 ### Weekdays
@@ -303,9 +380,11 @@ npm install @mio-xyz/figures-parser
 const fp = require("@mio-xyz/figures-parser");
 
 fp.ungroundedFigures(reply, corpus);             // ["48,200"]
-fp.ungroundedPercentages(reply, corpus);         // ["30%"]
+fp.amountsSharedWith(reply, [print1, print2]);   // [["19,850"], []]; also sharesAmount, statesFigure
+fp.ungroundedRatios(reply, corpus, said);        // ["30%"]
 fp.proseArithmetic(reply, message, corpus);      // ["61,300"]
-fp.ungroundedUrls(reply, corpus, prompt);        // also fabricatedUrls
+fp.ungroundedUrls(reply, corpus, prompt, hosts); // also fabricatedUrls, linkFindings
+fp.mendedLinks(reply, corpus); // { text, mends }
 fp.misdatedWeekdays(reply, "2026-10-09");
 fp.ungroundedEmails(reply, corpus, prompt);
 fp.ungroundedIdentifiers(reply, corpus, prompt); // also unseenTokens
