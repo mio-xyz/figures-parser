@@ -253,8 +253,39 @@ pub const HOUR: &[&str] = &[
     "saat", "sa", "jam", "tuntia", "tunti", "tunnin",
 ];
 
-/// The unit names CLDR writes with a closing dot.
-pub const DOTTED: &[&str] = &["sek", "sn", "min", "dk", "std", "godz", "sa", "ชม"];
+/// The unit names written short, which a closing dot abbreviates rather than
+/// ends a sentence after: CLDR's dotted names, and the English, Spanish,
+/// Indonesian and Swedish short forms ("1 hr. 15 min.", "2 tim. 20 min.").
+pub const DOTTED: &[&str] = &[
+    "sek",
+    "sn",
+    "min",
+    "dk",
+    "std",
+    "godz",
+    "sa",
+    "ชม",
+    "hr",
+    "hrs",
+    "mins",
+    "mn",
+    "mnt",
+    "sec",
+    "secs",
+    "seg",
+    "segs",
+    "dtk",
+    "msec",
+    "msecs",
+    "millisec",
+    "millisecs",
+    "tim",
+    "wk",
+    "wks",
+    "yr",
+    "yrs",
+    "mos",
+];
 
 /// The names of a second, a minute and an hour that end in a letter outside
 /// ASCII (Russian and Ukrainian, with the accusative a count of one takes

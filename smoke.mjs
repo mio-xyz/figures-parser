@@ -44,7 +44,9 @@ assert.deepEqual(rowsOutsideWindow("Nov 4, 9:00-17:00:\n| Nov 4 | a |\n| Nov 6 |
 assert.deepEqual(extract("run 9f2e4c1a", { kinds: ["id"] }).map((e) => [e.kind, e.text, e.shape]), [["id", "9f2e4c1a", "hex"]]);
 assert.deepEqual(ungroundedIdentifiers("CORE-1711 and CORE-1710", "CORE-1710"), ["CORE-1711"]);
 assert.deepEqual(unseenTokens("model claude-opus-5-5", ""), ["claude-opus-5-5"]);
-assert.deepEqual(extract("took 1h30 then 30s", { kinds: ["duration"] }).map((e) => [e.kind, e.text, e.milliseconds, e.centimonths, e.stated]), [["duration", "1h30", 5400000, 0, true], ["duration", "30s", 30000, 0, false]]);
+assert.deepEqual(extract("took 1h30 then 30s", { kinds: ["duration"] }).map((e) => [e.kind, e.text, e.milliseconds, e.centimonths, e.stated]), [["duration", "1h30", 5400000, 0, false], ["duration", "30s", 30000, 0, false]]);
+assert.deepEqual(extract("took 1.250 Sekunden", { kinds: ["duration"] }).map((e) => [e.milliseconds, e.loose]), [[1250000, { length: { milliseconds: 1250, centimonths: 0 }, place: { milliseconds: 1, centimonths: 0 } }]]);
+assert.deepEqual(ungroundedDurations("took 1 hr. 15 min., then 1,250 seconds", "75 minutes; 1.25 seconds"), ["1,250 seconds"]);
 assert.deepEqual(ungroundedDurations("45 minutes, then 2 hours", '{"duration": 2700}'), ["2 hours"]);
 assert.deepEqual(ungroundedDurations("a 6-minute walkthrough, then a 2-minute recap, each 10–30 min", "350 seconds; the longest ran 25 minutes"), ["2-minute"]);
 assert.deepEqual(extract("~10–30 min", { kinds: ["duration"] }).map((e) => [e.text, e.from, e.place, e.approximate]), [["10–30 min", { milliseconds: 600000, centimonths: 0 }, { milliseconds: 60000, centimonths: 0 }, true]]);

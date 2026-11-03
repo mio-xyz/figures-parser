@@ -55,12 +55,21 @@ export interface DurationEntity {
    * half a step.
    */
   place: LengthValue
+  /**
+   * The other reading of its digits, when a lone dot or comma before three
+   * digits may group them or end the whole number ("1.250 Sekunden" is
+   * 1,250 seconds, or 1.25). A corpus prints either; a reply states the
+   * first reading alone.
+   */
+  loose?: LooseReading
   /** Whether an approximation mark stands before it ("~5 minutes"). */
   approximate: boolean
   /**
-   * Whether a reply is held to it: false for a number glued to a
-   * one-letter symbol, which may be a plural ("the 90s"), a time of day
-   * ("15h") or a size as well as a length.
+   * Whether a reply is held to it: false for a number beside a one-letter
+   * symbol, which may be a plural ("the 90s"), a time of day ("15h",
+   * "15h30") or a size as well as a length, and for a length in days or
+   * longer units only, which a window ("the last 30 days") or a plan is
+   * written with as well.
    */
   stated: boolean
 }
@@ -142,6 +151,17 @@ export interface LinkFindings {
   misdirected: Array<string>
   /** Items named without the link a source gave them, each with its links. */
   unlinked: Array<string>
+}
+
+/**
+ * The other reading of a duration whose digits fit two, and the step it is
+ * written to.
+ */
+export interface LooseReading {
+  /** The length it reads as. */
+  length: LengthValue
+  /** The step it is written to. */
+  place: LengthValue
 }
 
 /**

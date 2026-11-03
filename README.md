@@ -458,9 +458,9 @@ errors.
 ### Durations
 
 `ungrounded_durations(reply, corpus, prompt)` returns the lengths of time the
-corpus does not carry. A reply's "1h30" is grounded by "90 minutes",
-`PT1H30M`, `1:30:00` or `"elapsed_ms": 5400000`, and its "6-minute" by "350
-seconds", which rounds to it; "~5 minutes" takes a minute either way, and
+corpus does not carry. A reply's "1h30m" is grounded by "90 minutes",
+`PT1H30M`, "took 1:30:00" or `"elapsed_ms": 5400000`, and its "6-minute" by
+"350 seconds", which rounds to it; "~5 minutes" takes a minute either way, and
 "10–30 min" any length inside it. Words and phrases are read in English,
 French, Spanish, Italian, Portuguese and Arabic ("an hour and a half",
 "deux heures et demie", "ساعة ونصف"), and a second, a minute and an hour in
@@ -473,7 +473,7 @@ use figures_parser::ungrounded_durations;
 
 let corpus = r#"{"elapsed_ms": 5400000}"#;
 assert_eq!(
-    ungrounded_durations("The job ran 1h30, then 45 minutes.", corpus, ""),
+    ungrounded_durations("The job ran 1h30m, then 45 minutes.", corpus, ""),
     ["45 minutes"]
 );
 

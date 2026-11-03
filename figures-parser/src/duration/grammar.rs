@@ -161,9 +161,10 @@ pub struct Part {
     /// whole number ("1,250 secondes" as 1.25 seconds, "1.250 Sekunden" as
     /// 1,250).
     pub loose: Option<(Length, Length)>,
-    /// Whether a reply is held to it: not for a number glued to a one-letter
-    /// symbol, which may be a plural ("the 90s"), a time of day ("15h") or a
-    /// size as well as a length.
+    /// Whether a reply is held to it: not for a number beside a one-letter
+    /// symbol, which may be a plural ("the 90s"), a time of day ("15h",
+    /// "15h30") or a size as well as a length, nor for a day or a longer unit,
+    /// which a window or a plan is written with as well.
     pub stated: bool,
 }
 
@@ -403,8 +404,9 @@ const SPACE: &str = r"[ \x{A0}\x{202F}\x{2009}]";
 const GLUED: &str =
     "[0-9]{1,4}h(?:[0-5]?[0-9]m(?:[0-5]?[0-9]s)?|[0-5][0-9])|[0-9]{1,4}m[0-5]?[0-9]s";
 
-/// The pattern of a part: a glued run of units, or an amount (in digits, or
-/// in words followed by a space), a unit, and an optional "and a half".
+/// The pattern of a part: a glued run of units, or an amount (in digits, a
+/// fraction "1/2", "1/4" or "3/4" after an optional whole number, or in words
+/// followed by a space), a unit, and an optional "and a half".
 fn part_pattern() -> String {
     let words = words_of(SINGLES, 0..30);
     let tens = words_of(TENS, 10..100);
@@ -425,7 +427,9 @@ fn part_pattern() -> String {
         })
         .collect::<Vec<_>>()
         .join("|");
-    let digits = format!("(?P<vulgar>{LEAD}[½¼¾])|(?P<printed>{PRINTED})");
+    let digits = format!(
+        r"(?P<slash>(?:(?P<slashwhole>[0-9]{{1,4}}){SPACE}+)?(?-u:\b)(?P<slashpart>1/[24]|3/4))|(?P<vulgar>(?:{LEAD})?[½¼¾])|(?P<printed>{PRINTED})"
+    );
     let worded = format!(
         r"(?i:(?P<couple>(?:a\s+)?couple\s+of|(?:un\s+)?paio\s+di))|(?i:(?P<tens>{tens})(?:\s+(?:y|e|et)\s+|-et-|-|\s+)(?P<ones>{ones}))|(?i:(?P<ittens>{it_tens})[ia]?(?P<itones>{it_ones}))|(?i:(?P<article>an?))|(?i:(?P<word>{words}|{tens}))"
     );
@@ -508,6 +512,18 @@ fn amount(caps: &Groups<'_, '_>) -> Option<(Amount, Option<Amount>)> {
     if let Some(m) = caps.get("vulgar") {
         return Some((Amount::of_digits(m.as_str(), false)?, None));
     }
+    if let Some(part) = caps.get("slashpart") {
+        let whole = caps
+            .get("slashwhole")
+            .map_or(Some(0), |w| w.as_str().parse::<u64>().ok())?;
+        let hundredths = match part.as_str() {
+            "1/2" => 50,
+            "1/4" => 25,
+            _ => 75,
+        };
+        let mantissa = whole.checked_mul(100)?.checked_add(hundredths)?;
+        return Some((Amount { mantissa, scale: 2 }, None));
+    }
     let value = if caps.get("couple").is_some() || caps.get("coupled").is_some() {
         2
     } else if caps.get("article").is_some() || caps.get("elided").is_some() {
@@ -560,7 +576,9 @@ fn read_glued(span: Range<usize>, written: &str) -> Option<Part> {
         smallest,
         place: smallest.one(),
         loose: None,
-        stated: true,
+        // An hour and two digits with no `m` after them ("15h30") is how
+        // French and German write a time of day.
+        stated: !written.ends_with(|c: char| c.is_ascii_digit()),
     })
 }
 
@@ -577,8 +595,15 @@ fn read_part(text: &str, caps: &Groups<'_, '_>) -> Option<Part> {
     let (unit, written) = Unit::ALL
         .into_iter()
         .find_map(|u| caps.get(u.group()).map(|m| (u, m)))?;
-    let digits = caps.get("printed").or_else(|| caps.get("vulgar"));
+    let digits = caps
+        .get("printed")
+        .or_else(|| caps.get("vulgar"))
+        .or_else(|| caps.get("slash"));
     let symbol = written.as_str().chars().count() == 1;
+    // "1/2 h" is a fixed phrase's, which holds a reply to it.
+    if symbol && caps.get("slash").is_some() {
+        return None;
+    }
     // A spaced "y" is the Spanish "and" ("entre 1 y 2 horas"), not a year.
     if written.as_str() == "y" && (digits.is_none() || caps.get("gap").is_some()) {
         return None;
@@ -622,7 +647,7 @@ fn read_part(text: &str, caps: &Groups<'_, '_>) -> Option<Part> {
         smallest: unit,
         place,
         loose,
-        stated: !symbol,
+        stated: !symbol && unit < Unit::Day,
     })
 }
 
@@ -648,22 +673,50 @@ fn read_phrase(text: &str, caps: &Groups<'_, '_>) -> Option<Part> {
         smallest: unit,
         place: unit.times(Amount::whole(step))?,
         loose: None,
-        stated: true,
+        stated: unit < Unit::Day,
     })
 }
 
-/// Whether a unit name ending in `last` may end before byte `at`: not before
-/// a letter, a mark or a digit, except that a name in a script written
-/// without spaces ("3時間かかった", "3시간이") may end before an uncased
-/// letter.
+/// Whether `c` is a digit or a cased letter, which no uncased script
+/// writes.
+fn is_cased_or_digit(c: char) -> bool {
+    c.is_numeric() || c.is_lowercase() || c.is_uppercase()
+}
+
+/// Whether a unit name ending in `last` may end before byte `at`. A name in a
+/// cased script ends before anything but a letter, a mark or a digit. A name
+/// in a script written without spaces ("3時間かかった", "3시간이") may end
+/// before an uncased letter. A name in another uncased script may go on in
+/// letters and marks of its own, an inflection ("۳ ساعته", "5 मिनटों",
+/// "5 دقائقَ"), but not into a cased letter or a digit ("วินาทีly").
 fn ends_named(text: &str, at: usize, last: char) -> bool {
-    char_at(text, at).is_none_or(|c| {
-        let wordlike = c.is_numeric() || c.is_lowercase() || c.is_uppercase();
-        if is_unspaced_script(last) {
-            !wordlike
-        } else {
-            is_unspaced_script(c) || !(wordlike || is_letter(c) || is_mark(c))
-        }
+    let Some(rest) = text.get(at..) else {
+        return true;
+    };
+    let Some(next) = rest.chars().next() else {
+        return true;
+    };
+    if is_unspaced_script(last) {
+        !is_cased_or_digit(next)
+    } else if is_cased_or_digit(last) {
+        is_unspaced_script(next) || !(is_cased_or_digit(next) || is_letter(next) || is_mark(next))
+    } else {
+        !rest
+            .chars()
+            .take_while(|&c| is_cased_or_digit(c) || is_letter(c) || is_mark(c))
+            .any(is_cased_or_digit)
+    }
+}
+
+/// Byte `at` moved past the combining marks that start there: the short
+/// vowels and tanween an Arabic word may be written with ("دقائقَ").
+fn past_marks(text: &str, at: usize) -> usize {
+    text.get(at..).map_or(at, |rest| {
+        at.saturating_add(
+            rest.char_indices()
+                .find(|&(_, c)| !is_mark(c))
+                .map_or(rest.len(), |(i, _)| i),
+        )
     })
 }
 
@@ -832,11 +885,11 @@ fn read_arabic(text: &str, caps: &Groups<'_, '_>) -> Option<Part> {
     let mut plus = caps.get("plus");
     let mut minus = caps.get("minus");
     let mut end = whole.end();
-    if !ends_clean(text, end) {
+    if !ends_clean(text, past_marks(text, end)) {
         // A fraction glued to more letters is not one: read the part without it.
         plus.take().or_else(|| minus.take())?;
         end = one.map_or_else(|| unit_word.end(), |o| o.end());
-        if !ends_clean(text, end) {
+        if !ends_clean(text, past_marks(text, end)) {
             return None;
         }
     }
@@ -895,7 +948,7 @@ fn read_arabic(text: &str, caps: &Groups<'_, '_>) -> Option<Part> {
         smallest: unit,
         place,
         loose: None,
-        stated: true,
+        stated: unit < Unit::Day,
     })
 }
 

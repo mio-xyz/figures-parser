@@ -84,14 +84,16 @@ pub struct Duration<'a> {
     /// The other reading of a length whose digits fit two, and the step it
     /// is written to: a lone dot or comma before three digits may group them
     /// or end the whole number ("1.250 Sekunden" is 1,250 seconds, or 1.25).
-    /// A printed length that grounds either grounds the duration.
+    /// A corpus prints either; a reply states the first reading alone.
     pub loose: Option<(Length, Length)>,
     /// Whether an approximation mark stands before it ("~5 minutes"), which
     /// lets a printed length round to it within a whole step.
     pub approximate: bool,
-    /// Whether a reply is held to it: not when it is only a number glued to a
+    /// Whether a reply is held to it: not when it is only a number beside a
     /// one-letter symbol, which may be a plural ("the 90s"), a time of day
-    /// ("15h") or a size as well as a length.
+    /// ("15h", "15h30", "à 15 h") or a size as well as a length, nor when
+    /// its units are all days or longer, which a window ("the last 30
+    /// days") or a plan ("in 2 weeks") is written with as well.
     pub stated: bool,
 }
 
@@ -222,8 +224,6 @@ pub(crate) struct Want {
     high: Length,
     /// The step it is written to.
     place: Length,
-    /// Its other reading and that reading's step, when its digits fit two.
-    loose: Option<(Length, Length)>,
     /// Whether it is marked approximate.
     approximate: bool,
     /// Whether a printed length grounds it.
@@ -231,7 +231,9 @@ pub(crate) struct Want {
 }
 
 impl Want {
-    /// What `duration` asks of the corpus.
+    /// What `duration` asks of the corpus. A reply is held to the reading
+    /// its digits are read at first, never its loose one: "1,250 seconds" is
+    /// 1,250 seconds, and 1.25 seconds does not ground it.
     const fn of(duration: &Duration<'_>) -> Self {
         Self {
             low: match duration.from {
@@ -240,7 +242,6 @@ impl Want {
             },
             high: duration.length,
             place: duration.place,
-            loose: duration.loose,
             approximate: duration.approximate,
             found: false,
         }
@@ -252,23 +253,7 @@ impl Want {
     /// (a whole step when approximate), a range when the printed bounds lie
     /// inside it widened by as much; the other component matches as written.
     fn grounded_by(&self, low: Length, high: Length) -> bool {
-        self.reads_as(self.low, self.high, self.place, low, high)
-            || self
-                .loose
-                .is_some_and(|(length, place)| self.reads_as(length, length, place, low, high))
-    }
-
-    /// Whether a printed length from `low` to `high` rounds to the reading
-    /// from `want_low` to `want_high` written to `place`, as
-    /// [`grounded_by`](Self::grounded_by) says.
-    fn reads_as(
-        &self,
-        want_low: Length,
-        want_high: Length,
-        place: Length,
-        low: Length,
-        high: Length,
-    ) -> bool {
+        let (want_low, want_high, place) = (self.low, self.high, self.place);
         let calendar = place.centimonths > 0;
         let pick = |l: Length| {
             if calendar {
@@ -310,11 +295,13 @@ impl Want {
 /// The durations in `reply`, once each, whose length neither `corpus` (the
 /// thread, the request, the run's tool results) nor `prompt` carries.
 ///
-/// A length is carried by a duration written out, by any one part of a
-/// list ("1 hour, 30 minutes"), by an ISO 8601 duration (`PT1H30M`), by a
-/// clock reading (`1:30:00`, or `12:30` read both as hours and as minutes),
-/// or by a number under a field named for its unit (`"duration_ms":
-/// 5400000`).
+/// A length is carried by a duration written out, whole ("1 hour, 30
+/// minutes" carries ninety minutes, not thirty), by an ISO 8601 duration
+/// (`PT1H30M`), by a clock reading labelled a length ("took 1:30:00", or
+/// `"duration": "12:30"` read both as hours and as minutes), or by a number
+/// under a field named for its unit (`"duration_ms": 5400000`). An hour
+/// written with its symbol at a time of day ("à 3 h", "de 14h à 15h30")
+/// carries none.
 ///
 /// A printed length carries a reply's when it rounds to it at the
 /// [`place`](Duration::place) the reply writes it to: 350 seconds is "6

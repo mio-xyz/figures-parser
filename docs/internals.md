@@ -690,8 +690,9 @@ corpus with a Kelvin sign or a capital dotted I, which lowercase to `k` and
 
 ## Durations
 
-`durations(text)` reads an amount and a unit: a printed number, "1½", number
-words ("forty-five", "vingt et un", "trentacinque"), glued runs of units
+`durations(text)` reads an amount and a unit: a printed number, "1½", "½",
+a fraction "1/2", "1/4" or "3/4" after an optional whole number ("1 1/2
+hours"), number words ("forty-five", "vingt et un", "trentacinque"), glued runs of units
 ("1h30", "1h5m30s"), and fixed phrases ("half an hour", "un quart d'heure",
 "mezz'ora", "a fortnight"). A printed number is digits of any script in
 groups joined by the symbols a locale prints ("1,250", "1.234,5", "1'250",
@@ -699,13 +700,14 @@ groups joined by the symbols a locale prints ("1,250", "1.234,5", "1'250",
 lone dot or comma before three digits reads both ways ("1.250 Sekunden" is
 1,250 seconds or 1.25), and groups that fit no one number are none. A part
 does not start inside a word or right after a number's symbol or a fraction
-slash ("x7,59 min", "1/2 hours"), and a letter of a script written without
+slash ("x7,59 min", the "2 hours" of "1/2 hours"), and a letter of a script written without
 spaces is no word ("合計5分钟", "30 minutes後").
 
 Parts in falling units join into one length when a space, a hyphen, a comma
 or "and" alone stands between them, within a line ("1 hour and 30
 minutes", "5-minute-50-second", "2 hours - 30 minutes", "2 jours, 4
-heures"); a full stop ends the length ("2 hours. 30 minutes" is two). A bare
+heures"); a full stop ends the length ("2 hours. 30 minutes" is two), unless
+it closes an abbreviation ("1 hr. 15 min." is one). A bare
 number and one dash within the line before a part in digits open a range
 ("10–30 min", "2 - 3 hours"); written high to low ("30-10 minutes", "step 3
 - 2 minutes") it is read as the span between the two numbers, and two equal
@@ -721,11 +723,15 @@ the Finnish genitive ("3 tunnin kokous") and the Russian and Ukrainian
 accusative ("за 1 хвилину"). A name that ends in ASCII joins the
 part pattern; one that ends outside it ("минут", "時間", "giờ") has a
 pattern of its own, run only over a text that is not all ASCII, since the
-part pattern's ASCII word boundary cannot end it. Such a name ends before
-no letter, mark or digit, except that a name in a script written without
-spaces ends before an uncased letter ("3時間かかった"). An abbreviation CLDR
-closes with a dot ("Std.", "godz.", "min.") takes the dot, so a part after
-it still joins ("2 Std. 30 min").
+part pattern's ASCII word boundary cannot end it. A name in a cased script
+ends before no letter, mark or digit; a name in a script written without
+spaces ends before an uncased letter ("3時間かかった"); a name in another
+uncased script may go on in letters and marks of its own, an inflection or
+short vowels ("۳ ساعته", "5 मिनटों", "5 دقائقَ"), but not into a cased letter
+or a digit ("วินาทีly"). An abbreviation, CLDR's dotted ones ("Std.",
+"godz.", "min.") and the short forms "hr", "hrs", "mins", "secs", "tim" and
+their like, takes the dot after it, so a part after it still joins ("2 Std.
+30 min", "1 hr. 15 min.").
 
 Arabic has a pattern of its own, run only over a text that holds Arabic
 letters (one `memchr` scan decides):
@@ -763,24 +769,34 @@ prints a length in any of these forms:
 
 - written out, a range as its two bounds (its upper part is not also read
   alone), a lone dot or comma before three digits both ways ("1,250
-  secondes" is 1.25 seconds as well as 1,250), and each part of a duration
-  a comma or a word joins on its own too, since "1 hour, 30 minutes, 15
-  minutes" may be a list; a part only spaces or hyphens join is one length
-  with its neighbour ("1 hour 30 minutes" does not print "30 minutes");
+  secondes" is 1.25 seconds as well as 1,250); a part joined to another is
+  one length with it ("1 hour 30 minutes", "25 minutes, 59 seconds" and "1
+  hour and 30 minutes" do not print "30 minutes", "25 minutes" or "1 hour");
 - as ISO 8601 (`PT1H30M`);
-- as a clock reading (`1:30:00`; `12:30` reads both as hours and minutes and
-  as minutes and seconds);
+- as a clock reading labelled a length (`"duration": "1:30:00"`, "took
+  1:30:00", "elapsed 3:00:00"), or one whose first field is past a day's
+  hours ("75:30"); `12:30` reads both as hours and minutes and as minutes
+  and seconds. A reading with no such label ("at 10:05", "[10:05:12] INFO",
+  "starts 14:00:00") is as often a time of day;
 - as a number under a field whose name ends in a unit's word or symbol
   (`"duration_ms": 5400000`, `"elapsedHours": 1.5`; a bare `duration` reads
   as seconds or minutes).
 
 A clock reading right after a date (`2026-10-09 14:30`) is a time of day,
-not a length. Rates ("once a day"), dimensions ("3D") and a bare `m`, as
+not a length, and so is an hour written with its symbol after a clock word
+("à 3 h", "um 15h"), before a part of the day ("3 h du matin") or joined to
+another such hour ("de 14h à 15h30"). Rates ("once a day"), dimensions ("3D") and a bare `m`, as
 often a metre or a million, are not durations, nor is a spaced "y", the
 Spanish "and" ("entre 1 y 2 horas"). A number before a one-letter symbol
 ("30s", "24h", "3d", "24 h") may be a plural ("the 90s"), a time of day
-("15h", "à 15 h") or a size, so it grounds a reply's duration but is never
-reported itself. `Duration::stated` says which readings a reply is held to.
+("15h", "à 15 h", and "15h30", the hours and minutes French and German
+write a time of day with) or a size, so it grounds a reply's duration but is
+never reported itself. A length in days or longer units alone ("30 days",
+"2 weeks", "1 year") is not reported either, since a window ("the last 30
+days") and a plan ("in 2 weeks") are written the same way; joined to a
+shorter part ("2 days and 3 hours") it is. A reply is held to the first
+reading of its digits, never the loose one: "1,250 seconds" is not grounded
+by 1.25 seconds. `Duration::stated` says which readings a reply is held to.
 A part inside one of the reply's links is the link's: it is never reported
 and joins no part after it, and a range whose low is inside a link is the
 part after the link alone.

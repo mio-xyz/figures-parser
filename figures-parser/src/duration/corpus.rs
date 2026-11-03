@@ -11,7 +11,9 @@ use rustc_hash::FxHashMap;
 
 use super::grammar::{Amount, Part, Unit, parts};
 use super::{Duration, Length, Want, join};
-use crate::text::{compile, is_ascii_word_byte, is_iso_date, run_end, run_start, same_word};
+use crate::text::{
+    compile, contains_ignoring_case, is_ascii_word_byte, is_iso_date, run_end, run_start, same_word,
+};
 
 /// An ISO 8601 duration (`P1Y2M`, `PT1H30M`, `P3W`).
 static ISO: LazyLock<Option<Regex>> = LazyLock::new(|| {
@@ -155,11 +157,12 @@ fn field_lengths(key: &str, number: &str) -> [Option<Length>; 2] {
     field_units(last_word(key)).map(|unit| unit?.times(amount?))
 }
 
-/// The clock reading whose first colon is at byte `colon`: one to three
-/// digits, two more, optionally two more and up to three decimals, standing
-/// apart from any word. A later colon of a reading is not a first one, and a
-/// reading right after a date (`2026-10-09 14:30`) is a time of day.
-fn clock_at(text: &str, colon: usize) -> Option<&str> {
+/// The clock reading whose first colon is at byte `colon`, and where it
+/// starts: one to three digits, two more, optionally two more and up to three
+/// decimals, standing apart from any word. A later colon of a reading is not
+/// a first one, and a reading right after a date (`2026-10-09 14:30`) is a
+/// time of day.
+fn clock_at(text: &str, colon: usize) -> Option<(usize, &str)> {
     let bytes = text.as_bytes();
     let start = run_start(bytes, colon, |b| b.is_ascii_digit());
     let before = start.checked_sub(1).and_then(|i| bytes.get(i)).copied();
@@ -193,7 +196,112 @@ fn clock_at(text: &str, colon: usize) -> Option<&str> {
         })
         .filter(|&end| free(end))
         .or_else(|| free(minutes).then_some(minutes))?;
-    text.get(start..end)
+    Some((start, text.get(start..end)?))
+}
+
+/// The words a length's label holds, matched inside the label's last word
+/// case aside (`duration`, `video_duration`, `elapsedTime`, "took").
+const LENGTH_CUES: &[&str] = &[
+    "duration",
+    "durée",
+    "dauer",
+    "duración",
+    "duracion",
+    "durata",
+    "duração",
+    "duracao",
+    "duur",
+    "length",
+    "runtime",
+    "uptime",
+    "elapsed",
+    "took",
+    "lasted",
+    "lasting",
+    "lasts",
+    "taken",
+    "spent",
+    "temps",
+    "tempo",
+    "longueur",
+    "länge",
+    "laufzeit",
+    "recording",
+    "video",
+    "audio",
+    "clip",
+    "episode",
+    "total",
+];
+
+/// How many bytes before a clock reading its label is looked for in.
+const LABEL_REACH: usize = 48;
+
+/// Words that may stand between a length's label and its reading ("took
+/// about 1:30:00").
+const FILLERS: &[&str] = &[
+    "about",
+    "approx",
+    "approximately",
+    "around",
+    "roughly",
+    "of",
+    "for",
+    "in",
+    "is",
+    "was",
+    "env",
+    "environ",
+    "ca",
+    "etwa",
+];
+
+/// Whether the clock reading that starts at byte `start` is labelled as a
+/// length: its first field is past a day's hours ("75:30"), or the last word
+/// before it on its line, past punctuation and a filler word, names a length
+/// (`"duration": "1:30:00"`, "took 1:30:00"). A reading after "at", or with
+/// no label ("`[10:05:12] INFO`", "starts 14:00:00"), is as often a time of
+/// day.
+fn labelled_length(text: &str, start: usize, reading: &str) -> bool {
+    let first = reading
+        .split(':')
+        .next()
+        .and_then(|f| f.parse::<u32>().ok());
+    if first.is_some_and(|hours| hours >= 24) {
+        return true;
+    }
+    // A label stands close before its reading; a window of a few words keeps
+    // a long line from being walked back once per reading.
+    let mut from = start.saturating_sub(LABEL_REACH);
+    while !text.is_char_boundary(from) {
+        from = from.saturating_add(1);
+    }
+    let Some(before) = text.get(from..start) else {
+        return false;
+    };
+    let line = before.rsplit_once('\n').map_or(before, |(_, l)| l);
+    let last_word = |t: &str| -> (usize, usize) {
+        let t_end = t
+            .trim_end_matches(|c: char| !(c.is_alphanumeric() || c == '_'))
+            .len();
+        let word_start = t.get(..t_end).map_or(0, |w| {
+            w.trim_end_matches(|c: char| c.is_alphanumeric() || c == '_')
+                .len()
+        });
+        (word_start, t_end)
+    };
+    let (mut word_start, mut word_end) = last_word(line);
+    if line
+        .get(word_start..word_end)
+        .is_some_and(|w| FILLERS.iter().any(|f| w.eq_ignore_ascii_case(f)))
+    {
+        (word_start, word_end) = last_word(line.get(..word_start).unwrap_or_default());
+    }
+    line.get(word_start..word_end).is_some_and(|word| {
+        LENGTH_CUES
+            .iter()
+            .any(|cue| contains_ignoring_case(word, cue))
+    })
 }
 
 /// The field whose separator is at byte `at`: a name, an optional quote and
@@ -226,27 +334,25 @@ fn field_at(text: &str, at: usize) -> Option<(&str, &str)> {
 /// The lengths read at the `:` or `=` at byte `at`: a clock reading's or a
 /// field's.
 fn at_separator(text: &str, at: usize) -> [Option<Length>; 2] {
-    if let Some(reading) = clock_at(text, at) {
-        return clock_lengths(reading);
+    if let Some((start, reading)) = clock_at(text, at) {
+        if labelled_length(text, start, reading) {
+            return clock_lengths(reading);
+        }
+        return [None, None];
     }
     field_at(text, at).map_or([None, None], |(key, number)| field_lengths(key, number))
 }
 
 /// Whether the part at `index` of `parts`, inside `duration`, is a length a
 /// corpus printed on its own: not a range's upper bound, which bounds the
-/// range, and not a part that only spaces and hyphens join to the part
-/// before or after it ("5 minutes 40 seconds", "5-minute-50-second"), which
-/// is one length with it. Parts a comma or a word joins may be a list ("1
-/// hour, 30 minutes, 15 minutes"), so each also stands alone.
-fn stands_alone(text: &str, duration: &Duration<'_>, parts: &[Part], index: usize) -> bool {
+/// range, and not a part joined to the part before or after it ("5 minutes
+/// 40 seconds", "1 hour, 30 minutes", "25 minutes and 59 seconds"), which is
+/// one length with it.
+fn stands_alone(duration: &Duration<'_>, parts: &[Part], index: usize) -> bool {
     let Some(part) = parts.get(index) else {
         return true;
     };
     let inside = |p: &Part| duration.span.start <= p.span.start && p.span.end <= duration.span.end;
-    let tight = |a: &Part, b: &Part| {
-        text.get(a.span.end..b.span.start)
-            .is_some_and(|gap| gap.chars().all(is_tight_joiner))
-    };
     let previous = index
         .checked_sub(1)
         .and_then(|i| parts.get(i))
@@ -269,13 +375,99 @@ fn stands_alone(text: &str, duration: &Duration<'_>, parts: &[Part], index: usiz
         }
     }
     let next = parts.get(index.saturating_add(1)).filter(|p| inside(p));
-    !previous.is_some_and(|p| tight(p, part)) && !next.is_some_and(|n| tight(part, n))
+    previous.is_none() && next.is_none()
 }
 
-/// Whether `c` joins two parts into one length beyond doubt: a space or a
-/// hyphen.
-const fn is_tight_joiner(c: char) -> bool {
-    matches!(c, ' ' | '\t' | '\u{a0}' | '\u{202f}' | '\u{2009}' | '-')
+/// The words before an hour that make it a time of day ("à 15 h", "um 15h",
+/// "from 14h").
+const CLOCK_WORDS: &[&str] = &[
+    "à",
+    "at",
+    "um",
+    "vers",
+    "dès",
+    "ab",
+    "bis",
+    "gegen",
+    "hasta",
+    "desde",
+    "las",
+    "alle",
+    "ore",
+    "entre",
+    "from",
+    "until",
+    "till",
+    "by",
+    "às",
+    "jusqu'à",
+    "jusqu’à",
+];
+
+/// The words that join the two ends of a range of hours ("14h à 15h30").
+const RANGE_WORDS: &[&str] = &["-", "–", "—", "à", "a", "to", "bis", "et", "and", "y"];
+
+/// What follows an hour of the day in French ("3 h du matin").
+const DAY_PARTS: &[&str] = &["du matin", "du soir", "de l'après-midi", "de l’après-midi"];
+
+/// Whether `text` ends in an hour written with its symbol: digits, an
+/// optional space, `h` and optional minutes ("14h", "15 h 30", "8h15").
+fn ends_in_hour(text: &str) -> bool {
+    text.trim_end_matches(|c: char| c.is_ascii_digit())
+        .trim_end_matches([' ', '\u{a0}'])
+        .strip_suffix('h')
+        .is_some_and(|t| {
+            t.trim_end_matches([' ', '\u{a0}'])
+                .ends_with(|c: char| c.is_ascii_digit())
+        })
+}
+
+/// Whether `text` starts with an hour written with its symbol ("15h30",
+/// "16 h").
+fn starts_with_hour(text: &str) -> bool {
+    let t = text.trim_start_matches(|c: char| c.is_ascii_digit());
+    t.len() < text.len() && t.trim_start_matches([' ', '\u{a0}']).starts_with('h')
+}
+
+/// Whether the hour written with its symbol from byte `start` to `end` of
+/// `text` is a time of day: a clock word before it, a part of the day after
+/// it, or another hour a range word joins to it on either side ("de 14h à
+/// 15h30").
+fn time_of_day(text: &str, start: usize, end: usize) -> bool {
+    let is_space = |c: char| c == ' ' || c == '\u{a0}' || c == '\u{202f}';
+    let before = text
+        .get(..start)
+        .unwrap_or_default()
+        .trim_end_matches(is_space);
+    let after = text
+        .get(end..)
+        .unwrap_or_default()
+        .trim_start_matches(is_space);
+    let word_start = before
+        .trim_end_matches(|c: char| c.is_alphabetic() || c == '\'' || c == '’')
+        .len();
+    let word = before.get(word_start..).unwrap_or_default();
+    if CLOCK_WORDS.iter().any(|w| same_word(w, word)) {
+        return true;
+    }
+    if DAY_PARTS
+        .iter()
+        .any(|p| after.get(..p.len()).is_some_and(|a| same_word(a, p)))
+    {
+        return true;
+    }
+    RANGE_WORDS.iter().any(|w| {
+        let next = after
+            .get(..w.len())
+            .filter(|a| same_word(a, w))
+            .and_then(|_| after.get(w.len()..));
+        let previous = before
+            .get(before.len().saturating_sub(w.len())..)
+            .filter(|b| same_word(b, w))
+            .and_then(|_| before.get(..before.len().saturating_sub(w.len())));
+        next.is_some_and(|n| starts_with_hour(n.trim_start_matches(is_space)))
+            || previous.is_some_and(|p| ends_in_hour(p.trim_end_matches(is_space)))
+    })
 }
 
 /// Marks each duration in `wanted` that a length `text` prints grounds, a
@@ -289,6 +481,13 @@ pub fn mark(text: &str, wanted: &mut [Want]) {
     }
     let found = parts(text);
     let joined = join(text, &found);
+    // An hour written with its symbol is a length only when no clock word,
+    // part of the day or other hour makes it a time of day.
+    let clock_hour = |at: usize, start: usize, end: usize| {
+        found.get(at).is_some_and(|p: &Part| {
+            !p.stated && p.largest == Unit::Hour && time_of_day(text, start, end)
+        })
+    };
     let single = |l: Length| (l, l);
     // Parts and durations both run in order, so one cursor finds each part's.
     let mut cursor = 0;
@@ -302,11 +501,12 @@ pub fn mark(text: &str, wanted: &mut [Want]) {
         joined
             .get(cursor)
             .filter(|d| d.span.start <= p.span.start)
-            .is_none_or(|d| stands_alone(text, d, &found, *index))
+            .is_none_or(|d| stands_alone(d, &found, *index))
     };
     let readings = found
         .iter()
         .enumerate()
+        .filter(|(i, p)| !clock_hour(*i, p.span.start, p.span.end))
         .filter(|p| alone(p))
         .flat_map(|(_, p)| [Some(p.length), p.loose.map(|(length, _)| length)])
         .flatten()
@@ -314,6 +514,12 @@ pub fn mark(text: &str, wanted: &mut [Want]) {
         .chain(
             joined
                 .iter()
+                .filter(|d| {
+                    d.stated
+                        || found
+                            .binary_search_by_key(&d.span.start, |p| p.span.start)
+                            .map_or(true, |i| !clock_hour(i, d.span.start, d.span.end))
+                })
                 .map(|d| (d.from.unwrap_or(d.length), d.length)),
         )
         .chain(

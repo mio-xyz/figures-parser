@@ -181,15 +181,22 @@ it stands; a contribution that closes one should remove it here.
   read their upper end only, as the host's TypeScript reads them.
 - Minutes after a spaced hour are dropped ("2h 30" is 2 hours), and "1h30s"
   is not read.
-- Calendar lengths do not convert to days: "4 weeks" is not "1 month", and
-  "365 days" is not "1 year".
-- A time of day written "15h30" reads as a length.
+- A reply is not held to a length in days or longer units alone ("a 14-day
+  trial", "took 2 months"), as the host's TypeScript holds none, since a
+  window ("the last 30 days") and a plan ("in 2 weeks") read the same way.
+  Calendar lengths do not convert to days ("4 weeks" is not "1 month", "365
+  days" not "1 year"), nor a corpus's date range to its span, which holding
+  them would need.
+- A clock reading in a corpus grounds a length only under a label ("took",
+  "duration", "elapsed") or past a day's hours, so a bare one ("Intro 3:45")
+  grounds nothing, as in the host's TypeScript, which reads no clock
+  reading.
 - A printed length rounds to a reply's at the reply's place, so a long unit
   is loose: "2 hours" is grounded by any printed length from 1:30:01 to
   2:29:59, and "1 year" by 6.01 to 17.99 months.
 - A reply's duration is reported without the full stop after its unit
   ("5 minutes", where the host's TypeScript reports "5 minutes."), unless
-  the unit's own abbreviation takes the dot ("2 Std.").
+  the unit's own abbreviation takes the dot ("2 Std.", "15 min.").
 - A number straddling the end of a link ("https://x.io/11 528 seconds") is
   read whole, so it starts inside the link and is not checked.
 
@@ -204,30 +211,44 @@ is pinned in `tests/it/durations.rs`.
   its unit, so any length from 61 to 119 minutes grounds "1.5 hours".
 - Parts "and" joins are one length: "2 minutes and 30 seconds" is grounded
   by 150 seconds, where the TypeScript check reads two lengths and flags
-  both.
+  both. In a corpus too: "1 hour and 30 minutes" is ninety minutes, so it
+  grounds no reply's "30 minutes", nor "3 hours and 58 minutes" a reply's "3
+  hours", where the TypeScript check reads each part as a length printed on
+  its own.
+- A part in days joins the parts after it ("2 days and 3 hours" is 51
+  hours), where the TypeScript check reads no day and holds the reply to "3
+  hours" alone.
 - A full stop ends a length: "2 hours. 30 minutes" is two lengths, where the
-  TypeScript check joins them across the sentence.
+  TypeScript check joins them across the sentence. The dot after a short
+  form ("1 hr. 15 min.") closes the abbreviation, so there the parts join as
+  in the TypeScript check.
 - A range written high to low ("30-10 minutes", "step 3 - 2 minutes") is
   read as the span between its numbers, where the TypeScript check drops it
   and so holds the reply to nothing; "18-18 seconds" is 18 seconds.
 - A dash after a line break opens a list item: "Total: 10\n- 30 min" is no
   range from 10 to 30 minutes.
-- A unit after a fraction slash or inside a longer word is not read: "1/2
-  hours" is not two hours, "x7,59 min" not 59 minutes, and "วินาทีly" or
-  "ساعتانly" hold no unit, where the TypeScript check reads "วิ" and "ساعت"
-  inside them.
+- A fraction before a unit is read whole: "1/2 hours" is half an hour and "1
+  1/2 hours" an hour and a half, where the TypeScript check reads "2 hours"
+  in both. A number after another number's symbol is not read: "x7,59 min"
+  is not 59 minutes.
+- A unit name in an uncased script may go on in letters and marks of its
+  own ("۳ ساعته", "5 मिनटों"), as in the TypeScript check, but not into a
+  Latin letter: "วินาทีly" or "ساعتانly" hold no unit, where the TypeScript
+  check reads "วิ" and "ساعت" inside them.
 - Two numbers a plain space sets apart are two ("1:52:39 1.75 seconds"
   prints 1.75 seconds), where the TypeScript check reads one token and
   neither number.
 - A number before a one-letter symbol ("24 h", "30 s") grounds a reply's
-  duration ("3 hours" by "took 3h"); neither the TypeScript check nor this
-  library holds a reply to one, since "à 15 h" is a time of day.
-- A printed part that only a space joins to the next is one length with it
-  in a corpus: "30 minutes" is not grounded by "130 minutes", nor by "1 hour
-  30 minutes", nor by the upper bound of "10-30 minutes".
-- A corpus also prints a length as an ISO 8601 duration, a clock reading or
-  a field named for its unit, and each part a comma joins on its own, as a
-  list may: "Breaks: 1 hour, 30 minutes" grounds "30 minutes".
+  duration ("3 hours" by "took 3h", "pendant 3 h"), but not as a time of day
+  ("à 3 h du matin", "um 15h", "de 14h à 15h30"); neither the TypeScript
+  check nor this library holds a reply to one, nor to "15h30", since "à 15
+  h" and "15h30" are times of day.
+- A printed part joined to another is one length with it in a corpus: "30
+  minutes" is not grounded by "130 minutes", nor by "1 hour 30 minutes",
+  nor by the upper bound of "10-30 minutes".
+- A corpus also prints a length as an ISO 8601 duration, a field named for
+  its unit, or a clock reading labelled as a length ("Duration: 1:30:00",
+  "took 1:30:00"), which the TypeScript check does not read.
 
 ## Rows under a date window
 

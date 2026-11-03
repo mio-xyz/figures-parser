@@ -123,7 +123,8 @@ fn grounds_a_length_however_the_corpus_writes_it() {
         r#"{"length": "PT45M"}"#,
         "recording 00:45:00",
         "recording 45:00",
-        "from 0:45",
+        "length 0:45",
+        "took about 0:45:00",
         "it took three quarters of an hour",
         "45 MINUTES",
     ] {
@@ -146,7 +147,7 @@ fn grounds_a_length_however_the_corpus_writes_it() {
         Vec::<String>::new()
     );
     assert_eq!(
-        ungrounded_durations("30 minutes", "1 hour, 30 minutes, 15 minutes", ""),
+        ungrounded_durations("15 minutes", "1 hour, 30 minutes, 15 minutes", ""),
         Vec::<String>::new()
     );
 }
@@ -572,18 +573,28 @@ fn reads_digits_of_any_script_in_any_locale_s_grouping() {
 }
 
 #[test]
-fn grounds_a_lone_dot_or_comma_before_three_digits_by_either_reading() {
-    for corpus in ["1250 seconds", "1.25 seconds"] {
+fn holds_a_reply_to_the_grouped_reading_and_grounds_by_either_in_a_corpus() {
+    assert_eq!(
+        ungrounded("took 1.250 Sekunden", "1250 seconds"),
+        Vec::<String>::new()
+    );
+    for (reply, corpus) in [
+        ("took 1.250 Sekunden", "1.25 seconds"),
+        ("took 1,250 seconds", "1.25 seconds"),
+        ("took 1,500 minutes", "1.5 minutes"),
+        ("Es dauerte 1.500 Minuten", "1.5 minutes"),
+        ("Panggilan 1,000 jam", "1 hour"),
+        ("took 1.250 Sekunden", "12 seconds"),
+    ] {
+        assert_eq!(ungrounded(reply, corpus).len(), 1, "{reply} / {corpus}");
+    }
+    for corpus in ["1.250 Sekunden", "1,250 seconds"] {
         assert_eq!(
-            ungrounded("took 1.250 Sekunden", corpus),
+            ungrounded("took 1.25 seconds", corpus),
             Vec::<String>::new(),
             "{corpus}"
         );
     }
-    assert_eq!(
-        ungrounded("took 1.250 Sekunden", "12 seconds"),
-        ["1.250 Sekunden"]
-    );
 }
 
 #[test]
@@ -655,8 +666,26 @@ fn ends_a_length_at_a_sentence_s_full_stop() {
         ]
     );
     assert_eq!(
-        ungrounded("3.7 seconds", "took 72 hrs. 3.7 seconds"),
+        ungrounded("3.7 seconds", "took 72 hours. 3.7 seconds"),
         Vec::<String>::new()
+    );
+}
+
+#[test]
+fn joins_parts_across_an_abbreviation_s_dot() {
+    for (reply, corpus) in [
+        ("took 1 hr. 15 min.", "75 minutes"),
+        ("it lasted 2 hrs. 30 mins.", "9000 seconds"),
+        ("took 1 mins. 30 secs.", "90 seconds"),
+        ("took 2 tim. 20 min.", "140 minutes"),
+        ("took 2 hr. 5 min", "125 minutes"),
+    ] {
+        assert_eq!(ungrounded(reply, corpus), Vec::<String>::new(), "{reply}");
+    }
+    assert_eq!(ungrounded("it lasted 2 hrs", "2 hrs. 30 mins."), ["2 hrs"]);
+    assert_eq!(
+        ungrounded("3.7 seconds", "took 72 hrs. 3.7 seconds"),
+        ["3.7 seconds"]
     );
 }
 
@@ -729,5 +758,141 @@ fn reads_a_range_whose_low_is_a_link_s_as_its_part_alone() {
     assert_eq!(
         ungrounded("see https://cal.com/x/16 – 1880 seconds", "16-1880 seconds"),
         ["1880 seconds"]
+    );
+}
+
+#[test]
+fn holds_a_reply_to_no_time_of_day_written_with_an_hour_symbol() {
+    for reply in [
+        "Rendez-vous à 15h30 demain",
+        "le train part à 8h15",
+        "réunion de 14h à 15h30",
+        "Abfahrt 15h30",
+    ] {
+        assert_eq!(ungrounded(reply, ""), Vec::<String>::new(), "{reply}");
+    }
+    assert_eq!(ungrounded("took 4h26m", ""), ["4h26m"]);
+}
+
+#[test]
+fn grounds_by_no_time_of_day_written_with_an_hour_symbol() {
+    for corpus in ["à 3 h du matin", "um 3h", "de 3h à 4h30", "entre 2h et 3h"] {
+        assert_eq!(
+            ungrounded("it took 3 hours", corpus),
+            ["3 hours"],
+            "{corpus}"
+        );
+    }
+    assert_eq!(
+        ungrounded("took 15 hours and 30 minutes", "à 15h30"),
+        ["15 hours and 30 minutes"]
+    );
+    for corpus in ["took 3h", "pendant 3 h"] {
+        assert_eq!(
+            ungrounded("it took 3 hours", corpus),
+            Vec::<String>::new(),
+            "{corpus}"
+        );
+    }
+}
+
+#[test]
+fn grounds_by_a_clock_reading_only_when_it_is_labelled_a_length() {
+    for (reply, corpus) in [
+        ("the deploy took 10 hours", "at 10:05 the deploy started"),
+        ("took 10 minutes", "at 10:05 the deploy started"),
+        ("took 10 hours", "[10:05:12] INFO deploy started"),
+        ("took 14 hours", "Meeting starts 14:00:00"),
+        ("took 14 hours", "started 14:00:00 UTC"),
+        ("took 9 hours", "logged 09:12:44"),
+        ("took 90 minutes", "Duration: 2:00:00 at 1:30:00"),
+    ] {
+        assert_eq!(ungrounded(reply, corpus).len(), 1, "{reply} / {corpus}");
+    }
+    for corpus in [
+        "Duration: 1:30:00",
+        "it took 1:30:00",
+        "took about 1:30:00",
+        r#"{"video_duration": "1:30:00"}"#,
+        "elapsedTime=1:30:00",
+        "90:00",
+    ] {
+        assert_eq!(
+            ungrounded("took 90 minutes", corpus),
+            Vec::<String>::new(),
+            "{corpus}"
+        );
+    }
+}
+
+#[test]
+fn holds_each_part_of_a_compound_in_a_corpus_to_the_compound() {
+    for (reply, corpus) in [
+        ("the meeting is 25 minutes", "took 25 minutes, 59 seconds"),
+        ("25นาที", "took 25 minutes, 59 seconds"),
+        ("the call is 1 hour", "Duration: 1 hour, 30 minutes"),
+        ("the call is 30 seconds", "2 hours, 15 minutes, 30 seconds"),
+        ("15 segundo", "took 30 minutes, 15 seconds"),
+        ("took 30 minutes", "1 hour and 30 minutes"),
+        ("took 3 hours", "took 3 hours and 58 minutes"),
+    ] {
+        assert_eq!(ungrounded(reply, corpus).len(), 1, "{reply} / {corpus}");
+    }
+    assert_eq!(
+        ungrounded("took 26 minutes", "took 25 minutes, 59 seconds"),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn reads_a_unit_with_its_inflection_or_short_vowels() {
+    for (text, written, length) in [
+        ("یک جلسه ۳ ساعته داشتیم", "۳ ساعت", clock(3 * HOUR)),
+        ("جلسه ۲ ساعتی طول کشید", "۲ ساعت", clock(2 * HOUR)),
+        ("استغرقت 5 دقائقَ", "5 دقائق", clock(5 * MINUTE)),
+        ("استغرقت ١٠ دقيقةً", "١٠ دقيقة", clock(10 * MINUTE)),
+        ("वीडियो 5 मिनटों में", "5 मिनट", clock(5 * MINUTE)),
+        ("10 सेकंडों में", "10 सेकंड", clock(10_000)),
+    ] {
+        assert_eq!(read(text), [(written, length)], "{text}");
+        assert_eq!(ungrounded(text, ""), [written], "{text}");
+    }
+}
+
+#[test]
+fn reads_a_fraction_of_a_unit() {
+    for (text, length) in [
+        ("took 1/2 hours", clock(30 * MINUTE)),
+        ("took 1 1/2 hours", clock(90 * MINUTE)),
+        ("took 2 3/4 hours", clock(165 * MINUTE)),
+        ("took ½ hour", clock(30 * MINUTE)),
+        ("took ¾ hours", clock(45 * MINUTE)),
+    ] {
+        assert_eq!(one(text), length, "{text}");
+    }
+    assert_eq!(
+        ungrounded("took 1 1/2 hours", "90 minutes"),
+        Vec::<String>::new()
+    );
+    assert_eq!(ungrounded("took 1 1/2 hours", ""), ["1 1/2 hours"]);
+    assert_eq!(ungrounded("took 1/2 hours", "2 hours"), ["1/2 hours"]);
+}
+
+#[test]
+fn holds_a_reply_to_no_length_in_days_or_longer_units_alone() {
+    for (reply, corpus) in [
+        ("Over the last 30 days revenue grew", ""),
+        ("We'll follow up in 2 weeks", ""),
+        ("a 14-day free trial", ""),
+        ("a 30-day window", "from 2026-10-01 to 2026-10-31"),
+        ("took 1 year", "365 days"),
+        ("took 2 months", "60 days"),
+    ] {
+        assert_eq!(ungrounded(reply, corpus), Vec::<String>::new(), "{reply}");
+    }
+    assert_eq!(ungrounded("took 48 hours", "2 days"), Vec::<String>::new());
+    assert_eq!(
+        ungrounded("took 2 days and 3 hours", "3 hours"),
+        ["2 days and 3 hours"]
     );
 }
