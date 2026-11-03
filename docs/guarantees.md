@@ -156,3 +156,34 @@ a full unit name, a line break and a Latin letter after a unit end what the
 original reads on through; a range written high to low is read as a span.
 Like the original, a reply is held to no time of day ("15h30"), to no length
 in days or longer units alone, and to the grouped reading of its digits.
+
+### Links, identifiers and memory: where the library reads more accurately
+
+The link, identifier and memory checks were run beside their TypeScript
+originals on 240,000 generated link readings, 160,000 link checks (findings,
+mends, fabricated links), 220,000 address prints, 160,000 built links and
+message links, 40,000 opaque-id checks, 20,000 each of page lists, link
+targets, memory lines and memory tokens, and every call the TypeScript tests
+make. Every link the TypeScript reads, the library reads, whole or cut by one
+of the rules below; every other difference is one of these, each a place
+where the TypeScript reads the text wrongly:
+
+- a link is read with its user name (`https://user@acme.io/x`), where
+  linkify-it reads `https://user`;
+- a backtick, a chat link's `|label>` without its `<`, and a markdown
+  link's `[label](` end a link that linkify-it reads on through, so
+  `https://acme.io/88a|the doc>` is `https://acme.io/88a` and
+  `https://acme.io/x[docs](https://b.io/y)` is two links;
+- a link glued to a letter of another script, an emoji or `_`, or after a
+  scheme that opens no link (`http:https://b.io`), is read, and ends before
+  any link linkify-it reads on its own;
+- a page name outside ASCII is read as written, where Node percent-encodes
+  it and the TypeScript check finds digits in `%C3%A9`: `[#4]` on
+  `…/x/é_x` is misdirected, and `github.com/équipe` names no item;
+- a workspace host printed in another case grounds its links;
+- a link printed without its scheme grounds the same link under any host, a
+  port or an address included (`acme.app/x`, `acme.io:8080/x`,
+  `127.0.0.1/x`), where the TypeScript check finds one only under the
+  top-level domains linkify-it lists;
+- an opaque id under a prefix of two or three words (`cs_test_…`,
+  `sk_live_…`) is held to the corpus, where the TypeScript reads none.

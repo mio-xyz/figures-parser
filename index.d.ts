@@ -30,6 +30,13 @@ export declare class PageHolds {
  */
 export declare function amountsSharedWith(reply: string, texts: Array<string>): Array<Array<string>>
 
+/**
+ * Whether `url` is a link a reply may build rather than copy: a page naming
+ * no item on one of `hosts`, or an item's link in its service's shape built
+ * from ids `corpus` prints.
+ */
+export declare function builtFromCorpus(url: string, corpus: string, hosts?: Array<string> | undefined | null): boolean
+
 /** One duration, with where it sits in the input. */
 export interface DurationEntity {
   /** The kind of figure. */
@@ -110,6 +117,12 @@ export interface ExtractOptions {
  */
 export declare function fabricatedUrls(reply: string, corpus: string, hosts?: Array<string> | undefined | null): Array<string>
 
+/**
+ * The distinctive words of `text`, lowercased, in order, as
+ * `memoryGrounding` compares them.
+ */
+export declare function groundingTokens(text: string): Array<string>
+
 /** One identifier, with where it sits in the input. */
 export interface IdEntity {
   /** The kind of figure. */
@@ -162,6 +175,21 @@ export interface LooseReading {
   length: LengthValue
   /** The step it is written to. */
   place: LengthValue
+
+ * Which lines of `dossiers` (each a preloaded dossier's text) `response`
+ * visibly draws on: two or more of a line's distinctive words and half of
+ * them, or three of its words in a row.
+ */
+export declare function memoryGrounding(response: string, dossiers: Array<string>): MemoryGrounding
+
+/** How much of a reply rests on the dossiers a turn preloaded. */
+export interface MemoryGrounding {
+  /** The dossier lines read: every non-empty line that is no heading. */
+  preloadedLines: number
+  /** The lines the reply draws on. */
+  groundedLines: number
+  /** Whether it draws on any. */
+  grounded: boolean
 }
 
 /**
@@ -256,6 +284,13 @@ export interface NumberValue {
 }
 
 /**
+ * The target of every markdown link in `text` that is not a URL, a mail
+ * address or an anchor, in order, each as written (`url` in `[PR 512](url)`,
+ * `chart.png` in `![chart](chart.png)`).
+ */
+export declare function placeholderTargets(text: string): Array<string>
+
+/**
  * Figures `reply` worked out in prose that `corpus` does not carry, when
  * `message` gave four or more values; empty when it gave fewer.
  */
@@ -286,6 +321,12 @@ export declare function sharesAmount(reply: string, text: string): boolean
  * it: the figure's whole part is matched.
  */
 export declare function statesFigure(text: string, figure: string): boolean
+
+/**
+ * `url` with the dot its Slack message ts kept dropped
+ * (`…/p1791180327.741099` to `…/p1791180327741099`); null for any other link.
+ */
+export declare function undottedSlackLink(url: string): string | null
 
 /**
  * The durations in `reply`, once each, whose length neither `corpus` nor
@@ -337,6 +378,12 @@ export declare function ungroundedRatios(reply: string, corpus: string, said?: s
  * the link a result carried.
  */
 export declare function ungroundedUrls(reply: string, corpus: string, prompt?: string | undefined | null, hosts?: Array<string> | undefined | null): Array<string>
+
+/**
+ * The links in `text`, once each, that name a page to open: not a Slack
+ * link, nor one of `opened`, the links the thread already went to.
+ */
+export declare function unopenedLinks(text: string, opened?: Array<string> | undefined | null): Array<string>
 
 /**
  * The opaque ids `reply` states outside its links (a typed id such as

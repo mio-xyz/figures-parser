@@ -129,7 +129,19 @@ pub fn bare_identifiers<'a>(text: &'a str, links: &[Range<usize>]) -> Vec<(usize
 }
 
 /// The target of every markdown link in `text` that is not a URL, a mail
-/// address or an anchor: a template copied from an example (`[PR 512](url)`).
+/// address or an anchor, in order, each as written.
+///
+/// Such a target is a template copied from an example (`[PR 512](url)`), or
+/// a file's name (`![chart](chart.png)`), which a caller that attached that
+/// file names apart.
+///
+/// # Examples
+///
+/// ```
+/// let reply = "See [PR 512](url), ![chart](chart.png) and [docs](https://acme.io/docs).";
+/// assert_eq!(figures_parser::placeholder_targets(reply), ["url", "chart.png"]);
+/// ```
+#[must_use]
 pub fn placeholder_targets(text: &str) -> Vec<&str> {
     let mut out = Vec::new();
     let mut from = 0;

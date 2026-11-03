@@ -99,17 +99,23 @@ it stands; a contribution that closes one should remove it here.
 
 - A link without a scheme ("acme.io/x") is not read in a reply; a tool
   returns full links. In a corpus one grounds the reply's schemed link.
-- A one-letter top-level domain is not a host (`https://a.b/c`).
 - A link's query is read as written: an encoded value in a thread link is
   not decoded before it is looked for in the corpus.
 - A built link's host list is the caller's: with none given, only a known
   shape's own host passes unprinted, and only at its root.
-- `url_printed_in` parses an address with the `url` crate, which reads some
-  `file:` addresses (empty path segments as in "file://a//", a backslash
-  after the host) differently from Node's parser; http(s) addresses parse
-  alike.
 - `url_printed_in` grounds an address by its path alone wherever the text
-  holds it, so a page on another host that links the same path grounds it.
+  holds it, and a root address with a query by its query alone (`?page=2`),
+  as a page's relative link gives them, so a page on another host that links
+  the same path grounds it.
+- A link printed without its scheme grounds every link it starts, as one
+  printed with it does: "github.com/org/repository" grounds
+  "https://github.com/org/repo".
+
+## Memory
+
+- A dossier line is matched by its words alone: a reply that repeats two of
+  a line's words in another sense ("Tuesday" and "standup" about another
+  team) draws on it.
 
 ## Weekdays
 
@@ -156,8 +162,9 @@ it stands; a contribution that closes one should remove it here.
   passes.
 - Long mixed tokens are never checked, and ISO durations ("PT1H30M45S") and
   chat user ids ("U01ABCDEF2") land among them.
-- `unprinted_ids` reads no tracker key, and no typed id whose prefix holds a
-  digit or an underscore (`cs_test_a1B2…`, read whole from its first `_`).
+- `unprinted_ids` reads no tracker key (`ungrounded_identifiers` holds one
+  to the corpus's other keys of its prefix), and no typed id whose prefix
+  holds a digit (`s3_…`) or four words or more.
 
 ## Durations
 

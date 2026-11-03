@@ -371,7 +371,7 @@ pub fn mispaired_per_unit(reply: String, corpus: String) -> Vec<MispairedFigure>
         .collect()
 }
 
-/// The lowercased hosts the caller trusts pages on, as `&str`s.
+/// A list the caller passed (hosts, links), as `&str`s; empty when absent.
 fn host_list(hosts: Option<&[String]>) -> Vec<&str> {
     hosts
         .unwrap_or_default()
@@ -615,4 +615,78 @@ impl PageHolds {
     pub fn hold(&mut self, filename: String, claims: Vec<String>) -> bool {
         self.inner.hold(&filename, &claims)
     }
+}
+
+/// `url` with the dot its Slack message ts kept dropped
+/// (`…/p1791180327.741099` to `…/p1791180327741099`); null for any other link.
+#[napi(catch_unwind)]
+#[must_use]
+pub fn undotted_slack_link(url: String) -> Option<String> {
+    figures_parser::undotted_slack_link(&url)
+}
+
+/// The target of every markdown link in `text` that is not a URL, a mail
+/// address or an anchor, in order, each as written (`url` in `[PR 512](url)`,
+/// `chart.png` in `![chart](chart.png)`).
+#[napi(catch_unwind)]
+#[must_use]
+pub fn placeholder_targets(text: String) -> Vec<String> {
+    figures_parser::placeholder_targets(&text)
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The links in `text`, once each, that name a page to open: not a Slack
+/// link, nor one of `opened`, the links the thread already went to.
+#[napi(catch_unwind)]
+#[must_use]
+pub fn unopened_links(text: String, opened: Option<Vec<String>>) -> Vec<String> {
+    figures_parser::unopened_links(&text, &host_list(opened.as_deref()))
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
+}
+
+/// How much of a reply rests on the dossiers a turn preloaded.
+#[napi(object)]
+pub struct MemoryGrounding {
+    /// The dossier lines read: every non-empty line that is no heading.
+    pub preloaded_lines: u32,
+    /// The lines the reply draws on.
+    pub grounded_lines: u32,
+    /// Whether it draws on any.
+    pub grounded: bool,
+}
+
+/// Which lines of `dossiers` (each a preloaded dossier's text) `response`
+/// visibly draws on: two or more of a line's distinctive words and half of
+/// them, or three of its words in a row.
+#[napi(catch_unwind)]
+#[must_use]
+pub fn memory_grounding(response: String, dossiers: Vec<String>) -> MemoryGrounding {
+    let dossiers: Vec<&str> = dossiers.iter().map(String::as_str).collect();
+    let read = figures_parser::memory_grounding(&response, &dossiers);
+    MemoryGrounding {
+        preloaded_lines: u32::try_from(read.preloaded_lines).unwrap_or(u32::MAX),
+        grounded_lines: u32::try_from(read.grounded_lines).unwrap_or(u32::MAX),
+        grounded: read.grounded,
+    }
+}
+
+/// The distinctive words of `text`, lowercased, in order, as
+/// `memoryGrounding` compares them.
+#[napi(catch_unwind)]
+#[must_use]
+pub fn grounding_tokens(text: String) -> Vec<String> {
+    figures_parser::grounding_tokens(&text)
+}
+
+/// Whether `url` is a link a reply may build rather than copy: a page naming
+/// no item on one of `hosts`, or an item's link in its service's shape built
+/// from ids `corpus` prints.
+#[napi(catch_unwind)]
+#[must_use]
+pub fn built_from_corpus(url: String, corpus: String, hosts: Option<Vec<String>>) -> bool {
+    figures_parser::built_from_corpus(&url, &corpus, &host_list(hosts.as_deref()))
 }

@@ -5,17 +5,19 @@
 //! returns what a text writes with its byte span, and a comparison, which
 //! takes a reply, the corpus it was written from and, where it matters, the
 //! prompt, and returns the reply's items that no source carries, once each,
-//! as written.
+//! as written. [`memory_grounding`] tells which lines of the memory a turn
+//! preloaded a reply draws on.
 //!
 //! | Kind | Reader | Comparison |
 //! |---|---|---|
 //! | Numbers | [`numbers`], [`extract_numbers`] | [`ungrounded_figures`], [`ungrounded_ratios`], [`prose_arithmetic`], [`mispaired_per_unit`], [`Amounts`], [`states_figure`] |
-//! | Links | [`urls`] | [`ungrounded_urls`], [`link_findings`], [`fabricated_urls`], [`mended_links`], [`url_printed_in`] |
+//! | Links | [`urls`], [`placeholder_targets`], [`unopened_links`] | [`ungrounded_urls`], [`link_findings`], [`fabricated_urls`], [`built_from_corpus`], [`mended_links`], [`undotted_slack_link`], [`url_printed_in`] |
 //! | Weekdays beside dates | | [`misdated_weekdays`] |
 //! | Rows beside a date window | | [`rows_outside_window`] |
 //! | Email addresses | [`emails`] | [`ungrounded_emails`] |
 //! | Identifiers | [`identifiers`] | [`ungrounded_identifiers`], [`unprinted_ids`], [`unseen_tokens`] |
 //! | Durations | [`durations`] | [`ungrounded_durations`] |
+//! | Memory | [`grounding_tokens`] | [`memory_grounding`] |
 //!
 //! # Example
 //!
@@ -51,6 +53,7 @@ pub mod duration;
 mod email;
 pub mod id;
 mod kind;
+mod memory;
 pub mod number;
 mod page;
 mod text;
@@ -63,14 +66,16 @@ pub use email::{Email, emails, ungrounded_emails};
 pub use id::{Identifier, identifiers, ungrounded_identifiers, unprinted_ids, unseen_tokens};
 pub use jiff::civil::Date;
 pub use kind::{Kind, UnknownKind};
+pub use memory::{MemoryGrounding, grounding_tokens, memory_grounding};
 pub use number::{
     Amounts, Figure, MispairedFigure, Number, Reading, Sign, extract_numbers, mispaired_per_unit,
     numbers, prose_arithmetic, shares_amount, states_figure, ungrounded_figures, ungrounded_ratios,
 };
 pub use page::{HOLDS_PER_PAGE, PageHolds, ungrounded_on_page};
 pub use url::{
-    LinkFindings, Mended, Url, fabricated_urls, link_findings, mended_links, ungrounded_urls,
-    url_printed_in, urls,
+    LinkFindings, Mended, Url, built_from_corpus, fabricated_urls, link_findings, mended_links,
+    placeholder_targets, undotted_slack_link, ungrounded_urls, unopened_links, url_printed_in,
+    urls,
 };
 
 /// The README's examples, run as doc tests so they stay true.

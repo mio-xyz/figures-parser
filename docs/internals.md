@@ -17,11 +17,12 @@ The library has one module per kind, each with a reader and a comparison:
 | Module | Reader | Comparison |
 |---|---|---|
 | `number` | `scan` (tokens), `readings`, `scale` (scale words), `spelled` (numbers in words), `digits` | `ground` (figures, and amounts against one print), `ratio`, `arithmetic`, `per_unit` |
-| `url` | `scan` | `ground`, `items` (the items named beside links), `shapes` (links built from printed ids) |
+| `date` | `languages`, `names` (a port of chrono-node, and Arabic), `clock` (its times of day) | `calendar`, `bare` (a weekday beside a bare day), `window` (rows under a date window) |
 | `date` | `languages`, `names` (a port of chrono-node, and Arabic), `clock` (its times of day, `east` for Japanese, Chinese and Vietnamese, `relative` for lengths from now) | `calendar`, `bare` (a weekday beside a bare day), `casual` (a weekday beside a casual word for a day), `window` (rows under a date window) |
 | `email` | `emails` | `ungrounded_emails` |
 | `id` | `identifiers` | `ungrounded_identifiers`, `unseen_tokens` |
 | `duration` | `grammar`, `words`, `groups` | `corpus` (the forms a corpus writes a length in) |
+| `memory` | `grounding_tokens` | `memory_grounding` |
 
 `text` holds the character lookups and helpers the kinds share, `kind` names
 the kinds a caller selects, and `utf16` converts byte offsets to UTF-16.
@@ -387,10 +388,45 @@ as the value.
 
 ## Links
 
-`url::scan::urls` finds http(s) links with the `linkify` crate. The
-`<url|label>` wrapping chat apps use is blanked in place first, so a link's span is its
-place in the text as given, and the markup and punctuation that close around
-a link are dropped.
+`url::scan::urls` reads http(s) links the way linkify-it, the host's former
+reader, reads a link with a scheme. The `<url|label>` wrapping chat apps use
+is blanked in place first, whatever the case of its scheme, so a link's span
+is its place in the text as given. A character reads as linkify-it classes
+it: a space or control, Unicode punctuation, a separator (`<`, `>`, `｜`), or
+anything else, which counts as a letter. After `http:` or `https:` and `//`:
+
+- an optional user name and `@` (ASCII letters, digits and the marks a user
+  name takes unescaped, opening and closing on a letter or digit);
+- a host: a bracketed IPv6 address, or one to eleven dot-separated labels,
+  each `xn--` and up to 59 letters, digits and dashes, or one to 63
+  characters that neither open nor close on a dash; then an optional port up
+  to 65535; then the host has to end on the text's end, a space, a
+  separator or punctuation other than `-`, `_`, a port's `:` or a dot before
+  more of a host, else there is no link;
+- a path after `/`, `?` or `#`: brackets, braces and parentheses nested up
+  to four deep and balanced, quotes holding up to a hundred characters
+  without a space, `.`, `,`, `;`, `!` and `?` only before more of the link,
+  dashes, the marks `\/:%@#&=_~*`, and any other letter; a bracket that
+  closes nothing ends it.
+
+A link is read wherever no ASCII letter or digit is glued before it, where
+linkify-it opens one only after a space, punctuation other than `_`, a
+control character or a separator; so a link in code, in emphasis or after a
+script written without spaces is read. A backtick, a `|` or `\|` that opens
+a chat link's `label>` on the same line, and a `[label](` that opens a
+markdown link end a link, where linkify-it reads on. The scan follows where
+linkify-it would look next (past the last scheme it tried, or the last
+character of the link it read, read without those cuts), so a link read where
+linkify-it reads none, or read with a user name, ends before any link
+linkify-it reads on its own, and an `ftp:` link or a `//host` link without a
+scheme takes in what linkify-it lets it take. The markup and punctuation that
+close around a link (`*`, `_`, a backtick, `~`, `.`, `,`, `;` and `:`) are
+then dropped.
+
+`placeholder_targets(text)` lists each markdown link target that is no URL,
+mail address or anchor, and `unopened_links(text, opened)` the links of a
+message, once each, that are on no host `slack.com` or under it (the host
+parsed as a browser parses it) and not among `opened`.
 
 `fabricated_urls(reply, corpus, hosts)` grounds a link the corpus holds
 verbatim, or without its scheme where the occurrence stands apart from what
@@ -412,7 +448,11 @@ from ids the corpus prints standing apart from other letters and digits:
   other filters in the query.
 
 A shape's host passes unprinted at its root only, and no built link carries
-a fragment.
+a fragment. A link's path is read as a browser resolves it: `.` and `..`
+segments (plain or escaped) read and `\` taken as `/`, so `facebook.com/.`
+is the root. A segment's characters are compared as written, where Node
+percent-encodes them, so a page name outside ASCII holds no digit.
+`built_from_corpus(url, corpus, hosts)` is this test alone.
 
 `ungrounded_urls(reply, corpus, prompt, hosts)` adds four checks for a reply
 about to be sent:
@@ -451,12 +491,15 @@ earlier offset holds. Every repair is listed as `from → to`.
 
 `url_printed_in(url, read)` parses the address with the `url` crate, which
 follows the WHATWG URL standard as browsers and Node do, so the host is
-lowercased and IDNA-encoded, a default port dropped, the path's dot segments
-resolved and its characters percent-encoded. It then looks for three plain
-substrings of `read`: the address as given less a trailing `/`, the host
-(less one leading `www.`, with a non-default port) followed by the path and
-query, and the path and query alone when they are not empty. An address that
-does not parse is looked for only as given.
+lowercased and IDNA-encoded and a default port dropped. The path is parsed
+again by the standard's path rules, since the crate lags it: a `file:` path
+keeps its empty segments (`file:////x` is `//x`), `^` is escaped, and a
+drive letter is read only in a `file:` path. An address whose scheme has no
+special meaning and whose port is no number does not parse, as in Node. It
+then looks for three plain substrings of `read`: the address as given less a
+trailing `/`, the host (less one leading `www.`, with a non-default port)
+followed by the path and query, and the path and query alone when they are
+not empty. An address that does not parse is looked for only as given.
 
 ## Weekdays
 
@@ -675,9 +718,10 @@ and model names, so they are never held; `unseen_tokens` returns them apart.
 `unprinted_ids(reply, corpus)` reads its own three shapes, each a whole run
 of ASCII letters, digits, `_` and `-` (no outer `_` or `-` dropped):
 
-- a typed id: two to eight lowercase letters, the first `_`, then ten or more
-  letters and digits mixing both, in mixed case unless sixteen or more long,
-  so a snake-case name (`df_sales2024q1`) is not one;
+- a typed id: one to three words of two to eight lowercase letters, each
+  closed by `_` (`prod_`, `cs_test_`), then ten or more letters and digits
+  mixing both, in mixed case unless sixteen or more long, so a snake-case
+  name (`df_sales2024q1`) is not one;
 - a UUID;
 - a hex digest of 8 to 64 digits mixing digits and letters.
 
@@ -687,6 +731,19 @@ link follows the blank. A run right after `@` or `#` is skipped as a chat
 mention. An id is grounded by the corpus holding it, ASCII case aside; a
 corpus with a Kelvin sign or a capital dotted I, which lowercase to `k` and
 `i`, is also read lowercased.
+
+## Memory
+
+`memory_grounding(response, dossiers)` counts the dossier lines a reply
+draws on. A line is each non-empty line of a dossier, trimmed as JavaScript
+trims, that is no `#` heading. `grounding_tokens` reads a text's words: its
+`[derived …]` and `[as of …]` markers and its `*`, `_`, backtick, `~`, `>`
+and `#` marks blanked, the
+rest lowercased and cut at every character that is no letter, number or
+`:`, a `:` at either end of a token dropped, and tokens under three UTF-16
+units or among the stopwords dropped. A line of two or more distinct tokens
+is drawn on when the reply shares two or more of them and at least half, or
+repeats three of the line's tokens in a row.
 
 ## Durations
 

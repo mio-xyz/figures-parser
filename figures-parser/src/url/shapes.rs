@@ -5,7 +5,7 @@
 //! printed.
 
 use super::ground::occurrences;
-use super::scheme_len;
+use super::{is_double_dot, is_single_dot, scheme_len};
 use crate::text::contains_ignoring_case;
 
 /// The parts of an http(s) link.
@@ -24,7 +24,7 @@ impl<'a> Parts<'a> {
     /// The parts of `url`; None when it is no http(s) link with a host.
     pub(super) fn of(url: &'a str) -> Option<Self> {
         let rest = url.get(scheme_len(url, true)?..)?;
-        let host_len = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+        let host_len = rest.find(['/', '\\', '?', '#']).unwrap_or(rest.len());
         let authority = rest.get(..host_len)?;
         let host = authority.rsplit('@').next().unwrap_or(authority);
         let host = host.split(':').next().unwrap_or(host);
@@ -46,9 +46,27 @@ impl<'a> Parts<'a> {
         })
     }
 
-    /// The path's segments, empty ones dropped.
-    pub(super) fn segments(&self) -> impl Iterator<Item = &'a str> {
-        self.path.split('/').filter(|s| !s.is_empty())
+    /// The path's segments as a browser resolves them, `.` and `..` read and
+    /// empty ones dropped, a `\\` separating them as a `/` does.
+    pub(super) fn segments(&self) -> Segments<'a> {
+        let path = self.path.strip_prefix(['/', '\\']).unwrap_or(self.path);
+        let split = path.split(['/', '\\']);
+        if !split
+            .clone()
+            .any(|segment| is_single_dot(segment) || is_double_dot(segment))
+        {
+            return Segments::Plain(split);
+        }
+        let mut resolved: Vec<&'a str> = Vec::new();
+        for segment in split {
+            if is_double_dot(segment) {
+                resolved.pop();
+            } else if !is_single_dot(segment) {
+                resolved.push(segment);
+            }
+        }
+        resolved.retain(|segment| !segment.is_empty());
+        Segments::Resolved(resolved.into_iter())
     }
 
     /// The query's pairs, each a key and a value (empty without an `=`).
@@ -79,6 +97,26 @@ impl<'a> Parts<'a> {
             .filter(|www| www.eq_ignore_ascii_case("www."))
             .and_then(|_| self.host.get(4..))
             .unwrap_or(self.host)
+    }
+}
+
+/// A link's path segments: as written when none is `.` or `..`, which is
+/// what a path almost always is, else resolved.
+pub(super) enum Segments<'a> {
+    /// Split from the path, empty segments still to drop.
+    Plain(std::str::Split<'a, [char; 2]>),
+    /// Resolved, empty segments dropped.
+    Resolved(std::vec::IntoIter<&'a str>),
+}
+
+impl<'a> Iterator for Segments<'a> {
+    type Item = &'a str;
+
+    fn next(&mut self) -> Option<&'a str> {
+        match self {
+            Self::Plain(split) => split.find(|segment| !segment.is_empty()),
+            Self::Resolved(resolved) => resolved.next(),
+        }
     }
 }
 
@@ -129,11 +167,26 @@ fn slack_message(parts: &Parts<'_>, corpus: &str) -> bool {
     query_printed && prints_id(corpus, channel) && prints_id(corpus, &format!("{seconds}.{micros}"))
 }
 
-/// `url` with the dot its Slack message ts kept dropped
-/// (`/archives/<channel>/p1791180327.741099` to `…/p1791180327741099`), the
-/// query and fragment as written; None for a message link already right, a
-/// ts of another length or a link off Slack.
-pub(super) fn undotted_slack_link(url: &str) -> Option<String> {
+/// `url` with the dot its Slack message ts kept dropped, or None for a
+/// message link already right, a ts of another length or a link off Slack.
+///
+/// `/archives/<channel>/p1791180327.741099` becomes `…/p1791180327741099`,
+/// the query and fragment as written.
+///
+/// # Examples
+///
+/// ```
+/// use figures_parser::undotted_slack_link;
+///
+/// let dotted = "https://acme.slack.com/archives/C09R2NX3D1R/p1791180327.741099";
+/// assert_eq!(
+///     undotted_slack_link(dotted).as_deref(),
+///     Some("https://acme.slack.com/archives/C09R2NX3D1R/p1791180327741099")
+/// );
+/// assert_eq!(undotted_slack_link("https://acme.io/p1791180327.741099"), None);
+/// ```
+#[must_use]
+pub fn undotted_slack_link(url: &str) -> Option<String> {
     let parts = Parts::of(url)?;
     let host = parts.host.to_ascii_lowercase();
     if !host.ends_with(".slack.com") {
@@ -214,11 +267,29 @@ fn names_no_item(parts: &Parts<'_>, shape_host: bool, hosts: &[&str]) -> bool {
     !page.bytes().any(|b| b.is_ascii_digit()) && trusted()
 }
 
-/// Whether `url` is a link the reply may build: a page naming no item on a
-/// host in `hosts` (the hosts the caller trusts such pages on, lowercased; a
-/// host under one counts), or an item's link in its service's shape with
-/// ids `corpus` prints. No shape's link carries a fragment.
-pub(super) fn built_from_corpus(url: &str, corpus: &str, hosts: &[&str]) -> bool {
+/// Whether `url` is a link a reply may build rather than copy.
+///
+/// That is a page naming no item on a host in `hosts` (the hosts the caller
+/// trusts such pages on, lowercased; a host under one counts), or an item's
+/// link in its service's shape with ids `corpus` prints: a chat message from
+/// its channel and ts on a workspace the corpus names, a CRM record from its
+/// id, an ad library page from its page id. No shape's link carries a
+/// fragment. [`fabricated_urls`](crate::fabricated_urls) grounds such a link
+/// besides one the corpus printed.
+///
+/// # Examples
+///
+/// ```
+/// use figures_parser::built_from_corpus;
+///
+/// let corpus = "posted in C09R2NX3D1R at 1791180327.741099 on acme.slack.com";
+/// let link = "https://acme.slack.com/archives/C09R2NX3D1R/p1791180327741099";
+/// assert!(built_from_corpus(link, corpus, &[]));
+/// assert!(built_from_corpus("https://github.com/new", "", &["github.com"]));
+/// assert!(!built_from_corpus("https://github.com/acme/app", "", &["github.com"]));
+/// ```
+#[must_use]
+pub fn built_from_corpus(url: &str, corpus: &str, hosts: &[&str]) -> bool {
     let Some(parts) = Parts::of(url) else {
         return false;
     };

@@ -342,14 +342,98 @@ fn a_prompt_link_grounds_a_reply_link_except_on_an_example_domain() {
     );
 }
 
-// linkify reads a host only under a top-level domain of two letters or more,
-// which every real one has; a host without a dot or an address still counts.
+// A host is read as linkify-it reads one after a scheme: any run of labels,
+// one letter long or an address included, and a port up to 65535.
 #[test]
-fn a_host_under_a_one_letter_top_level_domain_is_not_a_link() {
-    assert_eq!(texts("https://a.b/c"), Vec::<&str>::new());
+fn reads_a_host_of_any_labels_and_a_port_as_linkify_it_does() {
+    assert_eq!(texts("https://a.b/c"), ["https://a.b/c"]);
     assert_eq!(
         texts("http://localhost:3000/x and http://10.0.0.1/y"),
         ["http://localhost:3000/x", "http://10.0.0.1/y"]
+    );
+    assert_eq!(texts("http://acme.io:65535/x"), ["http://acme.io:65535/x"]);
+    // A port past 65535, or a host a dash or an underscore closes, is no link.
+    for none in [
+        "http://acme.io:65536/x",
+        "https://acme.io-",
+        "https://acme_x.io/a",
+    ] {
+        assert_eq!(texts(none), Vec::<&str>::new(), "{none}");
+    }
+}
+
+// A bracket that closes nothing ends a link, and one the path opens and
+// closes stays in it, as linkify-it reads them.
+#[test]
+fn ends_a_link_at_a_bracket_that_closes_nothing() {
+    assert_eq!(
+        texts("(see https://acme.io/a(b)/c) and https://acme.io/d(日本"),
+        ["https://acme.io/a(b)/c", "https://acme.io/d"]
+    );
+    assert_eq!(
+        texts("https://acme.io/x)https://acme.io/y"),
+        ["https://acme.io/x", "https://acme.io/y"]
+    );
+}
+
+// An ftp link and a link without a scheme are read as linkify-it reads
+// them, so a link inside one is part of it.
+#[test]
+fn reads_no_link_inside_another_scheme_s() {
+    assert_eq!(texts("ftp://acme.io/https://b.io/x"), Vec::<&str>::new());
+    assert_eq!(texts("(//acme.io/https://b.io/x)"), Vec::<&str>::new());
+}
+
+// linkify-it reads a user name as the host ("https://user"), so the link
+// ends before the `@`; the host is the one after it.
+#[test]
+fn reads_a_user_name_before_the_host() {
+    assert_eq!(
+        texts("Open https://user@acme.io/settings now."),
+        ["https://user@acme.io/settings"]
+    );
+    // Marks no user name takes unescaped are no user name.
+    assert_eq!(
+        texts("https://www.github.com\"@the"),
+        ["https://www.github.com"]
+    );
+    assert_eq!(texts("https://docs.acme.io<@x"), ["https://docs.acme.io"]);
+}
+
+// linkify-it reads the label of a chat link whose `<` is missing, a
+// markdown link's label written right after a link, and a backtick, as part
+// of the link: each ends it here.
+#[test]
+fn ends_a_link_where_chat_or_markdown_syntax_opens() {
+    assert_eq!(
+        texts("https://acme.io/88a|the doc> later"),
+        ["https://acme.io/88a"]
+    );
+    assert_eq!(
+        texts("https://acme.io/88a\\|the doc>"),
+        ["https://acme.io/88a"]
+    );
+    assert_eq!(
+        texts("https://acme.io/x[docs](https://b.io/y)"),
+        ["https://acme.io/x", "https://b.io/y"]
+    );
+    assert_eq!(texts("https://acme.io/a``,issue"), ["https://acme.io/a"]);
+    // A pipe no label follows stays in the link, as some links hold one.
+    assert_eq!(
+        texts("https://fonts.example.org/css?family=Roboto|Open+Sans"),
+        ["https://fonts.example.org/css?family=Roboto|Open+Sans"]
+    );
+}
+
+// A link read where linkify-it reads none (glued to a letter, or after a
+// scheme that opens no link, which linkify-it then skips past) never takes
+// in one linkify-it reads on its own.
+#[test]
+fn a_glued_link_ends_before_a_link_linkify_it_reads() {
+    assert_eq!(texts("http:https://b.io/x"), ["https://b.io/x"]);
+    assert_eq!(
+        texts("😀https://acme.io/x=;https://b.io/y"),
+        ["https://acme.io/x=", "https://b.io/y"]
     );
 }
 
@@ -746,4 +830,149 @@ fn an_address_is_compared_as_a_browser_parses_it() {
     // One that does not parse is printed only whole.
     assert!(url_printed_in("acme.com/x/", "acme.com/x"));
     assert!(!url_printed_in("acme.com/x", "/x"));
+}
+
+// Node's URL parser keeps a `file:` path's empty segments, escapes a `^` and
+// reads a drive letter only in a `file:` path; the `url` crate does none of
+// that, so the path is read the browser's way.
+#[test]
+fn an_address_s_path_is_parsed_as_a_browser_parses_it() {
+    use figures_parser::url_printed_in;
+    assert!(url_printed_in("file:////x", "//x"));
+    assert!(!url_printed_in("file:////x", "see /x."));
+    assert!(url_printed_in("https://acme.com/a^b/c", "/a%5Eb/c"));
+    assert!(url_printed_in("https://acme.com/C|/.%2E/x", "acme.com/x"));
+    // A scheme with no special meaning and a port that is no number does not
+    // parse, so it is printed only whole.
+    assert!(!url_printed_in("foo://C:\\x?a", "foo://c:\\x?a"));
+}
+
+#[test]
+fn names_each_link_target_that_is_no_url() {
+    use figures_parser::placeholder_targets;
+    let reply = "![chart](chart.png), [again](chart.png), [notes](notes.md), [top](#top), [mail](mailto:a@b.c) and [doc](https://acme.io/doc).";
+    assert_eq!(
+        placeholder_targets(reply),
+        ["chart.png", "chart.png", "notes.md"]
+    );
+}
+
+#[test]
+fn drops_the_dot_a_slack_message_link_kept_and_leaves_any_other() {
+    use figures_parser::undotted_slack_link;
+    assert_eq!(
+        undotted_slack_link(
+            "https://acme.slack.com/archives/C1/p1791180327.741099?thread_ts=1791180327.741099"
+        )
+        .as_deref(),
+        Some("https://acme.slack.com/archives/C1/p1791180327741099?thread_ts=1791180327.741099")
+    );
+    for left in [
+        "https://acme.slack.com/archives/C1/p1791180327741099",
+        "https://acme.slack.com/archives/C1/p179118032.741099",
+        "https://acme.io/archives/C1/p1791180327.741099",
+    ] {
+        assert_eq!(undotted_slack_link(left), None, "{left}");
+    }
+}
+
+#[test]
+fn lists_the_pages_a_message_links_once_each_less_slack_and_the_opened() {
+    use figures_parser::unopened_links;
+    assert_eq!(
+        unopened_links(
+            "the footer should be a png with <http://acme.example.com|acme.example.com> logo",
+            &[]
+        ),
+        ["http://acme.example.com"]
+    );
+    assert_eq!(
+        unopened_links(
+            "compare https://a.example.org/pricing and <https://b.example.org> with https://a.example.org/pricing",
+            &[]
+        ),
+        ["https://a.example.org/pricing", "https://b.example.org"]
+    );
+    assert_eq!(
+        unopened_links(
+            "see <https://acme.slack.com/archives/C0123ABCD/p1793264631123499> and https://acme.example.com/brand",
+            &[]
+        ),
+        ["https://acme.example.com/brand"]
+    );
+    assert_eq!(
+        unopened_links("make the footer nicer, acme.example.com style", &[]),
+        Vec::<&str>::new()
+    );
+    assert_eq!(
+        unopened_links(
+            "again: https://a.example.org/pricing, https://a.example.org/faq and https://b.example.org",
+            &["https://a.example.org/pricing", "https://b.example.org"]
+        ),
+        ["https://a.example.org/faq"]
+    );
+}
+
+// A browser resolves `.` and `..` and reads `\` as `/`, so a link that
+// resolves to a host's root is that root.
+#[test]
+fn reads_a_built_link_s_path_as_a_browser_resolves_it() {
+    use figures_parser::built_from_corpus;
+    assert!(built_from_corpus("https://facebook.com/.", "", &[]));
+    assert!(built_from_corpus("https://app.pipedrive.com/x/..", "", &[]));
+    assert!(built_from_corpus("https://github.com/a/../new", "", &HOSTS));
+    assert!(built_from_corpus("https://github.com\\new", "", &HOSTS));
+    assert!(!built_from_corpus(
+        "https://facebook.com/someinventedpage",
+        "",
+        &[]
+    ));
+}
+
+// Node percent-encodes a page name outside ASCII, so the TypeScript check
+// finds digits in `é` and holds the page to an item; the name has none.
+#[test]
+fn reads_a_page_name_outside_ascii_as_written() {
+    use figures_parser::built_from_corpus;
+    assert!(built_from_corpus("https://github.com/équipe", "", &HOSTS));
+    assert_eq!(
+        ungrounded_urls(
+            "[#4](https://bücher.de/x/é_x)",
+            "https://bücher.de/x/é_x",
+            ""
+        ),
+        ["[#4](https://bücher.de/x/é_x)"]
+    );
+}
+
+// The TypeScript check reads a workspace's host in the corpus as written,
+// so an upper-cased one grounds nothing; a host has no case.
+#[test]
+fn a_workspace_host_printed_in_any_case_grounds_its_root() {
+    use figures_parser::built_from_corpus;
+    assert!(built_from_corpus(
+        "https://acme.slack.com/",
+        "workspace ACME.SLACK.COM",
+        &[]
+    ));
+}
+
+// The TypeScript check finds a link printed without its scheme only under a
+// top-level domain it lists, and without a port or an address; a printed
+// `acme.app/x`, `acme.io:8080/x` or `127.0.0.1/x` is the same link.
+#[test]
+fn grounds_a_link_printed_without_its_scheme_under_any_host() {
+    for (link, printed) in [
+        (
+            "https://linear.app/acme/issue/CORE-1",
+            "url: linear.app/acme/issue/CORE-1",
+        ),
+        ("https://acme.io:8080/deal/352", "at acme.io:8080/deal/352"),
+        (
+            "https://127.0.0.1/runs/572/logs",
+            "see 127.0.0.1/runs/572/logs.",
+        ),
+    ] {
+        assert_eq!(fabricated_urls(link, printed), Vec::<&str>::new(), "{link}");
+    }
 }

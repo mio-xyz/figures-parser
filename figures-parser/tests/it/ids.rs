@@ -230,3 +230,30 @@ fn an_opaque_id_is_grounded_by_a_corpus_that_lowercases_to_it() {
         ["prod_kabc12345XYZ"]
     );
 }
+
+// The TypeScript check reads a typed id's prefix as one word, so an id under
+// a prefix of two or three (a checkout session's `cs_test_`, a key's
+// `sk_live_`) goes unread; such an id is as opaque as one under one word.
+#[test]
+fn holds_a_typed_id_whose_prefix_is_two_or_three_words() {
+    use figures_parser::unprinted_ids;
+    assert_eq!(
+        unprinted_ids(
+            "Session cs_test_a1B2c3D4e5F6 and key sk_live_51HxQz9KdLmN2pQr",
+            ""
+        ),
+        ["cs_test_a1B2c3D4e5F6", "sk_live_51HxQz9KdLmN2pQr"]
+    );
+    assert_eq!(
+        unprinted_ids(
+            "Session cs_test_a1B2c3D4e5F6.",
+            r#"{"id":"cs_test_a1B2c3D4e5F6"}"#
+        ),
+        Vec::<&str>::new()
+    );
+    // Four words, or a snake-case name, are no prefix.
+    assert_eq!(
+        unprinted_ids("ab_cd_ef_gh_a1B2c3D4e5F6 and df_sales_2024q1", ""),
+        Vec::<&str>::new()
+    );
+}

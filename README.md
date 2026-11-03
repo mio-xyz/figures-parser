@@ -67,7 +67,7 @@ what a text states, with byte spans.
 | [Ratios](#ratios) | `ungrounded_ratios` | | a ratio or a printed decimal rounds to it, or the person's numbers give it |
 | [Arithmetic in prose](#arithmetic-in-prose) | `prose_arithmetic` | | the corpus prints the same value |
 | [Per-unit amounts](#per-unit-amounts) | `mispaired_per_unit` | | the clause's own total over its count gives it, or no printed line shows it as another quotient |
-| [Links](#links) | `ungrounded_urls`, `fabricated_urls` | `urls` | the corpus holds the link, with or without its scheme, its path under no other host, or the ids it was built from |
+| [Links](#links) | `ungrounded_urls`, `fabricated_urls`, `built_from_corpus` | `urls`, `placeholder_targets`, `unopened_links` | the corpus holds the link, with or without its scheme, its path under no other host, or the ids it was built from |
 | [Addresses read](#addresses-read) | `url_printed_in` | | the text read holds the address, without its scheme or by its path |
 | [Weekdays](#weekdays) | `misdated_weekdays` | | the weekday is the date's own |
 | [Rows under a date window](#rows-under-a-date-window) | `rows_outside_window` | | the row's date falls inside the window its heading names |
@@ -75,6 +75,8 @@ what a text states, with byte spans.
 | [Identifiers](#identifiers) | `ungrounded_identifiers`, `unprinted_ids` | `identifiers` | the corpus or the prompt carries it |
 | [Durations](#durations) | `ungrounded_durations` | `durations` | the corpus carries the same length, in any form |
 | [Pages](#pages) | `ungrounded_on_page`, `PageHolds` | | the corpus carries its figures, ratios and ids |
+
+| [Memory](#memory) | `memory_grounding` | `grounding_tokens` | (counts the dossier lines it draws on: two of a line's words and half of them, or three in a row) |
 
 ### Numbers
 
@@ -318,7 +320,12 @@ assert!(fabricated_urls("Open https://acme.io/new.", "", &["acme.io"]).is_empty(
 ```
 
 `urls(text)` finds http(s) links, the `<url|label>` wrapping chat apps use and markdown links
-included, without the markup around them.
+included, without the markup around them. `placeholder_targets(text)` lists
+the link targets that are no URL (a template word, a file's name), and
+`unopened_links(text, opened)` the pages a message links, once each, less the
+chat's own links and those already opened. `built_from_corpus(url, corpus,
+hosts)` is the test for a link a reply may build, and
+`undotted_slack_link(url)` the repair `mended_links` makes to a message link.
 
 ### Addresses read
 
@@ -435,8 +442,8 @@ assert_eq!(
 ```
 
 `unprinted_ids(reply, corpus)` is the stricter check for opaque ids, which
-no reasoning yields: every typed id (`prod_VU49BpM22sWxIM`, a lowercase
-prefix and a mixed body), UUID and hex digest the reply states outside its
+no reasoning yields: every typed id (`prod_VU49BpM22sWxIM`, `cs_test_…`: a
+prefix of one to three lowercase words and a mixed body), UUID and hex digest the reply states outside its
 links is held to the corpus, whatever its prefix and inside code too. A run
 right after `@` or `#` is a chat mention and is left alone.
 
@@ -454,6 +461,20 @@ assert_eq!(
 returns long mixed tokens no source carries, for measurement only: they share
 their shape with product and model names, so they are never reported as
 errors.
+
+### Memory
+
+`memory_grounding(response, dossiers)` counts the lines of the dossiers a
+turn preloaded that a reply visibly draws on: it shares two or more of a
+line's distinctive words and half of them, or repeats three of them in a
+row. `grounding_tokens(text)` gives the words compared.
+
+```rust
+use figures_parser::memory_grounding;
+
+let dossier = "# Ana\nPrefers async standups at 10:00";
+assert!(memory_grounding("Standup at 10:00, async as Ana prefers.", &[dossier]).grounded);
+```
 
 ### Durations
 
@@ -539,7 +560,9 @@ fp.ungroundedRatios(reply, corpus, said);        // ["30%"]
 fp.proseArithmetic(reply, message, corpus);      // ["61,300"]
 fp.mispairedPerUnit(reply, corpus);              // [{ perUnit, stated, printed }]
 fp.ungroundedUrls(reply, corpus, prompt, hosts); // also fabricatedUrls, linkFindings
-fp.mendedLinks(reply, corpus); // { text, mends }
+fp.mendedLinks(reply, corpus); // { text, mends }; also undottedSlackLink, builtFromCorpus
+fp.unopenedLinks(message, opened);               // also placeholderTargets, urlPrintedIn
+fp.memoryGrounding(reply, dossiers);             // { preloadedLines, groundedLines, grounded }
 fp.misdatedWeekdays(reply, "2026-10-09");
 fp.ungroundedEmails(reply, corpus, prompt);
 fp.ungroundedIdentifiers(reply, corpus, prompt); // also unseenTokens

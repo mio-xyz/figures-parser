@@ -9,11 +9,12 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use figures_parser::number::scan::{Scratch, tokens};
 use figures_parser::utf16::{Utf16Cursor, units};
 use figures_parser::{
-    Date, PageHolds, durations, emails, extract_numbers, fabricated_urls, identifiers,
-    link_findings, mended_links, misdated_weekdays, mispaired_per_unit, numbers, prose_arithmetic,
-    rows_outside_window, ungrounded_durations, ungrounded_emails, ungrounded_figures,
-    ungrounded_identifiers, ungrounded_on_page, ungrounded_ratios, ungrounded_urls, unprinted_ids,
-    unseen_tokens, url_printed_in, urls,
+    Date, PageHolds, built_from_corpus, durations, emails, extract_numbers, fabricated_urls,
+    grounding_tokens, identifiers, link_findings, memory_grounding, mended_links,
+    misdated_weekdays, mispaired_per_unit, numbers, placeholder_targets, prose_arithmetic,
+    rows_outside_window, undotted_slack_link, ungrounded_durations, ungrounded_emails,
+    ungrounded_figures, ungrounded_identifiers, ungrounded_on_page, ungrounded_ratios,
+    ungrounded_urls, unopened_links, unprinted_ids, unseen_tokens, url_printed_in, urls,
 };
 
 /// Calls every entry point on the three texts, and returns a sum the
@@ -32,6 +33,11 @@ fn exercise(reply: &str, corpus: &str, prompt: &str) -> usize {
             });
         }
         n += numbers(text).count()
+            + placeholder_targets(text).len()
+            + unopened_links(text, &[reply]).len()
+            + undotted_slack_link(text).map_or(0, |link| link.len())
+            + usize::from(built_from_corpus(text, reply, &["github.com"]))
+            + grounding_tokens(text).len()
             + extract_numbers(text).len()
             + emails(text).len()
             + identifiers(text).len()
@@ -74,6 +80,8 @@ fn exercise(reply: &str, corpus: &str, prompt: &str) -> usize {
         + usize::from(url_printed_in(reply, corpus))
         + usize::from(url_printed_in(prompt, reply))
         + found_urls_printed(reply, corpus)
+        + memory_grounding(reply, &[corpus, prompt]).grounded_lines
+        + found_urls_built(reply, corpus)
         + unseen_tokens(reply, corpus, prompt).len()
         + ungrounded_durations(reply, corpus, prompt).len()
         + ungrounded_durations(corpus, reply, prompt).len()
@@ -87,6 +95,18 @@ fn found_urls_printed(text: &str, read: &str) -> usize {
     urls(text)
         .iter()
         .filter(|url| url_printed_in(url.text, read))
+        .count()
+}
+
+/// How many of `text`'s links a reply may build from `corpus`, and how many
+/// of them keep a Slack message ts's dot.
+fn found_urls_built(text: &str, corpus: &str) -> usize {
+    urls(text)
+        .iter()
+        .filter(|url| {
+            built_from_corpus(url.text, corpus, &["github.com"])
+                || undotted_slack_link(url.text).is_some()
+        })
         .count()
 }
 
@@ -328,6 +348,22 @@ const POOL: &[&str] = &[
     "<@",
     "https://www.acme.com:8080/a/../b?q=1#x",
     "file:////",
+    "file:\\\\C|\\..",
+    "foo://h:x/",
+    "ftp://",
+    "//",
+    "[::1]",
+    ":65536",
+    "\\..",
+    "%2e",
+    "|x>",
+    "cs_test_",
+    "a1B2c3D4e5F6",
+    "[derived ",
+    "[as of",
+    ".slack.com/archives/C1/p1791180327.741099",
+    "?thread_ts=",
+    "/ads/library/?view_all_page_id=",
     "xn--",
     "\u{212A}",
     "\u{130}",

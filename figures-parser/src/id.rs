@@ -271,14 +271,22 @@ const MIN_TYPED_BODY: usize = 10;
 /// lower case alone.
 const MIN_PLAIN_TYPED_BODY: usize = 16;
 
-/// Whether `run` is a typed id: two to eight lowercase letters, `_`, then
-/// ASCII letters and digits mixing both, in mixed case or sixteen or more long.
+/// The most `_`-joined words a typed id's prefix holds (`cs_test_` of
+/// `cs_test_a1B2c3D4e5`).
+const MAX_TYPED_PREFIX_WORDS: usize = 3;
+
+/// Whether `run` is a typed id: a prefix of one to three words of two to
+/// eight lowercase letters, each closed by `_`, then ASCII letters and
+/// digits mixing both, in mixed case or sixteen or more long.
 fn is_typed(run: &str) -> bool {
-    let Some((prefix, body)) = run.split_once('_') else {
+    let Some((prefix, body)) = run.rsplit_once('_') else {
         return false;
     };
-    (2..=8).contains(&prefix.len())
-        && prefix.bytes().all(|b| b.is_ascii_lowercase())
+    let words = prefix.split('_');
+    words.clone().count() <= MAX_TYPED_PREFIX_WORDS
+        && words.into_iter().all(|word| {
+            (2..=8).contains(&word.len()) && word.bytes().all(|b| b.is_ascii_lowercase())
+        })
         && body.len() >= MIN_TYPED_BODY
         && body.bytes().all(|b| b.is_ascii_alphanumeric())
         && body.bytes().any(|b| b.is_ascii_digit())
@@ -335,9 +343,10 @@ fn link_cover(text: &str) -> Vec<Range<usize>> {
 /// carries, case aside, once each, as written.
 ///
 /// Three shapes are read, each a run of ASCII letters, digits, `_` and `-`
-/// standing on its own: a typed id (`prod_VU49BpM22sWxIM`: two to eight
-/// lowercase letters, `_`, then ten or more letters and digits mixing both,
-/// in mixed case unless sixteen or more long), a UUID, and a hex digest of 8
+/// standing on its own: a typed id (`prod_VU49BpM22sWxIM`, `cs_test_…`: one
+/// to three words of two to eight lowercase letters, each closed by `_`, then
+/// ten or more letters and digits mixing both, in mixed case unless sixteen
+/// or more long), a UUID, and a hex digest of 8
 /// to 64 digits mixing digits and letters (a trace id, a commit sha). A run
 /// right after `@` or `#` is a chat mention (`<@U…>`, `<#C…>`), not an id. A
 /// shortened id the corpus carries whole is grounded.

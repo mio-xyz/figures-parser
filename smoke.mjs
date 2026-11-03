@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
-const { extract, ungroundedFigures, ungroundedRatios, mispairedPerUnit, amountsSharedWith, sharesAmount, statesFigure, proseArithmetic, ungroundedUrls, linkFindings, mendedLinks, fabricatedUrls, ungroundedEmails, misdatedWeekdays, rowsOutsideWindow, ungroundedIdentifiers, unseenTokens, ungroundedDurations, unprintedIds, urlPrintedIn, ungroundedOnPage, PageHolds } = createRequire(import.meta.url)("./index.js");
+const { extract, ungroundedFigures, ungroundedRatios, mispairedPerUnit, amountsSharedWith, sharesAmount, statesFigure, proseArithmetic, ungroundedUrls, linkFindings, mendedLinks, fabricatedUrls, ungroundedEmails, misdatedWeekdays, rowsOutsideWindow, ungroundedIdentifiers, unseenTokens, ungroundedDurations, unprintedIds, urlPrintedIn, ungroundedOnPage, PageHolds, undottedSlackLink, placeholderTargets, unopenedLinks, memoryGrounding, groundingTokens, builtFromCorpus } = createRequire(import.meta.url)("./index.js");
 
 const entities = extract("Total $1,250 and ١٢", { kinds: ["number"] });
 const has = (text, integer) => entities.some((e) => e.text === text && e.value.integer === integer);
@@ -66,4 +66,16 @@ assert.deepEqual(ungroundedOnPage("activation up 12% on 1,840 sign-ups", "signup
 const holds = new PageHolds();
 assert.deepEqual([holds.hold("p.png", ["12%"]), holds.hold("p.png", ["12%"]), holds.hold("p.png", ["12%", "40%"])], [true, false, true]);
 assert.deepEqual(ungroundedDurations("took ३ घंटे, then 2 minutes and 30 seconds", "150 seconds"), ["३ घंटे"]);
+
+assert.equal(urlPrintedIn("file:////x", "//x"), true);
+assert.deepEqual(extract("see https://a.b/c|label> and `https://acme.io/x`", { kinds: ["url"] }).map((e) => e.text), ["https://a.b/c", "https://acme.io/x"]);
+assert.equal(undottedSlackLink("https://acme.slack.com/archives/C1/p1791180327.741099"), "https://acme.slack.com/archives/C1/p1791180327741099");
+assert.equal(undottedSlackLink("https://acme.io/x"), null);
+assert.deepEqual(placeholderTargets("[PR 512](url) ![c](chart.png) [d](https://acme.io)"), ["url", "chart.png"]);
+assert.deepEqual(unopenedLinks("https://acme.io/a https://x.slack.com/archives/C1/p1 https://acme.io/b", ["https://acme.io/b"]), ["https://acme.io/a"]);
+assert.deepEqual(memoryGrounding("Standup moves to 10:00, async as Ana prefers.", ["# Ana\nPrefers async standups at 10:00"]), { preloadedLines: 1, groundedLines: 1, grounded: true });
+assert.deepEqual(groundingTokens("**Owner:** Ana at 10:00"), ["owner", "ana", "10:00"]);
+assert.deepEqual(unprintedIds("Session cs_test_a1B2c3D4e5F6 opened.", ""), ["cs_test_a1B2c3D4e5F6"]);
+assert.equal(builtFromCorpus("https://github.com/new", "", ["github.com"]), true);
+assert.equal(builtFromCorpus("https://github.com/o/r", "", ["github.com"]), false);
 console.log("ok");

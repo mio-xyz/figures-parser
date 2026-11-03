@@ -19,6 +19,8 @@ mod ground;
 mod ids;
 mod locales;
 mod pages;
+
+mod memory;
 mod panic_free;
 mod per_unit;
 mod ratios;
