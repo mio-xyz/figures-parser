@@ -1,4 +1,4 @@
-use figures_parser::{Date, misdated_weekdays};
+use figures_parser::{Date, misdated_weekdays, rows_outside_window};
 
 fn day(iso: &str) -> Date {
     iso.parse().unwrap()
@@ -204,4 +204,229 @@ fn leaves_an_arabic_weekday_beside_a_hijri_date_or_no_date_alone() {
     ] {
         assert_eq!(check(reply, TODAY), Vec::<String>::new(), "{reply}");
     }
+}
+
+const OCT_30: &str = "2026-10-30";
+
+// 2026-11-04 is a Wednesday; 2025-11-04 was the Tuesday.
+#[test]
+fn reads_a_bare_day_in_the_window_around_today_and_flags_a_weekday_no_date_there_falls_on() {
+    for (reply, finding) in [
+        (
+            "tu as un RDV mardi 4 à 17h",
+            r#""mardi 4" (2026-11-04 is a Wednesday)"#,
+        ),
+        (
+            "Call on Tue 4 at 5pm",
+            r#""Tue 4" (2026-11-04 is a Wednesday)"#,
+        ),
+        (
+            "Tuesday 4th",
+            r#""Tuesday 4th" (2026-11-04 is a Wednesday)"#,
+        ),
+        ("el martes 4", r#""martes 4" (2026-11-04 is a Wednesday)"#),
+        (
+            "Dienstag 4 um 17 Uhr",
+            r#""Dienstag 4" (2026-11-04 is a Wednesday)"#,
+        ),
+        ("mardi 4 de 9h", r#""mardi 4" (2026-11-04 is a Wednesday)"#),
+    ] {
+        assert_eq!(check(reply, OCT_30), [finding], "{reply}");
+    }
+}
+
+#[test]
+fn passes_a_weekday_some_date_in_the_window_falls_on() {
+    for reply in [
+        "tu as un RDV mercredi 4 à 17h",
+        "lundi 2, mardi 3 et mercredi 4",
+        "Wednesday 4th, el miércoles 4",
+        // 2026-10-10 is a Saturday, 2026-11-10 the Tuesday.
+        "Tuesday 10",
+    ] {
+        assert_eq!(check(reply, OCT_30), Vec::<String>::new(), "{reply}");
+    }
+}
+
+#[test]
+fn leans_a_month_ahead_and_three_weeks_back() {
+    // 2026-10-19, 26 days ahead, is the Monday.
+    assert_eq!(
+        check("seulement le lun 19, à 20h", "2026-09-23"),
+        Vec::<String>::new()
+    );
+    // 2026-09-18, 5 days back, is a Friday, and no 18th ahead is a Thursday.
+    assert_eq!(
+        check("Dernier message : jeudi 18.", "2026-09-23"),
+        [r#""jeudi 18" (2026-09-18 is a Friday)"#]
+    );
+}
+
+// A "meetings of the week" list for Oct 20-22 2026, weekdays from 2025.
+#[test]
+fn flags_each_bare_day_of_a_list_written_by_last_years_calendar() {
+    assert_eq!(
+        check("Lundi 20 / Mardi 21 / Mercredi 22", "2026-10-15"),
+        [
+            r#""Lundi 20" (2026-10-20 is a Tuesday)"#,
+            r#""Mardi 21" (2026-10-21 is a Wednesday)"#,
+            r#""Mercredi 22" (2026-10-22 is a Thursday)"#,
+        ]
+    );
+}
+
+#[test]
+fn names_the_nearest_date_the_later_of_two_as_near() {
+    // Nov 5 and Dec 5 are both 15 days from Nov 20; Nov 5 is the Thursday.
+    assert_eq!(
+        check("Mon 5", "2026-11-20"),
+        [r#""Mon 5" (2026-12-05 is a Saturday)"#]
+    );
+    assert_eq!(check("Thu 5", "2026-11-20"), Vec::<String>::new());
+}
+
+#[test]
+fn leaves_a_number_that_is_a_count_an_hour_a_range_or_part_of_a_month_date_alone() {
+    for reply in [
+        "Monday 3 meetings",
+        "Tue 4 pm",
+        "Mardi 4h",
+        "Monday 9:30",
+        "Mon 3-5",
+        "has sat 2+ weeks",
+        "Mar 11, 2026",
+        "Mittwoch 4. November",
+        "Tuesday 10 meetings",
+        "Tue 4 tomorrow",
+        "martes 4 a las 17h",
+        // "9h à 12h" outgrows "de 9h", so no time opens the rest of the line.
+        "mardi 4 de 9h à 12h",
+    ] {
+        assert_eq!(check(reply, OCT_30), Vec::<String>::new(), "{reply}");
+    }
+}
+
+// chrono merges the weekday with the hour it reads in "24" and drops both.
+#[test]
+fn leaves_a_weekday_beside_24_alone() {
+    assert_eq!(check("Tue 24", OCT_30), Vec::<String>::new());
+    assert_eq!(check("mer 24.", "2026-07-26"), Vec::<String>::new());
+}
+
+// "mer" is also Italian, which misses the French month.
+#[test]
+fn checks_a_date_with_its_month_once_against_that_month() {
+    assert_eq!(
+        check("- **Mer 15 oct** : soirée libre", "2026-09-23"),
+        [r#""Mer 15 oct" (2026-10-15 is a Thursday)"#]
+    );
+}
+
+fn window(reply: &str) -> Vec<String> {
+    rows_outside_window(reply, day(OCT_30))
+}
+
+const WEEK_TABLE: &str =
+    "Here's your LinkedIn activity from the past week (Oct 23–30), 6 original posts:
+
+**Original posts:**
+
+| Date | Post | Impressions |
+|------|------|------------|
+| Oct 29 | \"Sixteen plays, one page\" | 39 |
+| Oct 27 | \"The end of the weekly ad audit?\" | 427 |
+| Oct 22 | \"Sixteen agents, four pods\" | 15 |
+| Oct 20 | \"Paid ads through Slack\" | 540 |";
+
+#[test]
+fn flags_the_rows_of_a_table_whose_date_falls_before_the_window_its_heading_names() {
+    assert_eq!(
+        window(WEEK_TABLE),
+        [
+            r#""Oct 22" under "Oct 23-30""#,
+            r#""Oct 20" under "Oct 23-30""#
+        ]
+    );
+}
+
+#[test]
+fn passes_a_table_whose_rows_all_fall_inside_the_window() {
+    let inside: Vec<&str> = WEEK_TABLE
+        .lines()
+        .filter(|l| !(l.starts_with("| Oct 22") || l.starts_with("| Oct 20")))
+        .collect();
+    assert_eq!(window(&inside.join("\n")), Vec::<String>::new());
+}
+
+#[test]
+fn reads_list_items_by_the_date_they_lead_with_not_a_date_inside_them() {
+    let list = "*Weekly digest: Oct 19 to Oct 26*
+• Oct 21: support added for Slack Connect, first asked for on Oct 14
+• Oct 14: a release with reliability fixes";
+    assert_eq!(window(list), [r#""Oct 14" under "Oct 19 to Oct 26""#]);
+}
+
+#[test]
+fn lets_prose_end_what_a_heading_covers() {
+    let prose = "Weekly usage digest (Oct 12-18): 1,754 turns from 121 users.
+Since then the team shipped two fixes.
+- Oct 20: the GTM evidence review";
+    assert_eq!(window(prose), Vec::<String>::new());
+}
+
+#[test]
+fn reads_the_window_a_later_heading_names_for_the_rows_under_it() {
+    let two = "*This week (Oct 26-30)*
+- Oct 28: launch
+*Previous week (Oct 19-25)*
+- Oct 22: draft";
+    assert_eq!(window(two), Vec::<String>::new());
+}
+
+#[test]
+fn reads_a_window_and_its_rows_in_another_language() {
+    let french = "*Digest concurrents (19-26 oct.)*
+- 14 oct. : nouvelle version
+- 21 oct. : critique sur les crédits";
+    assert_eq!(window(french), [r#""14 oct." under "19-26 oct.""#]);
+    let german = "Woche vom 19. bis 26. Oktober\n- 18. Oktober: a\n- 22. Oktober: b";
+    assert_eq!(
+        window(german),
+        [r#""18. Oktober" under "19. bis 26. Oktober""#]
+    );
+}
+
+#[test]
+fn reads_a_window_across_months_and_years() {
+    assert_eq!(
+        window("Week of Oct 28 - Nov 3:\n- Nov 4: late\n- Oct 27: early\n- Oct 30: in"),
+        [
+            r#""Nov 4" under "Oct 28 - Nov 3""#,
+            r#""Oct 27" under "Oct 28 - Nov 3""#
+        ]
+    );
+    assert_eq!(
+        rows_outside_window(
+            "## Dec 28 to Jan 3\n1. Jan 5: x\n2) Dec 27: y\n3. Dec 30: z",
+            day("2026-01-02")
+        ),
+        [
+            r#""Jan 5" under "Dec 28 to Jan 3""#,
+            r#""Dec 27" under "Dec 28 to Jan 3""#
+        ]
+    );
+}
+
+#[test]
+fn leaves_a_row_dated_by_a_range_and_a_window_running_backwards_alone() {
+    assert_eq!(window("Oct 23-30\n- Oct 19-20: d"), Vec::<String>::new());
+    assert_eq!(window("Oct 30-23\n- Oct 1: a"), Vec::<String>::new());
+}
+
+#[test]
+fn checks_nothing_in_a_reply_with_no_table_or_list() {
+    assert_eq!(
+        window("Between Oct 23 and Oct 30 you posted on Oct 20 and Oct 29."),
+        Vec::<String>::new()
+    );
 }

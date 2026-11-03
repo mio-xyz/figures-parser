@@ -69,6 +69,7 @@ what a text states, with byte spans.
 | [Links](#links) | `ungrounded_urls`, `fabricated_urls` | `urls` | the corpus holds the link, with or without its scheme, its path under no other host, or the ids it was built from |
 | [Addresses read](#addresses-read) | `url_printed_in` | | the text read holds the address, without its scheme or by its path |
 | [Weekdays](#weekdays) | `misdated_weekdays` | | the weekday is the date's own |
+| [Rows under a date window](#rows-under-a-date-window) | `rows_outside_window` | | the row's date falls inside the window its heading names |
 | [Email addresses](#email-addresses) | `ungrounded_emails` | `emails` | the corpus or the prompt carries it, case aside |
 | [Identifiers](#identifiers) | `ungrounded_identifiers`, `unprinted_ids` | `identifiers` | the corpus or the prompt carries it |
 | [Durations](#durations) | `ungrounded_durations` | `durations` | the corpus carries the same length, in any form |
@@ -296,7 +297,10 @@ assert!(!url_printed_in(url, "## The Journal\n## When marking runs late"));
 
 `misdated_weekdays(reply, today)` finds each weekday written beside a date
 and names the pairs whose weekday is wrong. `today` gives a date without a
-year its year. It reads 15 languages, Arabic included (see
+year its year. A weekday beside a bare day number ("mardi 4", "Tue 4th") is
+wrong when no date from three weeks before `today` to five weeks after it
+with that number falls on it; the finding names the nearest such date. It
+reads 15 languages, Arabic included (see
 [Language support](#language-support)).
 
 ```rust
@@ -310,6 +314,38 @@ assert_eq!(
 assert_eq!(
     misdated_weekdays("الاجتماع يوم الجمعة ٢٦ سبتمبر ٢٠٢٦", today),
     [r#""يوم الجمعة ٢٦ سبتمبر ٢٠٢٦" (2026-09-26 is a Saturday)"#]
+);
+
+// 2026-11-04 is a Wednesday; the Tuesday the 4th was in 2025.
+let today: Date = "2026-10-30".parse().unwrap();
+assert_eq!(
+    misdated_weekdays("Call on Tue 4 at 5pm", today),
+    [r#""Tue 4" (2026-11-04 is a Wednesday)"#]
+);
+// A count, an hour or a month date after the number is no bare day.
+assert!(misdated_weekdays("Monday 3 meetings, Tue 4 pm", today).is_empty());
+```
+
+### Rows under a date window
+
+`rows_outside_window(reply, today)` reads a table or list under a heading
+that names a range of dates ("past week (Oct 23-30)", "Oct 19 to Oct 26",
+"19-26 oct.") and names the rows whose leading date falls outside it. A row
+is a table row, read by its first cell, or a list item, read by what follows
+its bullet or number. A blank line, a label ending in a colon or an
+emphasised line keeps the window open; other prose closes it. It reads the
+languages the weekday check reads, Arabic aside.
+
+```rust
+use figures_parser::{Date, rows_outside_window};
+
+let today: Date = "2026-10-30".parse().unwrap();
+let reply = "Your posts from the past week (Oct 23–30):\n\
+             | Oct 29 | Sixteen plays | 39 |\n\
+             | Oct 20 | Paid ads through Slack | 540 |";
+assert_eq!(
+    rows_outside_window(reply, today),
+    [r#""Oct 20" under "Oct 23-30""#]
 );
 ```
 
@@ -463,7 +499,7 @@ in one forward pass, as the binding does.
 |---|---|
 | Numbers | Any language: digits of every script Unicode encodes, and the separators every CLDR locale prints, Indian grouping included. Scale words and numbers in words: English, French, German, Spanish, Italian, Portuguese, lakh and crore, and Han numerals. |
 | Links | Any language, internationalized domain names included. |
-| Weekdays | English, French, German, Spanish, Italian, Portuguese, Dutch, Swedish, Finnish, Russian, Ukrainian, Japanese, Chinese (simplified and traditional), Vietnamese and Arabic (the month names of every Arab country, Arabic-Indic digits). |
+| Weekdays and date windows | English, French, German, Spanish, Italian, Portuguese, Dutch, Swedish, Finnish, Russian, Ukrainian, Japanese, Chinese (simplified and traditional), Vietnamese and Arabic (the month names of every Arab country, Arabic-Indic digits). |
 | Email addresses | Any language, a local part outside ASCII included. |
 | Identifiers | ASCII letters, digits, `-` and `_`, whatever the language around them. |
 | Durations | English, French, Spanish, Italian, Portuguese and Arabic for words; seconds, minutes and hours under their CLDR names in German, Dutch, Polish, Swedish, Turkish, Indonesian, Vietnamese, Russian, Hebrew, Persian, Hindi, Japanese, Korean, Chinese and Thai too; unit symbols (`ms`, `s`, `h`, `d`, `w`, `y`) in any language. |

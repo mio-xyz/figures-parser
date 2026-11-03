@@ -45,6 +45,7 @@ wildcard_enum_match_arm = "deny"
 aho-corasick = "1"
 unicode-general-category = "1.1"
 unicode-script = "0.5"
+unicode-segmentation = "1.13"
 iso_currency = "0.7"
 jiff = { version = "0.2", default-features = false, features = ["std"] }
 linkify = "0.11"

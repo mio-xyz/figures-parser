@@ -18,7 +18,7 @@ The library has one module per kind, each with a reader and a comparison:
 |---|---|---|
 | `number` | `scan` (tokens), `readings`, `scale` (scale words), `spelled` (numbers in words), `digits` | `ground` (figures, and amounts against one print), `ratio`, `arithmetic` |
 | `url` | `scan` | `ground`, `items` (the items named beside links), `shapes` (links built from printed ids) |
-| `date` | `languages`, `names` (a port of chrono-node, and Arabic) | `calendar` |
+| `date` | `languages`, `names` (a port of chrono-node, and Arabic), `clock` (its times of day) | `calendar`, `bare` (a weekday beside a bare day), `window` (rows under a date window) |
 | `email` | `emails` | `ungrounded_emails` |
 | `id` | `identifiers` | `ungrounded_identifiers`, `unseen_tokens` |
 | `duration` | `grammar`, `words`, `groups` | `corpus` (the forms a corpus writes a length in) |
@@ -422,6 +422,69 @@ bidi marks a formatter puts around numbers, and `الموافق` ("corresponding
 to"). A Hijri date has no month these parsers read, so a weekday beside one
 ("الجمعة 14 ربيع الأول 1448هـ") is never paired with the Gregorian date that
 may follow it.
+
+### A weekday beside a bare day number
+
+A weekday a language reads alone, followed by one same-line run of spaces
+and a day number (one or two digits, 1 to 31, with an ordinal suffix `st`,
+`nd`, `rd`, `th`, `er`, `e`, `º` or `ª`), names no month: it is read against
+the dates from 21 days before `today` to 35 days after it that carry that
+number, and is wrong only when none of them falls on that weekday. The
+window leans ahead, as a reply plans a month out more often than it looks
+back. The finding names the nearest such date, the later of two as near.
+The weekday word is one of the language's Intl names (its gate words),
+found as a word segment (UAX #29); a name in a script without spaces is
+found inside the text, as ICU's dictionary keeps "火曜日" one word.
+
+The pair is skipped when:
+
+- the weekday is a lowercase English short name ("sat 2+ weeks");
+- the number is followed by `:`, `/`, `-`, `–`, `+`, `%` or `h` (a time, a
+  range, a count or a slash date);
+- the number is followed by a space and a word, unless "number word" does
+  not read as an hour and the rest of the line opens on a time of day
+  ("mardi 4 à 17h" and "Tue 4 at 5pm" are checked; "Monday 3 meetings", "Tue
+  4 pm" and "Mer 15 oct" are not);
+- English reads the pair as a month date ("Mar 11");
+- the weekday sits inside a span some language read as a full date, which is
+  checked as such ("Mer 15 oct" is French, never a bare Italian "Mer 15");
+- the language's time parser reads the number as 24:00 ("Tue 24"): chrono
+  merges a weekday with the hour after it and drops the pair when that hour
+  is no time a clock shows.
+
+A pair is reported once, as written, the full-date pairs included.
+
+The time of day is `date/clock.rs`, a port of chrono's time parsers for the
+eleven languages that have them: its time expression (an optional prefix
+such as "at", "à", "um", "a las", "alle", "às", "om", "klo", "в", the hour,
+minutes and seconds, a meridiem, the language's suffix such as "o'clock" or
+"Uhr", and a range's second time), French and German written hours ("17h30",
+"17 Uhr abends"), a length from now in hours, minutes or seconds ("de 9h",
+"in 2 hours") and the casual words that set an hour ("noon", "midnight",
+"now", "maintenant"). Only a reading at the start counts, after chrono's own
+checks: a lone digit, a three-digit number and a text of digits and a dot are
+no time, and a longer time or date starting inside one removes it, as
+chrono's overlap removal does ("de 9h à 12h" reads "9h à 12h", which does not
+start the text).
+
+## Rows under a date window
+
+`rows_outside_window(reply, today)` splits the reply into lines, with en and
+em dashes read as hyphens since chrono reads "Oct 23–30" as its first day
+alone. A line is a row when it is a table row (its lead is the first cell)
+or a list item (`- `, `* `, `•`, `◦`, `‣`, `1. `, `1) `; its lead is what
+follows), each without the emphasis around it. Any other line opens a window
+when a language reads a range of dates in it that runs forward: a
+month-name date's own range ("Oct 23-30", "19-26 oct.", "19. bis 26.
+Oktober") or two dates the language's range word joins ("Oct 19 to Oct 26",
+"Oct 28 - Nov 3", "19 au 26 octobre"), with chrono's year rules: a year
+written on one end is implied on the other, and a range whose start falls
+after its end moves the end a year on, or the start a year back, where the
+year is unwritten. A blank line, a heading, a label ending in a colon or a
+wholly emphasised line keeps the window open; other prose closes it. A row
+whose lead starts with a single date outside the window is reported once, as
+`"<date>" under "<window>"`. Each of chrono's fourteen languages runs over
+every line, ungated; Arabic is not read.
 
 ## Email addresses
 

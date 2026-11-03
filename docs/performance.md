@@ -54,3 +54,6 @@ the other checks the same. Allocations are exact counts and do not move.
 - **Weekdays read only the reply** and allocate nothing: about 50 µs for a
   4 KB reply that names no weekday and 100 µs for one that does, after a
   one-time compile of 5 to 13 ms for each language a reply names.
+- **Date windows read only the reply**, line by line in every language, and
+  allocate one copy of it: under 0.25 ms on each 300 KB corpus read as a
+  reply, after a one-time compile of every language's patterns.

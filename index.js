@@ -785,6 +785,7 @@ module.exports.linkFindings = nativeBinding.linkFindings
 module.exports.mendedLinks = nativeBinding.mendedLinks
 module.exports.misdatedWeekdays = nativeBinding.misdatedWeekdays
 module.exports.proseArithmetic = nativeBinding.proseArithmetic
+module.exports.rowsOutsideWindow = nativeBinding.rowsOutsideWindow
 module.exports.sharesAmount = nativeBinding.sharesAmount
 module.exports.statesFigure = nativeBinding.statesFigure
 module.exports.ungroundedDurations = nativeBinding.ungroundedDurations

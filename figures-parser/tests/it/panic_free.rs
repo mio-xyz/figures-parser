@@ -10,9 +10,9 @@ use figures_parser::number::scan::{Scratch, tokens};
 use figures_parser::utf16::{Utf16Cursor, units};
 use figures_parser::{
     Date, durations, emails, extract_numbers, fabricated_urls, identifiers, link_findings,
-    mended_links, misdated_weekdays, numbers, prose_arithmetic, ungrounded_durations,
-    ungrounded_emails, ungrounded_figures, ungrounded_identifiers, ungrounded_ratios,
-    ungrounded_urls, unprinted_ids, unseen_tokens, url_printed_in, urls,
+    mended_links, misdated_weekdays, numbers, prose_arithmetic, rows_outside_window,
+    ungrounded_durations, ungrounded_emails, ungrounded_figures, ungrounded_identifiers,
+    ungrounded_ratios, ungrounded_urls, unprinted_ids, unseen_tokens, url_printed_in, urls,
 };
 
 /// Calls every entry point on the three texts, and returns a sum the
@@ -43,7 +43,9 @@ fn exercise(reply: &str, corpus: &str, prompt: &str) -> usize {
         }
     }
     n += misdated_weekdays(reply, today_for(reply)).len()
-        + misdated_weekdays(corpus, today_for(corpus)).len();
+        + misdated_weekdays(corpus, today_for(corpus)).len()
+        + rows_outside_window(reply, today_for(reply)).len()
+        + rows_outside_window(corpus, today_for(corpus)).len();
     n + ungrounded_figures(reply, corpus).len()
         + ungrounded_figures(corpus, reply).len()
         + ungrounded_ratios(reply, corpus, "").len()
@@ -115,6 +117,15 @@ fn every_code_point_beside_a_figure_and_a_link() {
         );
         let run = catch_unwind(|| black_box(misdated_weekdays(&dated, today_for(&dated)).len()));
         assert!(run.is_ok(), "panicked on {dated:?}");
+        let bare = format!("mardi{c} 4 à{c} 17h Tue 4{c}th 火曜日{c} 4 Mon 24{c} at{c} 5{c}pm");
+        let bare_run = catch_unwind(|| black_box(misdated_weekdays(&bare, today_for(&bare)).len()));
+        assert!(bare_run.is_ok(), "panicked on {bare:?}");
+        let table = format!(
+            "Oct 23{c}–30\n| Oct{c} 20 | x |\n- 19-26 oct.{c}\n- Oct 28 {c}to Nov{c} 3\n{c}"
+        );
+        let table_run =
+            catch_unwind(|| black_box(rows_outside_window(&table, today_for(&table)).len()));
+        assert!(table_run.is_ok(), "panicked on {table:?}");
         let link = format!(
             "{c}https://a.io/{c}x{c}) <https://b.io/{c}|{c}> [#1{c}](https://c.io/{c}) CORE-{c}1 [{c}]({c})"
         );
@@ -334,6 +345,17 @@ const POOL: &[&str] = &[
     "12:30",
     "10/2026",
     "4 + ",
+    "Tue 4 ",
+    "mardi ",
+    " à 17h",
+    " at 5pm",
+    "火曜日 ",
+    "\n| Oct 20 | ",
+    "Oct 23-30\n",
+    "\n- ",
+    "19-26 oct.",
+    " to ",
+    "Dec 28",
 ];
 
 /// A xorshift generator, seeded so a failure reproduces.

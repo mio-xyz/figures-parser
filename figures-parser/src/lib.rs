@@ -12,6 +12,7 @@
 //! | Numbers | [`numbers`], [`extract_numbers`] | [`ungrounded_figures`], [`ungrounded_ratios`], [`prose_arithmetic`], [`Amounts`], [`states_figure`] |
 //! | Links | [`urls`] | [`ungrounded_urls`], [`link_findings`], [`fabricated_urls`], [`mended_links`], [`url_printed_in`] |
 //! | Weekdays beside dates | | [`misdated_weekdays`] |
+//! | Rows beside a date window | | [`rows_outside_window`] |
 //! | Email addresses | [`emails`] | [`ungrounded_emails`] |
 //! | Identifiers | [`identifiers`] | [`ungrounded_identifiers`], [`unprinted_ids`], [`unseen_tokens`] |
 //! | Durations | [`durations`] | [`ungrounded_durations`] |
@@ -55,7 +56,7 @@ mod text;
 mod url;
 pub mod utf16;
 
-pub use date::misdated_weekdays;
+pub use date::{misdated_weekdays, rows_outside_window};
 pub use duration::{Duration, Length, durations, ungrounded_durations};
 pub use email::{Email, emails, ungrounded_emails};
 pub use id::{Identifier, identifiers, ungrounded_identifiers, unprinted_ids, unseen_tokens};

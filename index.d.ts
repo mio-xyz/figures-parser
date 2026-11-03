@@ -150,7 +150,8 @@ export interface MendedReply {
  * The weekday-and-date pairs in `reply` whose weekday is wrong for that date.
  *
  * `today` is `YYYY-MM-DD`; a date written without a year is read in the year
- * nearest it.
+ * nearest it, and a weekday beside a bare day number against the dates
+ * around it.
  *
  * # Errors
  *
@@ -201,6 +202,19 @@ export interface NumberValue {
  * `message` gave four or more values; empty when it gave fewer.
  */
 export declare function proseArithmetic(reply: string, message: string, corpus: string): Array<string>
+
+/**
+ * The rows of a table or list, under a heading that names a date window,
+ * whose own leading date falls outside it, each `"<date>" under "<window>"`.
+ *
+ * `today` is `YYYY-MM-DD`; a date written without a year is read in the year
+ * nearest it.
+ *
+ * # Errors
+ *
+ * `today` is not a `YYYY-MM-DD` date.
+ */
+export declare function rowsOutsideWindow(reply: string, today: string): Array<string>
 
 /**
  * Whether `reply` states an amount that `text` carries: a figure the gate

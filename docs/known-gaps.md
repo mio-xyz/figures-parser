@@ -96,9 +96,22 @@ it stands; a contribution that closes one should remove it here.
   ("الجُمُعَة").
 - Two-letter abbreviations ("Mo", "Fr") are not read, since they are words in
   other languages ("to", "so", "di").
-- Only a weekday written next to its date is paired. A weekday and a date
-  apart in a sentence ("Friday we meet; the date is 26 Sep"), or a relative
-  weekday ("next Friday"), are not checked.
+- Only a weekday written next to its date, or next to a bare day number, is
+  paired. A weekday and a date apart in a sentence ("Friday we meet; the
+  date is 26 Sep"), or a relative weekday ("next Friday"), are not checked.
+- A bare day number followed by a word is checked only when the rest of the
+  line opens on a time of day, and Japanese, Chinese and Vietnamese times are
+  not read, so "火曜日 4 15:00" is skipped. Of chrono's other readings of a
+  time, a casual date with a time ("tomorrow 15"), a time with a zone offset
+  ("05.29 +02:00") and a length in words ("de deux heures") are not read
+  either. An Arabic weekday beside a bare day number is not checked.
+- A bare day number is read against a window from three weeks back to five
+  weeks ahead, so a plan more than five weeks out ("Tuesday 4" for a meeting
+  two months away) is read against the wrong month.
+- The TypeScript check loses a weekday that chrono joins into a range with a
+  time on the line before ("Total: 15\n- Montag 20" in German), and names
+  a date with that time's text; this library reads both lines apart, as
+  written.
 - In English, a lowercase "may" and a slash date whose two numbers could each
   be the month ("3/4") are skipped as ambiguous.
 - A date without a year takes the year chrono-node would give it, which can
@@ -152,3 +165,18 @@ it stands; a contribution that closes one should remove it here.
 - A printed length rounds to a reply's at the reply's place, so a long unit
   is loose: "2 hours" is grounded by any printed length from 1:30:01 to
   2:29:59, and "1 year" by 6.01 to 17.99 months.
+
+## Rows under a date window
+
+- A date followed by a range of hours ("Nov 4, 9:00-17:00") opens no window,
+  where chrono reads it as one day; a heading that names its window in words
+  ("this week", "the last 7 days") opens none either.
+- A row's date is named without the time after it ("Oct 20" for "Oct 20 at
+  5pm").
+- chrono reads a number after a hyphen beside a date as a zone offset ("29
+  octobre-14 déc." is October 29 at UTC-14, so no range; "12-17 de nov - 6
+  posts" names its window "12-17 de nov - 6") and part of a slash date as an
+  hour ("9/4 - 6"); this library reads the dates as written, so it opens
+  windows the TypeScript check does not, and names them without the offset.
+- Arabic is not read, nor a window or a row in a language whose date words
+  the weekday check does not read.

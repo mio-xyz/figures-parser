@@ -417,7 +417,32 @@ pub fn mended_links(reply: String, corpus: String) -> MendedReply {
     }
 }
 
+/// `today` as a date.
+fn parse_today(today: &str) -> napi::Result<figures_parser::Date> {
+    today
+        .parse()
+        .map_err(|e| napi::Error::from_reason(format!("today is not a YYYY-MM-DD date: {e}")))
+}
+
 /// The weekday-and-date pairs in `reply` whose weekday is wrong for that date.
+///
+/// `today` is `YYYY-MM-DD`; a date written without a year is read in the year
+/// nearest it, and a weekday beside a bare day number against the dates
+/// around it.
+///
+/// # Errors
+///
+/// `today` is not a `YYYY-MM-DD` date.
+#[napi(catch_unwind)]
+pub fn misdated_weekdays(reply: String, today: String) -> napi::Result<Vec<String>> {
+    Ok(figures_parser::misdated_weekdays(
+        &reply,
+        parse_today(&today)?,
+    ))
+}
+
+/// The rows of a table or list, under a heading that names a date window,
+/// whose own leading date falls outside it, each `"<date>" under "<window>"`.
 ///
 /// `today` is `YYYY-MM-DD`; a date written without a year is read in the year
 /// nearest it.
@@ -426,11 +451,11 @@ pub fn mended_links(reply: String, corpus: String) -> MendedReply {
 ///
 /// `today` is not a `YYYY-MM-DD` date.
 #[napi(catch_unwind)]
-pub fn misdated_weekdays(reply: String, today: String) -> napi::Result<Vec<String>> {
-    let today: figures_parser::Date = today
-        .parse()
-        .map_err(|e| napi::Error::from_reason(format!("today is not a YYYY-MM-DD date: {e}")))?;
-    Ok(figures_parser::misdated_weekdays(&reply, today))
+pub fn rows_outside_window(reply: String, today: String) -> napi::Result<Vec<String>> {
+    Ok(figures_parser::rows_outside_window(
+        &reply,
+        parse_today(&today)?,
+    ))
 }
 
 /// The email addresses in `reply`, once each, that neither `corpus` nor

@@ -6,8 +6,8 @@ use std::hint::black_box;
 use figures_parser::number::scan::tokens;
 use figures_parser::{
     Amounts, Date, extract_numbers, link_findings, mended_links, misdated_weekdays,
-    prose_arithmetic, ungrounded_durations, ungrounded_emails, ungrounded_figures,
-    ungrounded_identifiers, ungrounded_ratios, ungrounded_urls, urls,
+    prose_arithmetic, rows_outside_window, ungrounded_durations, ungrounded_emails,
+    ungrounded_figures, ungrounded_identifiers, ungrounded_ratios, ungrounded_urls, urls,
 };
 
 /// The size every corpus is built to, in bytes.
@@ -52,7 +52,7 @@ pub struct Case {
 pub type Path<'c> = (&'static str, Box<dyn Fn() -> usize + 'c>);
 
 /// The hot paths both benches measure over `case`.
-pub fn paths(case: &Case) -> [Path<'_>; 17] {
+pub fn paths(case: &Case) -> [Path<'_>; 18] {
     let text = case.text.as_str();
     let amounts = Amounts::of(UNGROUNDED_REPLY);
     [
@@ -93,6 +93,12 @@ pub fn paths(case: &Case) -> [Path<'_>; 17] {
         (
             "misdated_weekdays",
             Box::new(move || misdated_weekdays(black_box(text), Date::constant(2026, 10, 2)).len()),
+        ),
+        (
+            "rows_outside_window",
+            Box::new(move || {
+                rows_outside_window(black_box(text), Date::constant(2026, 10, 2)).len()
+            }),
         ),
         (
             "ungrounded_ratios",

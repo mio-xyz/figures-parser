@@ -72,6 +72,9 @@ pub struct Found {
     pub end: usize,
     /// What it read.
     pub reading: Reading,
+    /// The last day of a range a month-name date writes ("Oct 23-30"), in
+    /// the same month and year.
+    pub to: Option<u8>,
 }
 
 /// How a language's refiner pairs a weekday with a date.
@@ -124,6 +127,9 @@ enum Kind {
         full: &'static [&'static str],
         /// Whether the result's text leaves out the `prefix` group ("in", "di").
         drop_prefix: bool,
+        /// Whether a two-digit year is held to English's check (not `18 Jan`,
+        /// `18 am`), the match backing out of the year where it fails.
+        english_year: bool,
     },
     /// A day and a month word, in either order.
     MonthName {
@@ -253,8 +259,32 @@ fn month_only(
             "{pre}(?P<prefix>{prefix})?(?P<m>{}){year}{MONTH_POST}",
             keys(months)
         ),
-        Kind::MonthOnly { full, drop_prefix },
+        Kind::MonthOnly {
+            full,
+            drop_prefix,
+            english_year: false,
+        },
     )
+}
+
+/// English's month-only parser, whose two-digit year chrono holds to the
+/// same check as a month-name date's.
+fn english_month_only(year: &str) -> Parser {
+    let pattern = |tail: &str| {
+        format!(
+            r"{PRE}(?P<prefix>in\s*)?(?P<m>{}){tail}{MONTH_POST}",
+            keys(names::EN_MONTHS)
+        )
+    };
+    Parser {
+        re: compile(&pattern(&format!(r"\s*(?:(?:,|-|of)?\s*(?P<y>{year})?)?"))),
+        no_year: compile(&pattern(r"\s*(?:(?:,|-|of)?\s*)?")),
+        kind: Kind::MonthOnly {
+            full: names::EN_FULL_MONTHS,
+            drop_prefix: true,
+            english_year: true,
+        },
+    }
 }
 
 /// A month written as a number and a four-digit year (`9/2026`): read only
@@ -396,14 +426,7 @@ fn english() -> Language {
                 ),
                 Kind::Other,
             ),
-            month_only(
-                PRE,
-                r"in\s*",
-                names::EN_MONTHS,
-                &format!(r"\s*(?:(?:,|-|of)?\s*(?:{year})?)?"),
-                names::EN_FULL_MONTHS,
-                true,
-            ),
+            english_month_only(year),
         ],
     }
 }
@@ -907,6 +930,8 @@ fn ukrainian() -> Language {
 pub struct Entry {
     /// The language's code, as chrono names it.
     pub code: &'static str,
+    /// The weekday names Intl gives, long then short, Monday first.
+    pub names: &'static [&'static str],
     /// The gate's weekday names as one case-insensitive pattern.
     gate: Option<Regex>,
     /// The language's parsers.
@@ -930,6 +955,7 @@ impl Entry {
             .filter(|w| unspaced(w) || w.chars().count() >= 3);
         Self {
             code,
+            names,
             gate: compile(&format!("(?:{})", alternation(words))),
             language: LazyLock::new(build),
         }
@@ -1353,6 +1379,7 @@ fn read_slash(m: &Match<'_, '_>, end: usize, day_first: bool) -> Option<Found> {
         start: index,
         end,
         reading: Reading::Date { day, month, year },
+        to: None,
     })
 }
 
@@ -1426,6 +1453,7 @@ fn read_arabic_slash(m: &Match<'_, '_>, end: usize) -> Option<Found> {
         start: index,
         end,
         reading: Reading::Date { day, month, year },
+        to: None,
     })
 }
 
@@ -1496,7 +1524,18 @@ fn extract(parser: &Parser, caps: &Captures<'_>, text: &str, from: usize) -> Opt
                 .map_or(Reading::Other, |&(_, day)| Reading::Weekday(day))
         }
         Kind::Other => Reading::Other,
-        Kind::MonthOnly { full, drop_prefix } => {
+        Kind::MonthOnly {
+            full,
+            drop_prefix,
+            english_year,
+        } => {
+            if english_year
+                && m.group("y").is_some_and(|y| {
+                    !year_follows_well(YearCheck::EnglishYear, y.trim(), m.after("y"))
+                })
+            {
+                return None;
+            }
             let prefix_end = caps.name("prefix").map(|p| from + p.end());
             let text_start = if drop_prefix {
                 prefix_end.unwrap_or(start)
@@ -1512,6 +1551,7 @@ fn extract(parser: &Parser, caps: &Captures<'_>, text: &str, from: usize) -> Opt
                 start: text_start,
                 end,
                 reading: Reading::Other,
+                to: None,
             });
         }
         Kind::MonthName {
@@ -1537,9 +1577,15 @@ fn extract(parser: &Parser, caps: &Captures<'_>, text: &str, from: usize) -> Opt
         Kind::Arabic => read_arabic(&m)?,
         Kind::ArabicSlash => return read_arabic_slash(&m, end),
     };
+    let to = if let Kind::MonthName { words, .. } = parser.kind {
+        m.group("d2").and_then(|d| parse_day(d, words.ordinals))
+    } else {
+        None
+    };
     Some(Found {
         start,
         end,
         reading,
+        to,
     })
 }
