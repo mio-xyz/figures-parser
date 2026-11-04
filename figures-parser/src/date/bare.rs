@@ -96,7 +96,10 @@ pub fn bare_day_at(
     // and drops both when that time is 24:00 ("Tue 24"): no pair is left.
     let from_number = tail.get(number_at..).unwrap_or_default();
     let number_line = from_number.split('\n').next().unwrap_or_default();
-    if clock::time_at_start(code, number_line).is_some_and(clock::Time::is_invalid) {
+    let past_clock = clock::time_at_start(code, number_line).is_some_and(clock::Time::is_invalid);
+    if past_clock
+        && !clock::signed_length_at_start(code, number_line.get(number.len()..).unwrap_or_default())
+    {
         return None;
     }
     let after = segments.get(2).map(|&(_, s)| s);
@@ -136,7 +139,12 @@ pub fn bare_day_at(
 /// ICU's dictionary keeps "火曜日" one word.
 fn weekday_word<'t>(tail: &'t str, span: usize, names: &[&str]) -> Option<(usize, &'t str, i8)> {
     let weekday = |i: usize| i8::try_from(i % 7 + 1).ok();
-    if names.iter().any(|n| n.chars().any(is_unspaced_script)) {
+    // A script's mark that other scripts share ("пʼятниця" writes U+02BC,
+    // which Thai uses too) does not make the language one without spaces.
+    if names
+        .iter()
+        .any(|n| n.chars().next().is_some_and(is_unspaced_script))
+    {
         return tail
             .char_indices()
             .take_while(|&(offset, _)| offset < span)

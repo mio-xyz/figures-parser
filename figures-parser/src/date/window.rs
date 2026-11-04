@@ -12,7 +12,7 @@ use jiff::civil::Date;
 use regex::Regex;
 
 use super::languages::{Found, LANGUAGES, Language, Reading, YearOf};
-use super::{calendar, clock, merged};
+use super::{calendar, casual, clock, merged};
 
 /// The dashes chrono reads as the first day alone, not a range ("Oct 23–30").
 const RANGE_DASHES: &[char] = &['–', '—'];
@@ -160,6 +160,22 @@ pub(super) fn joins_range(code: &str, between: &str) -> bool {
         .is_some_and(|re| re.is_match(between))
 }
 
+/// The range words between two dates Spanish and Portuguese write that
+/// chrono's refiners for them do not read ("28 de março a 4 abr.", "del 3
+/// al 9 de mayo").
+static IBERIAN_RANGE_WORDS: LazyLock<Option<Regex>> =
+    LazyLock::new(|| crate::text::compile(r"(?i)^\s*(?:a|al|hasta|à|ao|até)\s*$"));
+
+/// Whether `between` joins two dates into a range in the language `code`:
+/// its refiner's words, and the Iberian ones chrono misses.
+fn joins_dates(code: &str, between: &str) -> bool {
+    joins_range(code, between)
+        || (matches!(code, "es" | "pt")
+            && IBERIAN_RANGE_WORDS
+                .as_ref()
+                .is_some_and(|re| re.is_match(between)))
+}
+
 /// Two dates a range word joins, ordered as chrono orders them: a later
 /// start moves the end a year on, or the start a year back, when the text
 /// leaves that year unwritten, and is swapped with the end otherwise.
@@ -189,13 +205,25 @@ fn merged_range(mut from: Day, mut to: Day) -> Option<(Day, Day)> {
 /// beside them, the longer of two overlapping results kept as chrono's
 /// overlap removal keeps it, then weekdays merged into their dates.
 fn dates_and_times(code: &str, language: &Language, text: &str, today: Date) -> Vec<Read> {
-    let dates = language.every_result(text);
-    if dates.is_empty() {
+    let mut dates = language.every_result(text);
+    let casual = casual::days_in(code, text, today);
+    if dates.is_empty() && casual.is_empty() {
         return Vec::new();
+    }
+    let lengths = lengths_in(code, text, today);
+    if !casual.is_empty() || !lengths.is_empty() {
+        dates.extend(
+            casual
+                .into_iter()
+                .chain(lengths)
+                .map(|(start, end, date)| day_found(start, end, date)),
+        );
+        dates.sort_by_key(|f| f.start);
     }
     let mut starts: Vec<usize> = dates
         .iter()
         .flat_map(|d| clock::time_starts_around(code, text, d.start, d.end, true))
+        .filter(|&at| !dates.iter().any(|d| inside_dotted_date(text, d, at)))
         .collect();
     starts.sort_unstable();
     starts.dedup();
@@ -273,6 +301,64 @@ fn dates_and_times(code: &str, language: &Language, text: &str, today: Date) -> 
         out.push(date_read(&current, today));
     }
     out
+}
+
+/// Whether `at` falls after the first dot of a date written as three
+/// dotted numbers ("25.11.25", "12.2.2025"). chrono's time scan tries the
+/// date's first numbers ("25.11") and resumes past them, so the time it
+/// reads further in ("11.25 bis 2025") is one a reader sees as no time;
+/// the date is kept.
+fn inside_dotted_date(text: &str, date: &Found, at: usize) -> bool {
+    let Some(written) = text.get(date.start..date.end) else {
+        return false;
+    };
+    let mut parts = written.split('.');
+    let shape = [(1, 2), (1, 2), (2, 4)].iter().all(|&(min, max)| {
+        parts.next().is_some_and(|p| {
+            (min..=max).contains(&p.len()) && p.bytes().all(|b| b.is_ascii_digit())
+        })
+    }) && parts.next().is_none();
+    let first_dot = written
+        .find('.')
+        .map_or(date.end, |d| date.start.saturating_add(d));
+    shape && at > first_dot && at < date.end
+}
+
+/// The lengths from now in `text` that land on a day ("3 days ago"), each
+/// with where it stands and that day; read where a word or number starts.
+fn lengths_in(code: &str, text: &str, today: Date) -> Vec<(usize, usize, Date)> {
+    let mut out = Vec::new();
+    let mut from = 0;
+    for (at, c) in text.char_indices() {
+        if at < from || !c.is_alphanumeric() {
+            continue;
+        }
+        let starts_word = crate::text::char_before(text, at).is_none_or(|b| !b.is_alphanumeric());
+        if !starts_word {
+            continue;
+        }
+        if let Some((end, date)) = clock::length_date_at(code, text, at, today) {
+            out.push((at, end, date));
+            from = end;
+        }
+    }
+    out
+}
+
+/// A casual day or a length from now as a date result: a day chrono holds
+/// as certain, year included.
+fn day_found(start: usize, end: usize, date: Date) -> Found {
+    let part = |n: i8| u8::try_from(n).unwrap_or_default();
+    Found {
+        start,
+        end,
+        reading: Reading::Date {
+            day: part(date.day()),
+            month: part(date.month()),
+            year: YearOf::Written(i32::from(date.year())),
+        },
+        to: None,
+    }
 }
 
 /// The read a time of day makes: no date, and no name for a bare number.
@@ -486,7 +572,11 @@ fn ranges(code: &str, text: &str, reads: Vec<Read>) -> Vec<Read> {
             continue;
         };
         let between = text.get(last.end..read.start).unwrap_or_default();
-        if last.range || read.range || !joins_range(code, between) {
+        let dates = last.dated && read.dated;
+        if last.range
+            || read.range
+            || !(joins_range(code, between) || dates && joins_dates(code, between))
+        {
             out.push(read);
             continue;
         }
@@ -578,24 +668,30 @@ fn keeps_window(line: &str) -> bool {
 }
 
 /// One language's findings over the lines, added to `out` once each.
+/// `windows` holds the window this language reads on each line that is no
+/// row, and `named` whether any language reads one there: a heading another
+/// language reads as a window ends the one this language had open.
 fn outside_for(
     code: &str,
     language: &Language,
     lines: &[&str],
+    (windows, named): (&[Option<Window<'_>>], &[bool]),
     today: Date,
     out: &mut Vec<String>,
 ) {
-    let mut window: Option<Window<'_>> = None;
-    for line in lines {
+    let mut window: Option<&Window<'_>> = None;
+    for (i, line) in lines.iter().enumerate() {
         let Some(lead) = row_lead(line) else {
-            match window_in(code, language, line, today) {
+            match windows.get(i).and_then(Option::as_ref) {
                 Some(opened) => window = Some(opened),
-                None if !keeps_window(line) => window = None,
+                None if !keeps_window(line) || named.get(i).copied().unwrap_or(false) => {
+                    window = None;
+                }
                 None => {}
             }
             continue;
         };
-        let Some(open) = &window else {
+        let Some(open) = window else {
             continue;
         };
         let Some(own) = reads(code, language, lead, today)
@@ -655,9 +751,38 @@ pub fn rows_outside_window(reply: &str, today: Date) -> Vec<String> {
     if !lines.iter().any(|l| row_lead(l).is_some()) {
         return Vec::new();
     }
+    let entries: Vec<_> = LANGUAGES.iter().filter(|e| e.code != "ar").collect();
+    let windows: Vec<Vec<Option<Window<'_>>>> = entries
+        .iter()
+        .map(|entry| {
+            lines
+                .iter()
+                .map(|line| {
+                    row_lead(line)
+                        .is_none()
+                        .then(|| window_in(entry.code, entry.language(), line, today))
+                        .flatten()
+                })
+                .collect()
+        })
+        .collect();
+    let named: Vec<bool> = (0..lines.len())
+        .map(|i| {
+            windows
+                .iter()
+                .any(|w| w.get(i).is_some_and(Option::is_some))
+        })
+        .collect();
     let mut out = Vec::new();
-    for entry in LANGUAGES.iter().filter(|e| e.code != "ar") {
-        outside_for(entry.code, entry.language(), &lines, today, &mut out);
+    for (entry, own) in entries.iter().zip(&windows) {
+        outside_for(
+            entry.code,
+            entry.language(),
+            &lines,
+            (own, &named),
+            today,
+            &mut out,
+        );
     }
     out
 }

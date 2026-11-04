@@ -493,7 +493,24 @@ followed by its weekday ("今日(金)"), is checked against the day the word
 names, today counted from `today`, as chrono's weekday refiner merges the
 two (`date/casual.rs`). A part of the day names no day ("this morning",
 "上午"), and "morgen" right after a weekday in German and Dutch is that
-day's morning ("Freitag morgen"); after a comma it is tomorrow.
+day's morning ("Freitag morgen"); after a comma it is tomorrow. The pair is
+named with the time and the zone written after it ("TUESDAY tomorrow 5:30
+PM").
+
+Three readings depart from chrono's, each where chrono reads the date as no
+reader would:
+
+- a date written as three dotted numbers is day first in English too
+  ("Sunday 5.1.2025" is January 5); a pair that is right month first is let
+  be, and one wrong either way is named by its day-first date;
+- a Japanese slash date whose first number cannot be a month is day first
+  ("13/05(木)" is May 13), and no slash date is read from inside a number,
+  where chrono's retry reads "3/05" out of "13/05";
+- a two-digit number that ends a month-name date's clause is its year when
+  chrono reads it as an hour past the clock and drops the date ("samedi 13
+  juillet 24" is 13 July 2024); a word after it makes it a count, and the
+  date goes unread as chrono leaves it. chrono reads the same number before
+  23 as an hour, so "samedi 13 juillet 23" is checked against this year.
 
 ### A weekday beside a bare day number
 
@@ -522,7 +539,9 @@ The pair is skipped when:
   checked as such ("Mer 15 oct" is French, never a bare Italian "Mer 15");
 - the language's time parser reads the number as 24:00 ("Tue 24"): chrono
   merges a weekday with the hour after it and drops the pair when that hour
-  is no time a clock shows.
+  is no time a clock shows. In English and Italian a signed length after the
+  number ("Friday 24 +11mins") merges into that hour instead, which then
+  names its own day, so the pair is checked.
 
 A pair is reported once, as written, the full-date pairs included.
 
@@ -567,9 +586,12 @@ number and a text of digits and a dot are no time, and a time at 24:00 drops
 the result.
 
 A full-date pair is named with the time written beside it on its line ("Fri
-26 Sep at 5pm", "at 5pm, Fri 26 Sep") and the zone after it. A bare number
+26 Sep at 5pm", "at 5pm, Fri 26 Sep") and the zone after it, an offset after
+a date with no time included ("WEDNESDAY 15 December +02:00"). A bare number
 beside a date ("mardi 7 nov 15 personnes") is no time to a reader, so it is
-left out of the name.
+left out of the name. In English and Italian a signed length after the date
+or its time ("+11mins") is a length, not the zone "+11"; the other languages
+read it as chrono does.
 
 ## Rows under a date window
 
@@ -580,18 +602,25 @@ or a list item (`- `, `* `, `•`, `◦`, `‣`, `1. `, `1) `; its lead is what
 follows), each without the emphasis around it. Each of chrono's fourteen
 languages reads every line, ungated, as chrono's refiners read it:
 
-1. every date parser's results and the times of day around them (inside a
-   date, glued to its start, and where the language's words join a date and
-   a time), the longer of two overlapping results kept, compared in UTF-16
-   units;
+1. every date parser's results, the casual words for a day ("today",
+   "hier", "сегодня", "今天") and the lengths from now that fix a day ("3
+   days ago", "in 2 weeks"; one of months or years only implies its day, so
+   it fixes none), and the times of day around them (inside a date, glued
+   to its start, and where the language's words join a date and a time),
+   the longer of two overlapping results kept, compared in UTF-16 units. No
+   time starts after the first dot of a date of three dotted numbers
+   ("25.11.25 bis ..."), as chrono's scan reads its first numbers and
+   resumes past them;
 2. weekdays merged into their dates;
 3. two times a range word joins merged into one range of times ("2/11 9:00
    - 17:00");
 4. a date merged with the time beside it: a range of hours makes a one-day
    window ("Nov 4, 9:00-17:00"), or a two-day one when it ends before it
    starts ("Nov 4, 22:00-02:00");
-5. two dates a range word joins merged into a range, with chrono's year
-   rules: a year written on one end is implied on the other, and a range
+5. two dates a range word joins merged into a range ("Oct 20 to today",
+   "3 days ago - today"), Spanish and Portuguese joining dates with "a",
+   "al", "hasta", "até" and "ao" as well, which chrono's refiners for them
+   do not; with chrono's year rules: a year written on one end is implied on the other, and a range
    whose start falls after its end moves the end a year on, or the start a
    year back, where the year is unwritten. English and Italian first take
    in a zone name, drop a lone time in digits and a dot, and merge dates
@@ -605,7 +634,12 @@ whatever merged into it.
 
 Any line that is not a row opens a window when it reads a range of dates
 that runs forward. A blank line, a heading, a label ending in a colon or a
-wholly emphasised line keeps the window open; other prose closes it. A row
+wholly emphasised line keeps the window open; other prose closes it, and so
+does a line some other language reads as a window, so the rows under it are
+never held to the window an earlier heading named. A month-name date that
+ends a range takes no count after a comma as its year ("Aug 4 - Aug 5, 12
+posts"), while one or two digits with another number later on the line
+("Aug 5, 27 at 3pm") still read as one. A row
 whose lead starts with a single date outside the window is reported once,
 as `"<date>" under "<window>"`; a row whose lead is a range, of dates or of
 hours, is left alone. A row and a window are named with the times and the

@@ -71,4 +71,7 @@ the other corpora move within noise.
   reply, after a one-time compile of every language's patterns. The times
   of day are read only beside a date, so a table of 300 rows each dated with
   a time takes about 2.4 ms where its dates alone take 1.2, and the corpus
-  of every script, whose dates sit beside digits, about 18% more.
+  of every script, whose dates sit beside digits, about 18% more. The casual
+  words for a day and the lengths from now that can end a window are read on
+  every line too, which costs about a fifth more on generated replies made
+  of headings and dated rows, 0.44 ms each from 0.37.

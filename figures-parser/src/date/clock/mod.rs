@@ -1425,6 +1425,32 @@ pub fn times_at(code: &str, text: &str, starts: impl Iterator<Item = usize>) -> 
     out
 }
 
+/// Whether `text` opens on a signed length ("+11mins", "- 2 days") that the
+/// language `code` merges into the time before it, as chrono's English and
+/// Italian relative-after-date refiners do: the pair then names its own day.
+pub fn signed_length_at_start(code: &str, text: &str) -> bool {
+    let rest = text.trim_start();
+    matches!(code, "en" | "it")
+        && rest.starts_with(['+', '-'])
+        && relative::at_start(code, rest, true, true).is_some()
+}
+
+/// The date a length from now written at byte `at` of `text` lands on
+/// ("3 days ago", "in 2 weeks"), counted from `today`, and where it ends.
+pub fn length_date_at(
+    code: &str,
+    text: &str,
+    at: usize,
+    today: jiff::civil::Date,
+) -> Option<(usize, jiff::civil::Date)> {
+    let rest = text.get(at..)?;
+    let before = crate::text::char_before(text, at);
+    let word_ok = before.is_none_or(|c| !crate::text::is_ascii_word(c));
+    let unicode_ok = before.is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
+    let (len, date) = relative::date_at_start(code, rest, word_ok, unicode_ok, today)?;
+    Some((at.saturating_add(len), date))
+}
+
 /// Whether `between` lets the language `code` merge a date and a time.
 pub fn joins_date_and_time(code: &str, between: &str) -> bool {
     MERGE_GAPS
@@ -1451,6 +1477,31 @@ pub fn zone_name_len(text: &str, end: usize, timed: bool) -> usize {
         zoned: false,
     };
     with_zone_name(rest, time).len
+}
+
+/// The bytes of the zone chrono takes in after a date with no time that
+/// ends at `end` of `text`: a name in capitals, then an offset ("15 December
+/// +02:00"), which chrono's offset refiner reads after any result.
+pub fn date_zone_len(code: &str, text: &str, end: usize) -> usize {
+    let name = zone_name_len(text, end, false);
+    let Some(rest) = text.get(end.saturating_add(name)..) else {
+        return name;
+    };
+    let date = Time {
+        len: 0,
+        valid: true,
+        unlikely: false,
+        hour: false,
+        dated: true,
+        range: None,
+        zoned: false,
+    };
+    // English and Italian read "+11mins" as a length, the others its "+11"
+    // as a zone.
+    if signed_length_at_start(code, rest) {
+        return name;
+    }
+    name.saturating_add(with_offset(code, rest, date).len)
 }
 
 /// The places a time of day that may merge into, or overlap, the date

@@ -114,6 +114,34 @@ this library reads it as written. Each case is pinned by a test in
   " morgen" it reads as a morning. This library reads a part of the day as
   no date, and "morgen" after a weekday and a comma, in German and Dutch, as
   tomorrow.
+- **A dotted date is day first, in English too.** chrono's English parser
+  reads "5.1.2025" as May 1, so the TypeScript check flags "Sunday 5.1.2025"
+  (5 January 2025 was a Sunday) and opens the window "3.1.2025-9.1.2025" on
+  March 1. No language writes dotted dates month first; this library reads
+  them day first, and lets a weekday pair be when it is right month first.
+- **A Japanese slash date is read whole.** chrono rejects "13/05" as a month
+  13 and retries one digit in, so the TypeScript check names "3/05(木)" and
+  checks March 5, and reads "31/10-11月7日" as a window from January 10. A
+  number that cannot be a month is the day; this library reads May 13 and
+  October 31.
+- **A two-digit year that no hour can be is a year.** chrono reads the "24"
+  of "samedi 13 juillet 24" as 24:00 and drops the date, so the TypeScript
+  check passes "dimanche 13 juillet 24"; 13 July 2024 was a Saturday, and
+  this library flags it.
+- **A count after a range is no year.** chrono reads "Aug 4 - Aug 5, 12
+  posts" as running to August 5, 2012, so the TypeScript check flags a row
+  dated August 5 under that very window. A one- or two-digit number after
+  the comma that a word follows, with no other number on the line, is a
+  count here.
+- **"a" and "até" join a Spanish or Portuguese range.** chrono's refiners
+  for those languages join two dates with a dash alone, so "28 de março a 4
+  abr." opens no window there. This library reads the range words the two
+  languages write, "a", "al", "hasta", "até" and "ao".
+- **A heading names the window of the rows under it.** The TypeScript check
+  reads each language apart, so a heading one language cannot read keeps
+  that language's earlier window open over the rows under it, and flags a
+  row against a window its heading does not name. Here a line that any
+  language reads as a window ends the window every other language had open.
 - **A two-digit year before a Chinese date is this century's.** chrono keeps
   "03 11月5日" in the year 3; this library reads 2003, as chrono reads a
   two-digit year everywhere else.

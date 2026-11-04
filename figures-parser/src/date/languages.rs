@@ -157,8 +157,11 @@ enum Kind {
     Iso,
     /// Vietnamese: `ngày D tháng M năm Y`.
     Vietnamese,
-    /// Japanese: `Y年M月D日`, `Y/M/D` or `M/D`, digits halfwidth or fullwidth.
+    /// Japanese: `Y年M月D日`, digits halfwidth or fullwidth.
     Japanese,
+    /// Japanese: `Y/M/D` or `M/D`, read day first where the first number
+    /// cannot be a month ("13/05", "31/10"), and never from inside a number.
+    JapaneseSlash,
     /// Chinese: `Y年M月D日`, digits or Chinese numerals.
     Chinese,
     /// Arabic: a day, a month word or number and an optional year, in
@@ -795,8 +798,8 @@ fn japanese() -> Language {
                 Kind::WeekdayChar(names::JA_WEEKDAYS),
             ),
             plain(
-                r"(?:(?P<y>[0-9０-９]{4})[/|／])?(?P<mn>[0-1０-１]?[0-9０-９])(?:[/|／](?P<d>[0-3０-３]?[0-9０-９]))",
-                Kind::Japanese,
+                r"(?:(?P<y>[0-9０-９]{4})[/|／])?(?P<mn>[0-3０-３]?[0-9０-９])(?:[/|／](?P<d>[0-3０-３]?[0-9０-９]))",
+                Kind::JapaneseSlash,
             ),
         ],
     }
@@ -942,9 +945,11 @@ pub struct Entry {
 }
 
 /// Whether `word` is written in a script without spaces, so it is found
-/// inside text rather than as a whole word.
+/// inside text rather than as a whole word. Its first letter decides: a
+/// mark other scripts share ("пʼятниця" writes U+02BC, which Thai uses too)
+/// does not.
 fn unspaced(word: &str) -> bool {
-    word.chars().any(is_unspaced_script)
+    word.chars().next().is_some_and(is_unspaced_script)
 }
 
 impl Entry {
@@ -1060,7 +1065,7 @@ fn chinese_year(text: &str) -> Option<i32> {
 }
 
 /// chrono's reading of a year below 100: after 50 the 1900s, else the 2000s.
-const fn likely_ad_year(year: i32) -> i32 {
+pub const fn likely_ad_year(year: i32) -> i32 {
     if year < 100 {
         if year > 50 { year + 1900 } else { year + 2000 }
     } else {
@@ -1272,6 +1277,35 @@ fn written_or_nearest(year: Option<i32>) -> YearOf {
     year.map_or(YearOf::Nearest, YearOf::Written)
 }
 
+/// Whether the year `y` a month-name date that ends a range took is a count
+/// instead: one or two digits after a comma, then a word, and no other
+/// number on the line ("Aug 4 - Aug 5, 12 posts"). chrono reads it as the
+/// year 2012.
+fn counted(m: &Match<'_, '_>, y: &str) -> bool {
+    let comma = m
+        .caps
+        .name("m")
+        .zip(m.caps.name("y"))
+        .and_then(|(month, year)| {
+            m.text
+                .get(m.from.saturating_add(month.end())..m.from.saturating_add(year.start()))
+        })
+        .is_some_and(|gap| gap.contains(','));
+    let line = m.after("y").split('\n').next().unwrap_or_default();
+    let worded =
+        line.starts_with(char::is_whitespace) && line.trim_start().starts_with(char::is_alphabetic);
+    let date_start = m.from.saturating_add(
+        m.caps
+            .name("pre")
+            .map_or_else(|| m.caps.get(0).map_or(0, |w| w.start()), |pre| pre.end()),
+    );
+    let range_end = m
+        .text
+        .get(..date_start)
+        .is_some_and(|before| before.trim_end().ends_with(['-', '–']));
+    y.trim().len() <= 2 && comma && worded && range_end && !line.bytes().any(|b| b.is_ascii_digit())
+}
+
 /// A month-name date, or None where chrono's parser rejects it.
 fn read_month_name(
     m: &Match<'_, '_>,
@@ -1307,6 +1341,7 @@ fn read_month_name(
     let month = lookup(words.months, m.group("m")?)?;
     let year = match m.group("y") {
         Some(y) if !year_follows_well(year_check, y.trim(), m.after("y")) => return None,
+        Some(y) if counted(m, y) => return None,
         Some(y) => Some(parse_year(y)?),
         None => None,
     };
@@ -1394,6 +1429,8 @@ fn read_slash(m: &Match<'_, '_>, end: usize, day_first: bool) -> Option<Found> {
         return None;
     }
     let (first, second): (u8, u8) = (a.as_str().parse().ok()?, m.group("b")?.parse().ok()?);
+    // A date written with dots is day first wherever it is written.
+    let day_first = day_first || !written.contains(['/', '-']);
     let (month, day) = if day_first {
         (second, first)
     } else {
@@ -1529,6 +1566,24 @@ fn read_wide(m: &Match<'_, '_>) -> Option<Reading> {
     })
 }
 
+/// A Japanese slash date. chrono reads month first and, rejecting a first
+/// number past 12, retries one digit in ("13/05" as 3/05); a reader takes
+/// the number that cannot be a month as the day.
+fn read_japanese_slash(m: &Match<'_, '_>, text: &str, start: usize) -> Option<Reading> {
+    if crate::text::char_before(text, start).is_some_and(|c| wide_digit(c).is_some()) {
+        return None;
+    }
+    let Reading::Date { day, month, year } = read_wide(m)? else {
+        return None;
+    };
+    let (day, month) = if month > 12 && m.group("y").is_none() && (1..=12).contains(&day) {
+        (month, day)
+    } else {
+        (day, month)
+    };
+    (month <= 12).then_some(Reading::Date { day, month, year })
+}
+
 /// A Chinese date; one without a day is no date to check.
 fn read_chinese(m: &Match<'_, '_>) -> Option<Reading> {
     let Some(day) = m.group("d") else {
@@ -1612,6 +1667,7 @@ fn extract(parser: &Parser, caps: &Captures<'_>, text: &str, from: usize) -> Opt
             year: written_or_nearest(m.group("y").and_then(parse_year)),
         },
         Kind::Japanese => read_wide(&m)?,
+        Kind::JapaneseSlash => read_japanese_slash(&m, text, start)?,
         Kind::Chinese => read_chinese(&m)?,
         Kind::Arabic => read_arabic(&m)?,
         Kind::ArabicSlash => return read_arabic_slash(&m, end),

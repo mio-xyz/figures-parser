@@ -137,6 +137,9 @@ it stands; a contribution that closes one should remove it here.
   two months away) is read against the wrong month.
 - In English, a lowercase "may" and a slash date whose two numbers could each
   be the month ("3/4") are skipped as ambiguous.
+- A two-digit number after a month-name date, below 24, is read as chrono
+  reads it, as an hour, so "samedi 13 juillet 23" is checked against this
+  year, not 2023.
 - A date without a year takes the year chrono-node would give it, which can
   be the wrong one.
 
@@ -191,13 +194,27 @@ it stands; a contribution that closes one should remove it here.
 
 ## Rows under a date window
 
-- A heading that names its window in words ("this week", "the last 7 days")
-  opens none, as it opens none in the TypeScript check: chrono reads one date
-  there, not a range.
+- A heading that names its window in words alone ("this week", "the last 7
+  days") opens none, as it opens none in the TypeScript check: chrono reads
+  one date there, not a range. One that runs from or to a casual day or a
+  length from now ("Oct 20 to today", "3 days ago - today") opens it.
 - A heading that chains several ranges and times ("Oct 10 9:00-17:00 to Nov 8
   9:00-17:00") is read as chrono's refiners would join it in English, in
-  every language, so its window can differ from the TypeScript check's.
+  every language, so its window can differ from the TypeScript check's. On
+  a generated corpus of 24,000 such headings, about 260 open a window under
+  which only the TypeScript check flags a row; most are Chinese, Japanese
+  or Vietnamese chains whose end runs before their start, and most of the
+  rest are the readings [Guarantees](guarantees.md) lists as deliberate.
 - A date with a length added ("Nov 6, 2026 - 14h", chrono's
   relative-after-date merge) is not read as one date.
 - Arabic is not read, nor a window or a row in a language whose date words
   the weekday check does not read.
+
+## Not ported
+
+- The host's check that a spreadsheet read is a ledger summed by period
+  (records in a column of words, placed by a column of dates or laid across
+  a header of months) is not ported. It judges structured cells, from a
+  workbook, a delimited file or an API's records, some typed as dates by the
+  file itself, and decides which helpers the host loads for them; it reads
+  no reply or corpus text.

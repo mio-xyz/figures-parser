@@ -664,3 +664,255 @@ fn checks_nothing_in_a_reply_with_no_table_or_list() {
         Vec::<String>::new()
     );
 }
+
+#[test]
+fn checks_a_capitalised_ukrainian_weekday_beside_a_bare_day_number() {
+    for reply in ["Середа 7", "СЕРЕДА 7", "середа 7"] {
+        assert_eq!(check(reply, "2026-02-27").len(), 1, "{reply}");
+    }
+    assert_eq!(
+        check("el Четвер 09", "2028-01-03"),
+        [r#""Четвер 09" (2028-01-09 is a Sunday)"#]
+    );
+}
+
+#[test]
+fn checks_a_bare_day_number_a_signed_length_follows() {
+    // chrono merges "24 +11mins" into a time of its own, so "Friday" is
+    // left beside a bare 24, and no Friday the 24th falls near today.
+    assert_eq!(
+        check("Friday 24 +11mins", "2024-02-29"),
+        [r#""Friday 24" (2024-02-24 is a Saturday)"#]
+    );
+    assert_eq!(check("Friday 24 +11 mins", "2024-02-29").len(), 1);
+    assert_eq!(check("Friday 24", "2024-02-29"), Vec::<String>::new());
+}
+
+// chrono reads "24" after a date as 24:00 and drops the date, so the
+// TypeScript check passes both; a reader takes 24 as the year.
+#[test]
+fn reads_a_two_digit_number_ending_a_month_name_date_as_its_year() {
+    let june = "2025-06-17";
+    for reply in [
+        "samedi 13 juillet 24",
+        "maandag 21 oktober 24",
+        "lun 10 de jun de 24",
+        "maanantai 21. lokakuuta 24",
+        "понедельник, 21 октября 24",
+    ] {
+        assert_eq!(check(reply, june), Vec::<String>::new(), "{reply}");
+    }
+    assert_eq!(
+        check("dimanche 13 juillet 24", june),
+        [r#""dimanche 13 juillet 24" (2024-07-13 is a Saturday)"#]
+    );
+    // A word after it makes it a count, and the pair goes unread as chrono
+    // leaves it.
+    assert_eq!(
+        check("dimanche 13 juillet 24 personnes", june),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn names_a_pair_with_the_time_and_zone_written_after_it() {
+    let today = "2025-12-25";
+    assert_eq!(
+        check("TUESDAY tomorrow 5:30 PM", today),
+        [r#""TUESDAY tomorrow 5:30 PM" (2025-12-26 is a Friday)"#]
+    );
+    assert_eq!(
+        check("明日 土曜日 01:50", today),
+        [r#""明日 土曜日 01:50" (2025-12-26 is a Friday)"#]
+    );
+    assert_eq!(
+        check("Mittwoch heute um 15 Uhr", today),
+        [r#""Mittwoch heute um 15 Uhr" (2025-12-25 is a Thursday)"#]
+    );
+    assert_eq!(
+        check("WEDNESDAY 15 December +02:00", today),
+        [r#""WEDNESDAY 15 December +02:00" (2025-12-15 is a Monday)"#]
+    );
+    // A length after it is no zone: English merges it into the time.
+    assert_eq!(
+        check("Tuesday, tomorrow 5:30 PM +11mins", "2026-08-22"),
+        [r#""Tuesday, tomorrow" (2026-08-23 is a Sunday)"#]
+    );
+}
+
+// chrono's Japanese parser reads "13/05" month first, rejects the 13 and
+// retries one digit in, so the TypeScript check names "3/05(木)" and checks
+// March 5.
+#[test]
+fn reads_a_japanese_slash_date_day_first_when_its_first_number_is_no_month() {
+    assert_eq!(
+        check("13/05(木)", "2028-09-17"),
+        [r#""13/05(木)" (2028-05-13 is a Saturday)"#]
+    );
+    // 29 December 2024 was a Sunday; the TypeScript check flags "9/12（日)".
+    assert_eq!(check("« 29/12（日) »", "2025-01-03"), Vec::<String>::new());
+    assert_eq!(
+        rows_outside_window(
+            "今週 (13/09 から 9月26日):\n* **9月12日**: x",
+            day("2028-10-10")
+        ),
+        [r#""9月12日" under "13/09 から 9月26日""#]
+    );
+    assert_eq!(
+        rows_outside_window(
+            "報告 31/10-11月7日, 5 posts\n- 11月3日: in",
+            day("2025-11-19")
+        ),
+        Vec::<String>::new()
+    );
+}
+
+// chrono's English parser reads "5.1.2025" month first, as May 1.
+#[test]
+fn reads_a_dotted_date_day_first_in_english() {
+    let today = "2025-01-10";
+    assert_eq!(check("Sunday 5.1.2025", today), Vec::<String>::new());
+    // Right month first, the pair is let be; wrong both ways, it is named
+    // by its day-first date.
+    assert_eq!(check("Thursday 5.1.2025", today), Vec::<String>::new());
+    assert_eq!(
+        check("Monday 5.1.2025", today),
+        [r#""Monday 5.1.2025" (2025-01-05 is a Sunday)"#]
+    );
+    assert_eq!(
+        rows_outside_window(
+            "Viikko — 3.1.2025–9.1.2025\n* 2025-01-03: in",
+            day("2025-01-22")
+        ),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        rows_outside_window(
+            "## Past week 12.5.2027—11 Jun\n- Tue, 1 Jun 2027: in",
+            day("2027-05-25")
+        ),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn opens_a_window_from_or_to_a_casual_day_or_a_length_from_now() {
+    let today = day("2026-11-04");
+    let rows = "\n- Oct 12: x\n- Nov 8: y";
+    assert_eq!(
+        rows_outside_window(&format!("Posts from Oct 20 to today:{rows}"), today),
+        [
+            r#""Oct 12" under "Oct 20 to today""#,
+            r#""Nov 8" under "Oct 20 to today""#
+        ]
+    );
+    assert_eq!(
+        rows_outside_window(&format!("Posts (yesterday - Nov 10):{rows}"), today),
+        [r#""Oct 12" under "yesterday - Nov 10""#]
+    );
+    assert_eq!(
+        rows_outside_window(&format!("Posts: 3 days ago - today{rows}"), today).len(),
+        2
+    );
+    assert_eq!(
+        rows_outside_window("Отчёт (20 окт - сегодня):\n- 12 окт: x\n- 8 ноя: y", today).len(),
+        2
+    );
+    assert_eq!(
+        rows_outside_window("报告（10月20日 - 今天）：\n- 10月12日: x", today),
+        [r#""10月12日" under "10月20日 - 今天""#]
+    );
+    // A length whose day chrono only implies opens none.
+    assert_eq!(
+        rows_outside_window(&format!("2 months ago - today{rows}"), today),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn reads_a_two_digit_year_dotted_date_in_a_window_and_its_rows() {
+    assert_eq!(
+        rows_outside_window(
+            "Bericht 25.11.25 bis 2025-11-27, 4 posts\n- 17. November: x",
+            day("2025-12-26")
+        ),
+        [r#""17. November" under "25.11.25 bis 2025-11-27, 4""#]
+    );
+    assert_eq!(
+        rows_outside_window(
+            "Overzicht 13 tot 26 februari\n- 12.2.25 om 15 uur: x",
+            day("2025-03-08")
+        ),
+        [r#""12.2.25 om 15 uur" under "13 tot 26 februari""#]
+    );
+    assert_eq!(
+        rows_outside_window(
+            "Shifts (Jul 25 to Aug 24):\n- 24.7.28 - 6 posts",
+            day("2028-08-07")
+        ),
+        [r#""24.7.28" under "Jul 25 to Aug 24""#]
+    );
+}
+
+// chrono reads the count after a range as its end's year ("Aug 5, 12" as
+// 2012), so the TypeScript check flags the 5th under its own window.
+#[test]
+fn reads_a_count_after_a_range_as_no_year() {
+    for (reply, today) in [
+        ("Week 4 Aug - 5 Aug, 12 posts\n- Aug 5: in", "2025-09-01"),
+        (
+            "Report Mar 21 - Apr 3, 12 posts\n- 27 Mar: in",
+            "2025-04-13",
+        ),
+        (
+            "Semana 4 de agosto-5 de agosto, 4 posts\n- 5 agosto: in",
+            "2025-09-01",
+        ),
+        (
+            "Zeitraum 2025-08-01–5. Aug, 8 posts\n- 5. August: in",
+            "2025-09-01",
+        ),
+        (
+            "Bericht 21/03/2025-3. April, 6 posts\n- 27. März: in",
+            "2025-04-13",
+        ),
+    ] {
+        assert_eq!(
+            rows_outside_window(reply, day(today)),
+            Vec::<String>::new(),
+            "{reply}"
+        );
+    }
+    // A year with a time after it is still the year.
+    assert_eq!(
+        check("Thursday, Aug 5, 27 at 3pm", "2026-07-01"),
+        Vec::<String>::new()
+    );
+}
+
+// chrono's Spanish and Portuguese refiners join no range with "a" or
+// "até", and the TypeScript check keeps the earlier heading's window over
+// a heading another language reads.
+#[test]
+fn reads_iberian_range_words_and_lets_a_heading_any_language_reads_end_a_window() {
+    let reply = "Resumo (11 de abril - 13 de abril)\n| Date | Post |\n|---|---|\n| 1º abril 2025 | x |\n*Resumo: 28 de março a 4 abr.*\n| Date | Post |\n|---|---|\n| 4 de abril | draft |";
+    assert_eq!(
+        rows_outside_window(reply, day("2025-05-03")),
+        [r#""1º abril 2025" under "11 de abril - 13 de abril""#]
+    );
+    assert_eq!(
+        rows_outside_window(
+            "Resumen 28 de marzo a 4 de abril:\n- 27 de marzo: x\n- 2 de abril: y",
+            day("2025-05-03")
+        ),
+        [r#""27 de marzo" under "28 de marzo a 4 de abril""#]
+    );
+    // A row under a later heading is held to that heading's window alone.
+    assert_eq!(
+        rows_outside_window(
+            "**9-10 set**\n- 9 settembre 2026: x\n13-14 settembre:\n* **15/09/2026** — launch",
+            day("2026-09-13")
+        ),
+        [r#""15/09/2026" under "13-14 settembre""#]
+    );
+}

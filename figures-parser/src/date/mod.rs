@@ -164,8 +164,9 @@ pub fn misdated_weekdays(reply: &str, today: Date) -> Vec<String> {
             match found.reading {
                 Reading::Weekday(weekday) if entry.code != "ar" => {
                     if let Some((span, date)) = casual::beside(entry.code, reply, found, today) {
+                        let (from, to) = with_times(entry.code, reply, span.0, span.1);
                         let written = reply
-                            .get(span.0..span.1)
+                            .get(from..to)
                             .unwrap_or_default()
                             .trim()
                             .trim_end_matches([',', '.', ';', ':']);
@@ -228,11 +229,14 @@ pub fn misdated_weekdays(reply: &str, today: Date) -> Vec<String> {
 fn with_times(code: &str, reply: &str, start: usize, end: usize) -> (usize, usize) {
     let times = clock::times_around(code, reply, start, end);
     let shown = |t: &&clock::Clocked| t.valid && !t.bare;
+    // A time a signed length follows ("5:30 PM +11mins") is merged with it
+    // into a time that names its own day, as English and Italian merge them.
     let after = times.iter().filter(shown).find(|t| {
         t.start >= end
             && reply
                 .get(end..t.start)
                 .is_some_and(|gap| clock::joins_date_and_time(code, gap))
+            && !clock::signed_length_at_start(code, reply.get(t.end..).unwrap_or_default())
     });
     let before = times.iter().filter(shown).rev().find(|t| {
         t.zoned_end <= start
@@ -241,11 +245,67 @@ fn with_times(code: &str, reply: &str, start: usize, end: usize) -> (usize, usiz
                 .is_some_and(|gap| gap.trim() != ":" && clock::joins_date_and_time(code, gap))
     });
     let start = before.map_or(start, |t| t.start);
-    let end = after.map_or(end, |t| t.zoned_end);
-    (
-        start,
-        end.saturating_add(clock::zone_name_len(reply, end, after.is_some())),
-    )
+    let zone = after.map_or_else(
+        || end.saturating_add(clock::date_zone_len(code, reply, end)),
+        |t| {
+            t.zoned_end
+                .saturating_add(clock::zone_name_len(reply, t.zoned_end, true))
+        },
+    );
+    (start, zone)
+}
+
+/// Whether `text` writes a date as three dotted numbers ("5.1.2025").
+fn dotted_numeric(text: &str) -> bool {
+    text.split_whitespace().any(|token| {
+        let token = token.trim_matches(|c: char| !c.is_ascii_digit());
+        let parts: Vec<&str> = token.split('.').collect();
+        parts.len() == 3
+            && parts
+                .iter()
+                .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+    })
+}
+
+/// The time of day past the clock that chrono merges after the date of
+/// `found` ("Sat 13 Jul 24", "Fri 26 Sep at 24:00"), None for none: a
+/// two-digit number after a space that ends its clause reads as the year.
+fn hour_after(code: &str, reply: &str, found: &Found) -> Option<PastClock> {
+    let time = clock::times_around(code, reply, found.start, found.end)
+        .into_iter()
+        .find(|t| {
+            t.start >= found.end
+                && reply
+                    .get(found.end..t.start)
+                    .is_some_and(|gap| clock::joins_date_and_time(code, gap))
+        })
+        .filter(|t| !t.valid)?;
+    let gap = reply.get(found.end..time.start).unwrap_or_default();
+    let written = reply.get(time.start..time.end).unwrap_or_default();
+    let two_digits = written.len() == 2 && written.bytes().all(|b| b.is_ascii_digit());
+    // A word or a number after it makes it a count ("24 personnes").
+    let ends = reply
+        .get(time.end..)
+        .unwrap_or_default()
+        .chars()
+        .find(|c| *c == '\n' || !c.is_whitespace())
+        .is_none_or(|c| !c.is_alphanumeric());
+    let year = (time.bare
+        && two_digits
+        && ends
+        && !gap.is_empty()
+        && gap.chars().all(char::is_whitespace))
+    .then(|| written.parse().ok().map(languages::likely_ad_year))
+    .flatten();
+    Some(year.map_or(PastClock::Dropped, |y| PastClock::Year(y, time.end)))
+}
+
+/// A time past the clock after a date, as [`hour_after`] reads it.
+enum PastClock {
+    /// chrono drops the date with it.
+    Dropped,
+    /// It is the date's two-digit year: the year, and where it ends.
+    Year(i32, usize),
 }
 
 /// The finding for a weekday merged into its date, if the weekday is wrong
@@ -273,6 +333,18 @@ fn check_dated<'r>(
     if ambiguous {
         return None;
     }
+    let mut name_end = None;
+    let year = match (year, hour_after(code, reply, found)) {
+        (_, None) => year,
+        // chrono reads a number after a date as its hour and drops the pair
+        // when that hour is past the clock; a two-digit number no hour can be
+        // ("samedi 13 juillet 24") is the year to a reader.
+        (YearOf::Nearest | YearOf::Current, Some(PastClock::Year(y, end))) => {
+            name_end = Some(end);
+            YearOf::Written(y)
+        }
+        (_, Some(_)) => return None,
+    };
     let year = match year {
         YearOf::Written(y) => i16::try_from(y).ok(),
         YearOf::Nearest => calendar::nearest_year(today, month, day),
@@ -282,8 +354,20 @@ fn check_dated<'r>(
     if calendar::from_sunday(date) == weekday {
         return None;
     }
+    // English reads a dotted date day first, as the rest of the world
+    // writes it; one that is right month first is let be.
+    let swapped = Date::new(date.year(), date.day(), date.month()).ok();
+    if code == "en"
+        && dotted_numeric(date_only)
+        && swapped.is_some_and(|d| calendar::from_sunday(d) == weekday)
+    {
+        return None;
+    }
     // Only a wrong pair is named, so only one reads the times beside it.
-    let written = name(with_times(code, reply, found.start, found.end));
+    let written = name(name_end.map_or_else(
+        || with_times(code, reply, found.start, found.end),
+        |end| (found.start, end),
+    ));
     if seen.contains(&written) {
         return None;
     }

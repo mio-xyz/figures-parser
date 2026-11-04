@@ -222,6 +222,67 @@ static WORDS: LazyLock<Vec<Words>> = LazyLock::new(|| {
         .collect()
 });
 
+/// Each language's casual words for a day, found anywhere a word starts:
+/// its code, the pattern and the offsets. The pattern's group `w` is the
+/// word and `d` the word for the day.
+static ANYWHERE: LazyLock<Vec<Words>> = LazyLock::new(|| {
+    WORDS
+        .iter()
+        .map(|(code, re, offsets)| {
+            let anchored = re.as_ref().map(Regex::as_str).unwrap_or_default();
+            let body = anchored.strip_prefix("(?i)^").unwrap_or(anchored);
+            let pre = match *code {
+                "zh" => "",
+                "ru" | "uk" => r"(?:^|[^\p{L}\p{N}_])",
+                _ => "(?:^|[^A-Za-z0-9_])",
+            };
+            (
+                *code,
+                crate::text::compile(&format!("(?i){pre}{body}")),
+                *offsets,
+            )
+        })
+        .collect()
+});
+
+/// The language's casual words for a day in `text` ("today", "hier",
+/// "昨日"), each with where it stands and the day it names, as chrono's
+/// casual date parsers read them.
+pub fn days_in(code: &str, text: &str, today: Date) -> Vec<(usize, usize, Date)> {
+    let mut out = Vec::new();
+    if code == "ja" {
+        for (word, days) in JAPANESE {
+            for (at, _) in text.match_indices(word) {
+                if let Ok(date) = today.checked_add(days.days()) {
+                    out.push((at, at.saturating_add(word.len()), date));
+                }
+            }
+        }
+        out.sort_unstable_by_key(|&(at, _, _)| at);
+        return out;
+    }
+    let Some((_, Some(re), offsets)) = ANYWHERE.iter().find(|(c, _, _)| *c == code) else {
+        return out;
+    };
+    let mut from = 0;
+    while let Some(caps) = text.get(from..).and_then(|_| re.captures_at(text, from)) {
+        let (Some(word), Some(day)) = (caps.name("w"), caps.name("d")) else {
+            break;
+        };
+        from = word.end().max(from.saturating_add(1));
+        while !text.is_char_boundary(from) {
+            from = from.saturating_add(1);
+        }
+        let Some(days) = offset(offsets, day.as_str()) else {
+            continue;
+        };
+        if let Ok(date) = today.checked_add(days.days()) {
+            out.push((word.start(), word.end(), date));
+        }
+    }
+    out
+}
+
 /// The Japanese casual words for a day, before the weekday they merge with,
 /// and the days each lies from today.
 const JAPANESE: &[(&str, i64)] = &[

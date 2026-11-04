@@ -1563,7 +1563,69 @@ fn read(code: &str, lexicon: &Lexicon, parser: &Parser, caps: &Captures<'_>) -> 
 /// boundary may start there, `unicode_ok` one with Unicode's; Chinese's
 /// deadline has none.
 pub fn at_start(code: &str, text: &str, word_ok: bool, unicode_ok: bool) -> Option<Time> {
-    let mut kept: Option<Time> = None;
+    longest_at_start(code, text, word_ok, unicode_ok).map(|(time, _)| time)
+}
+
+/// The date a length from now at the start of `text` lands on ("3 days
+/// ago", "in 2 weeks"), counted from noon on `today`, where chrono's
+/// reference stands, and the length's bytes; None for none, for a length
+/// with a fraction, and for one whose day chrono only implies.
+pub fn date_at_start(
+    code: &str,
+    text: &str,
+    word_ok: bool,
+    unicode_ok: bool,
+    today: jiff::civil::Date,
+) -> Option<(usize, jiff::civil::Date)> {
+    let (time, d) = longest_at_start(code, text, word_ok, unicode_ok)?;
+    let whole = |v: Option<f64>| -> Option<i64> {
+        let v = v.unwrap_or(0.0);
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::as_conversions,
+            reason = "a whole value checked to fit, and JavaScript adds it as a whole number"
+        )]
+        (v.fract() == 0.0 && v.abs() < 1e6).then_some(v as i64)
+    };
+    let [year, quarter, month, week, day, hour, minute, second] = d.0;
+    // chrono holds the day as certain only for a length with days or
+    // weeks, or with a time; "2 months ago" implies its day.
+    let certain = [week, day, hour, minute, second]
+        .iter()
+        .any(Option::is_some);
+    if !certain {
+        return None;
+    }
+    let months = whole(year)?
+        .checked_mul(12)?
+        .checked_add(whole(quarter)?.checked_mul(3)?)?
+        .checked_add(whole(month)?)?;
+    let days = whole(week)?.checked_mul(7)?.checked_add(whole(day)?)?;
+    let seconds = whole(hour)?
+        .checked_mul(3600)?
+        .checked_add(whole(minute)?.checked_mul(60)?)?
+        .checked_add(whole(second)?)?
+        .checked_add(12 * 3600)?;
+    let date = today
+        .checked_add(jiff::Span::new().try_months(months).ok()?)
+        .ok()?
+        .checked_add(
+            jiff::Span::new()
+                .try_days(days.checked_add(seconds.div_euclid(86_400))?)
+                .ok()?,
+        )
+        .ok()?;
+    Some((time.len, date))
+}
+
+/// The longest length from now at the start of `text`, and the length itself.
+fn longest_at_start(
+    code: &str,
+    text: &str,
+    word_ok: bool,
+    unicode_ok: bool,
+) -> Option<(Time, Duration)> {
+    let mut kept: Option<(Time, Duration)> = None;
     let lexicon = LEXICONS.iter().find(|(c, _)| *c == code).map(|(_, l)| *l)?;
     let (_, parsers) = PARSERS.iter().find(|(c, _)| *c == code)?;
     for parser in parsers {
@@ -1587,7 +1649,10 @@ pub fn at_start(code: &str, text: &str, word_ok: bool, unicode_ok: bool) -> Opti
             continue;
         };
         let time = from_length(len, whole, d);
-        kept = Some(kept.map_or(time, |k| super::longer(text, k, time)));
+        kept = Some(match kept {
+            Some((k, kd)) if super::longer(text, k, time).len == k.len => (k, kd),
+            _ => (time, d),
+        });
     }
     kept
 }
