@@ -2,6 +2,7 @@
 //! reading of one is held to.
 
 mod arithmetic;
+mod context;
 pub mod digits;
 mod ground;
 mod per_unit;
@@ -120,6 +121,9 @@ pub struct Figure<'a, D> {
     /// Whether a scale word or multiplier after its digits multiplies it
     /// ("1.2 million", "12.5K", "3億"); a number in words is not.
     pub scaled: bool,
+    /// The power of ten that scale word or multiplier stands for in this
+    /// reading ("1.2 million" is read at 6); 0 without one.
+    pub magnitude: u8,
     /// Its text from its sign or approximation mark on ("~-$1.2 million");
     /// the same as `text` when neither stands before it.
     pub full_text: &'a str,
@@ -168,6 +172,7 @@ impl<'a> From<Reading<'a, '_>> for Number<'a> {
             sign: r.sign,
             approximate: r.approximate,
             scaled: r.scaled,
+            magnitude: r.magnitude,
             full_text: r.full_text,
             place: r.place,
         }
@@ -566,7 +571,7 @@ impl Reading<'_, '_> {
     /// or a bare digit run, which is a code, a zip or an order number as
     /// often as an amount ("541611", "40017731") and is never held to the
     /// whole turn. A figure with a scale word is a count or an amount, held
-    /// from 1,000 up ("4K", "3.2M teachers"); a number written in words or
+    /// whatever its value ("4K", "3.2M teachers", "0.95k"); a number written in words or
     /// after an approximation mark is an amount, held from 10,000 up. An
     /// approximate reading is also grounded by a value that rounds to it.
     #[must_use]
@@ -590,12 +595,14 @@ impl Reading<'_, '_> {
                 fraction: fraction.to_owned(),
             }
         } else {
-            let floor = if self.grouped {
+            // A compact scale states an amount whatever its value ("0.95k"),
+            // zero aside; a hundred is a number in words.
+            let floor = if self.magnitude >= 3 {
+                1
+            } else if self.scaled || self.grouped {
                 MIN_SEPARATED_FIGURE
             } else if self.currency {
                 MIN_CURRENCY_FIGURE
-            } else if self.scaled {
-                MIN_SEPARATED_FIGURE
             } else if bare_runs || self.approximate {
                 MIN_BARE_FIGURE
             } else {

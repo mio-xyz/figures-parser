@@ -25,7 +25,8 @@ assert.deepEqual(ungroundedRatios("Overall 14.3%, and 30% more per lead, 8.9x.",
 assert.deepEqual(ungroundedRatios("58% never activate", "", "1000 trials, 420 activated"), []);
 assert.deepEqual(ungroundedFigures("Codes 541611 and CPMs of $200-300.", "CPM=$244.49"), []);
 assert.deepEqual(ungroundedFigures("Rose to $3,200, over $3,000.", "max 3225.000000 close 3148.02"), ["3,000"]);
-assert.deepEqual(amountsSharedWith("2027 holds $19,850, Airbnb $729.", ["Total 19850", "Airbnb 729", "none"]), [["19,850"], ["729"], []]);
+const sharedWith = amountsSharedWith("2027 holds $19,850, Airbnb $729.");
+assert.deepEqual(["Total 19850", "Airbnb 729", "none"].map(sharedWith), [["19,850"], ["729"], []]);
 assert.equal(sharesAmount("Which tab, 2026 or 2027?", "2026 tab"), false);
 assert.equal(statesFigure("the TOTAL row says 19851", "19,851"), true);
 assert.deepEqual(mispairedPerUnit("$74.74 spend, 2 leads, $45.83 CPL.", "LT: $91.65 / 2 leads / CPL $45.83 | Y: $74.74 / 2 leads"), [{ perUnit: "$45.83", stated: "$74.74 / 2 = $37.37", printed: "$91.65 / 2" }]);
@@ -96,7 +97,7 @@ assert.deepEqual(ungroundedRatios("58% never activate", "", () => { asked += 1; 
 assert.equal(asked, 1);
 assert.throws(() => ungroundedRatios("58% never activate", "", () => { throw new Error("no thread"); }), /no thread/);
 assert.deepEqual(mispairedPerUnit("$74.74 spend, 2 leads, $45.83 CPL.", () => "LT: $91.65 / 2 leads / CPL $45.83"), [{ perUnit: "$45.83", stated: "$74.74 / 2 = $37.37", printed: "$91.65 / 2" }]);
-assert.deepEqual(ungroundedFigures("Budget 1,250 M€ and 500 k€.", "budget 1250000"), ["500 k€"]);
+assert.deepEqual(ungroundedFigures("Budget 1,250 Mio. € and 500 k€.", "budget 1250000"), ["500 k€"]);
 assert.deepEqual(ungroundedFigures("Pendapatan 35 rb dan ₺5 bin.", "35000 5000"), []);
 assert.deepEqual(statedFigures("USD 6 951 spend, 3 leads, 12% CTR").map((f) => [f.mark, f.value]), [["USD", 6951], ["", 3]]);
 assert.deepEqual(printedFigures("LT: $91.65 / 2 leads"), { values: [91.65, 2], amounts: [91.65] });

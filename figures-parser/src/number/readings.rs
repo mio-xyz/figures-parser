@@ -147,10 +147,18 @@ impl Scratch {
             sign,
             approximate: true,
             scaled: false,
+            magnitude: 0,
             full_text,
             place: None,
         }
     }
+}
+
+/// `power` in a byte, as [`Figure::magnitude`](super::Figure::magnitude)
+/// keeps it; no scale reaches 255.
+const fn small(power: u32) -> u8 {
+    let [low, ..] = power.to_le_bytes();
+    if power > 0xff { u8::MAX } else { low }
 }
 
 /// Writes `value` to `out` in ASCII digits.
@@ -244,6 +252,7 @@ impl<'a> Token<'a> {
             sign: self.sign,
             approximate: self.approximate || self.magnitude > 0,
             scaled: self.magnitude > 0,
+            magnitude: small(self.magnitude),
             full_text: self.full,
             place: None,
         }
@@ -289,6 +298,7 @@ impl<'a> Token<'a> {
             if self.keeps_digits {
                 f(Reading {
                     scaled: false,
+                    magnitude: 0,
                     ..r.clone()
                 });
             }
@@ -299,6 +309,13 @@ impl<'a> Token<'a> {
                 });
             let others = (0..16_u32).filter(|&p| self.also & (1 << p) != 0 && p != self.magnitude);
             for power in std::iter::once(self.magnitude).chain(others) {
+                // The decimal reading is the scale word's own language's;
+                // the other powers are other locales', which write the run
+                // otherwise ("9.007 tn" is English, the thousand of "tn"
+                // Swedish).
+                if decimal_before_scale && power != self.magnitude {
+                    continue;
+                }
                 let (integer, fraction) = scale_into(r.integer, r.fraction, power, scaled);
                 // The sections after a Han multiplier are read after whole
                 // digits only, whose scaled value the scanner checked fits.
@@ -333,6 +350,7 @@ impl<'a> Token<'a> {
                     sign: r.sign,
                     approximate: r.approximate,
                     scaled: r.scaled,
+                    magnitude: small(power),
                     full_text: r.full_text,
                     place: u32::try_from(r.fraction.map_or(0, |written| written.chars().count()))
                         .ok()
@@ -407,6 +425,7 @@ impl<'a> Token<'a> {
                     sign: if leading { self.sign } else { Sign::Unsigned },
                     approximate: leading && self.approximate,
                     scaled: false,
+                    magnitude: 0,
                     full_text: if leading {
                         self.full.get(..prefix_len + group.len()).unwrap_or(group)
                     } else {

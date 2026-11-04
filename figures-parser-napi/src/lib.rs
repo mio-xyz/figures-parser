@@ -12,6 +12,7 @@ use std::borrow::Cow;
 
 use figures_parser::utf16::{Utf16Cursor, units};
 use figures_parser::{Kind, Length, durations, emails, identifiers, numbers, urls};
+use napi::Env;
 use napi::bindgen_prelude::{Either, Either5, Function};
 use napi_derive::napi;
 
@@ -344,22 +345,30 @@ pub fn shares_amount(reply: String, text: String) -> bool {
     figures_parser::shares_amount(&reply, &text)
 }
 
-/// For each of `texts`, the amounts `reply` states that it carries, as the
-/// reply wrote them; the reply is read once.
-#[napi(catch_unwind)]
-#[must_use]
-pub fn amounts_shared_with(reply: String, texts: Vec<String>) -> Vec<Vec<String>> {
-    let amounts = figures_parser::Amounts::of(&reply);
-    texts
-        .iter()
-        .map(|text| {
-            amounts
-                .shared_with(text)
+/// A function that takes a text and returns the amounts `reply` states that
+/// the text carries, as the reply wrote them: `amountsSharedWith(reply)(text)`.
+///
+/// # Errors
+///
+/// When the function cannot be made, or is called without a string.
+#[napi(catch_unwind, ts_return_type = "(text: string) => Array<string>")]
+pub fn amounts_shared_with(
+    env: &Env,
+    reply: String,
+) -> napi::Result<Function<'_, String, Vec<String>>> {
+    env.create_function_from_closure("sharedWith", move |call| {
+        let text: String = call.first_arg()?;
+        // A panic unwinding into Node aborts the process; the export's own
+        // catch does not cover a call made after it returned.
+        std::panic::catch_unwind(|| {
+            figures_parser::Amounts::of(&reply)
+                .shared_with(&text)
                 .into_iter()
                 .map(str::to_owned)
                 .collect()
         })
-        .collect()
+        .map_err(|_| napi::Error::from_reason("amountsSharedWith panicked"))
+    })
 }
 
 /// Whether `text` states `figure` ("19,851", "1,234.50"), however it groups

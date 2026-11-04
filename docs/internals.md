@@ -105,8 +105,10 @@ grouping writes a zero lead, so "0,850" is a decimal only.
   arithmetic;
 - a thousands separator lowers the floor to 1,000, and a currency mark to
   100;
-- a scale word after the digits lowers it to 1,000, with or without a
-  currency, so a count written "3.2M teachers" or "4K" is held as "$8k" is;
+- a compact scale after the digits (a thousand or more) holds the figure
+  whatever its value, with or without a currency, so a count written "3.2M
+  teachers", "4K" or "0.95k" is held as "$8k" is; "hundred" after digits is
+  a number in words, held from 1,000 up;
 - a decimal with four fractional digits or more is always held, and is
   grounded by any corpus value that starts with the same digits ("1.1785" is
   carried by "1.17853");
@@ -165,17 +167,21 @@ so "$1.2 million" is grounded by 1,150,000 to 1,249,999.
 The abbreviations are those of the CLDR compact formats of the locales the
 host reads, and a few more ("Tsd", "Mds", "MM", "crores"): "jt", "rb", "tr",
 "nt", "lcr", "tri", "bi", "Md", "Mn", "mln", "bn", "bln" and their kin read
-wherever they stand, a multi-letter one case aside. An abbreviation that
-also names a unit or is also a word reads as a scale in a reply only beside
-a currency: "$5m" scales, "5m" (minutes), "5t" (tonnes), "5l" (litres),
-"5mm", "5 mi" (miles), "5 mn" (French minutes), "5 bin bags", "5 Mr", "5 md"
-files, "5 cr" credits and "12,500 CR" (a credit) do not. The capitals "M",
-"K", "B" and "T", and "k", "b" and "tn", read glued to the digits ("3.2M",
-"7B", "2.8T"), and after a space only beside a currency ("5 M€"), where a
-lone letter is otherwise a unit or a word ("500 m", "1750 N", "5 tn" of
-tonnes). "Mio" and "Bio" need their dot or a currency, since the bare
-letters are also a name and a word ("Bio" is organic). A long form reads
-glued to the digits too ("12million").
+wherever they stand, a multi-letter one case aside, and so does "Mio". An
+abbreviation that also names a unit or is also a word reads as a scale
+unless the words around the figure say it is the other thing
+(`number::context`): "3.2m users" and "5 mn people" scale, while "took 5m",
+"5m ago", "1h 5m" and "en 5 mn" are minutes, "5m tall", "3m x 4m" and "ran 5
+mi" lengths, "a 2481t truck" and "weighs 25 tn" tonnes, "300l of water"
+litres, "5 md files" a file type, "earned 92 cr this term" credits, "5 Mr
+Smith" a title, "5 bin bags" a bin and "3 Bio eggs" organic. A currency
+beside the figure settles it as a scale, written as a sign or code ("$5m"),
+a local symbol ("Rs 92 cr", "5 bin TL") or a currency's name ("3.2m
+dollars", "100,000m d'euros"). "mm" and "CR" in capitals (a credit after a
+balance) read only beside a currency. A lone letter after a space ("500 m",
+"1750 N", "5 M users") reads only beside a currency, as the capitals "M",
+"K", "B" and "T", and "k" and "b", read glued to the digits ("3.2M", "7B",
+"2.8T"). A long form reads glued to the digits too ("12million").
 
 The long forms of Dutch, Polish, Swedish, Turkish, Indonesian and Vietnamese
 ("3 miljoen", "4 miliony", "5 milyar", "7 juta", "3 tỷ") are read with the
@@ -193,17 +199,19 @@ Vietnamese) reads at each where the figure is written as those locales
 write it: a currency mark after the scale ("2 bn €", "1 billion EUR") or
 the "of" of French, Spanish, Italian or Portuguese ("1 billion d'euros").
 Elsewhere it reads at the power English gives it, as English puts the
-currency first ("$2 billion" is 10⁹, "2tn" 10¹²).
+currency first ("$2 billion" is 10⁹, "2tn" 10¹²). A decimal read through
+the scale word's own mark takes only the word's own power: "9.007 tn €" is
+English, so it is 9.007 × 10¹² and never the Swedish 9.007 thousand.
 
 A run that also groups ("1,250", "8.566") is a decimal before a scale word
 too where the word's language writes that decimal mark: a comma before a
 Latin word other than English ("8,566 Mrd.", "12,500 rb") or a Cyrillic one
-("8,566 млрд"), and before any word written with a currency after it, which
-is how the continental locales, all of which write a decimal comma, write an
-amount ("1,250 M€"); a point before an English word ("1.250 million") or a
-word of another script. The thousands reading is kept beside it, so the
-corpus grounds either. Elsewhere the run is thousands: "£1,250 million" is
-1,250 million.
+("8,566 млрд"); a point before an English word ("1.250 million") or a word
+of another script. The thousands reading is kept beside it, so the corpus
+grounds either. Elsewhere the run is thousands: "£1,250 million" is 1,250
+million, and so is a letter every locale writes alike, a currency after it
+included ("1,250 M€", "46,886b €"), since an English report writes "1,250
+M€" for 1.25 billion as a French one writes it for 1.25 million.
 
 A corpus reads scale words loosely (`Tokens::loose_scales`): an abbreviation
 in any case and without the currency or the dot a reply needs ("38.08 M",

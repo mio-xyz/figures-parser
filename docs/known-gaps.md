@@ -19,6 +19,11 @@ it stands; a contribution that closes one should remove it here.
   at that power only where a currency or the "of" of a Romance language
   follows the scale, so a French "1 billion" with neither is read at 10⁹.
 - A scale word after more than one space is not read.
+- An abbreviation that is also a unit is told from a scale by a short list
+  of words around the figure ("took", "ago", "tall", "truck", "files"), in
+  English and French, so a unit with none of them is read as a scale, as the
+  host reads it: "5m of cable" and "a 5m wall" are millions, and so is "spent
+  5m", which is as often money.
 - A sign written in words ("minus 12,500"), with an en dash ("–12,500"), after
   the figure ("12,500-") or as an accounting suffix ("12,500 CR") is not
   read, so such a figure holds the corpus to no sign.

@@ -2,6 +2,11 @@ use std::borrow::Cow;
 
 use figures_parser::{Sign, extract_numbers, ungrounded_figures};
 
+/// No finding.
+const fn none() -> Vec<String> {
+    Vec::new()
+}
+
 /// The first stated-side reading of `text`: as written, its integer and
 /// fraction, and whether it reads as approximate.
 fn first(text: &str) -> Option<(String, String, Option<String>, bool)> {
@@ -82,11 +87,9 @@ fn reads_a_letter_that_names_a_unit_only_beside_a_currency() {
         "5Mbps",
         "12.5kg",
         "5 mi away",
-        "5 cr",
         "a 7 B model",
         "5 bin bags",
         "12.5K9",
-        "a thread of 2 Mio messages",
         "3 Bio products",
     ] {
         let scaled: Vec<_> = extract_numbers(text)
@@ -142,12 +145,11 @@ fn grounds_an_exact_figure_by_a_scaled_corpus_value_of_the_same_value() {
 
 #[test]
 fn reads_a_scaled_run_that_groups_as_a_decimal_where_the_word_writes_that_mark() {
-    // A comma decimal before a word of a language that writes one, or before
-    // a currency after the scale, as the continental locales write it; a
-    // point before an English word.
+    // A comma decimal before a word of a language that writes one; a point
+    // before an English word.
     for (reply, corpus) in [
         ("Долг 8,566 млрд.", "8566000000"),
-        ("Budget 1,250 M€.", "1250000"),
+        ("Umsatz 1,250 Mio. Euro.", "1250000"),
         ("Budget 1,250 M€.", "1250000000"),
         ("Revenue of 1.250 million.", "1250000"),
         ("Revenue of 1.250 million.", "1250000000"),
@@ -159,8 +161,12 @@ fn reads_a_scaled_run_that_groups_as_a_decimal_where_the_word_writes_that_mark()
             "{reply} | {corpus}"
         );
     }
-    // Elsewhere the run is thousands, as "$206,788" is.
+    // Elsewhere the run is thousands, as "$206,788" is: before a letter every
+    // locale writes alike, a currency after it included, since an English
+    // report writes "1,250 M€" for 1.25 billion.
     for (reply, corpus) in [
+        ("Budget 1,250 M€.", "1250000"),
+        ("Total 46,886b €", "46886"),
         ("Debt of €12,500 million.", "12500000"),
         ("Debt of £1,250 million.", "1250000"),
         ("Budget 1.250 M€.", "1250000"),
@@ -566,4 +572,68 @@ fn every_scale_word_of_another_script_starts_with_a_listed_initial() {
             "{word}"
         );
     }
+}
+
+#[test]
+fn reads_an_abbreviation_that_is_also_a_unit_as_a_scale_unless_the_words_around_name_the_unit() {
+    for reply in [
+        "We have 3.2m users.",
+        "Revenue 206,788m.",
+        "Revenue 872 426m",
+        "Budget 100,000m d'euros",
+        "Revenue 5 mn",
+        "Revenue 5mn people",
+        "Gelir 8 mn",
+        "Revenue 58 md",
+        "Revenue 5 Mio",
+        "Revenue 12 mi",
+        "Revenue 5 cr",
+        "Gelir 5 Mr",
+        "Gelir 729 bin",
+        "Revenue 25 tn",
+        "Umsatz 5 Bio",
+        "Revenue 3t",
+        "Revenue 5L",
+    ] {
+        assert_eq!(ungrounded_figures(reply, "").len(), 1, "{reply}");
+    }
+    for reply in [
+        "The job took 5m.",
+        "Took about 5m.",
+        "It finished 5m ago.",
+        "Done in 1h 5m.",
+        "Waited 5m 30s.",
+        "a 3D model, 5m tall",
+        "A room 3m x 4m.",
+        "Took 165489 mn.",
+        "Ça prend en 5 mn.",
+        "Wrote 5 md files.",
+        "Ran 5 mi.",
+        "It is 5 mi away.",
+        "Earned 92 cr this term.",
+        "Table 5 Mr Smith.",
+        "Bought 5 bin bags.",
+        "It weighs 25 tn.",
+        "A 2481t truck.",
+        "300l of water.",
+        "Ate 3 Bio eggs.",
+    ] {
+        assert_eq!(ungrounded_figures(reply, ""), none(), "{reply}");
+    }
+}
+
+#[test]
+fn holds_a_figure_with_a_compact_scale_whatever_its_value() {
+    for reply in [
+        "Total 0.95k",
+        "Total 0.957k",
+        "Revenue 0,81k",
+        "Total 0.95 mil",
+        "Total 0,94 тыс.",
+        "Total 0,94 हज़ार",
+        "Total 0.4661 mil",
+    ] {
+        assert_eq!(ungrounded_figures(reply, "").len(), 1, "{reply}");
+    }
+    assert_eq!(ungrounded_figures("Total 0.95k", "950"), none());
 }

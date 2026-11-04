@@ -102,8 +102,9 @@ What to expect:
   [Amounts against one print](#amounts-against-one-print)). A thousands
   separator states an amount and is checked from 1,000 up, a currency mark
   from 100 up, and a decimal with four fractional digits or more always. A
-  figure with a scale word ("3.2M teachers", "12k signups") is a count or an
-  amount, checked from 1,000 up with or without a currency. A number in words
+  figure with a scale word ("3.2M teachers", "12k signups", "0.95k") is a
+  count or an amount, checked whatever its value, with or without a
+  currency. A number in words
   or after an approximation mark is an amount too, checked from 10,000 up.
 - **A link's digits are the link check's.** A timestamp or an id inside a URL
   is no figure; a link's label ("[$206,000](…)") still is.
@@ -132,15 +133,17 @@ What to expect:
   rows" and "43Kmembers" in a result print values in units, and ground
   "$38M", "€2,5 Mio.", "$12,000" and "43K"; the digits keep their own reading
   too, and a name reads at every power a locale gives it ("billion" is also
-  10¹² in French). In a reply, a lone letter that also names a unit needs a
-  currency or must be glued on: "3.2M" and "7B" scale, "5m" (minutes) and
-  "500 m" do not; an abbreviation that is also a word or a unit ("bin",
-  "mm", "mi") needs its currency.
+  10¹² in French). In a reply, a lone letter after a space needs a
+  currency ("500 m" is a length); one glued on, or a longer abbreviation that
+  is also a unit or a word ("m", "mn", "mi", "md", "bin", "tn"), is a scale
+  unless the words around name the unit: "3.2m users" scales, "took 5m" and
+  "5m tall" do not.
 - **Ambiguous notations.** "1.250" is 1,250 in Berlin and 1.25 in Boston;
   either value in the corpus grounds a figure. A reply's "$1,250" states
   1,250, and before a scale word it is a decimal too where the word's
-  language writes that mark: "8,566 млрд", "1,250 M€" (a currency after the
-  scale is continental writing) and "1.250 million".
+  language writes that mark: "8,566 млрд", "1,250 Mio." and "1.250 million".
+  Before a letter every locale writes alike it stays thousands: "1,250 M€"
+  is 1,250 million.
 - **A space groups only thousands.** "12 500" is one figure; "1,250,000
   980,000", as a script prints two values, is two.
 
@@ -608,7 +611,7 @@ npm install @mio-xyz/figures-parser
 const fp = require("@mio-xyz/figures-parser");
 
 fp.ungroundedFigures(reply, corpus);             // ["48,200"]
-fp.amountsSharedWith(reply, [print1, print2]);   // [["19,850"], []]; also sharesAmount, statesFigure
+[print1, print2].map(fp.amountsSharedWith(reply)); // [["19,850"], []]; also sharesAmount, statesFigure
 fp.ungroundedRatios(reply, corpus, said);        // ["30%"]; said may be () => string
 fp.proseArithmetic(reply, message, corpus);      // ["61,300"]
 fp.mispairedPerUnit(reply, corpus);              // [{ perUnit, stated, printed }]; corpus may be () => string

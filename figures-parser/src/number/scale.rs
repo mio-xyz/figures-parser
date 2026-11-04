@@ -4,6 +4,7 @@
 
 use std::ops::Range;
 
+use super::context::{Unit, currency_word_beside, names_unit};
 use super::digits::digit_value;
 use super::scan::{is_boundary, is_inline_space, is_symbol, marked_after, marked_before};
 use crate::text::{char_at, is_letter, lookup, same_word, starts_with_lowercase};
@@ -43,9 +44,12 @@ enum Needs {
     /// Only beside a currency, since the letters also name a unit or a size
     /// ("5m" of minutes or metres, "7B" parameters, "5mm"): "$5m", "€3B".
     Currency,
-    /// Before the dot German abbreviates with ("2,5 Mio."), or beside a
-    /// currency, since the bare letters are also a name ("2 Mio messages").
-    DotOrCurrency,
+    /// Glued to the digits unless the words around name the unit, after a
+    /// space only beside a currency: "3.2m users", but "took 5m", "5m tall".
+    GluedUnless(Unit),
+    /// Glued or after a space unless the words around name the unit: "5 mn
+    /// people", but "took 5 mn"; "58 md", but "5 md files".
+    Unless(Unit),
 }
 
 /// The longest long form, in bytes ("milliarden", "miliardów").
@@ -181,11 +185,11 @@ fn abbreviation(word: &str) -> Option<(u32, Needs, u16)> {
     let found = match word {
         "K" | "k" => (3, Needs::CurrencyWhenSpaced, 0),
         "M" => (6, Needs::CurrencyWhenSpaced, powers(&[9])),
-        "m" => (6, Needs::Currency, powers(&[9])),
+        "m" => (6, Needs::GluedUnless(Unit::TimeOrLength), powers(&[9])),
         "B" | "b" => (9, Needs::CurrencyWhenSpaced, powers(&[3, 12])),
         "T" => (12, Needs::CurrencyWhenSpaced, powers(&[9])),
-        "t" => (12, Needs::Currency, powers(&[9])),
-        "L" | "l" => (5, Needs::Currency, 0),
+        "t" => (12, Needs::GluedUnless(Unit::Weight), powers(&[9])),
+        "L" | "l" => (5, Needs::GluedUnless(Unit::Volume), 0),
         "N" | "n" => (3, Needs::Currency, 0),
         "Cr" => (7, Needs::Nothing, 0),
         "Mn" => (6, Needs::Nothing, 0),
@@ -195,10 +199,11 @@ fn abbreviation(word: &str) -> Option<(u32, Needs, u16)> {
     Some(found)
 }
 
-/// [`abbreviation`] for a name of two letters or more, case aside: those that
-/// are also a word, a title or a unit ("bin", "Mr", "mm" and "mi" of
-/// millimetres and miles, "mn" of French minutes, "CR" of a credit, "md" of
-/// a file or a doctor) read only beside a currency.
+/// [`abbreviation`] for a name of two letters or more, case aside: "mm" of
+/// millimetres and "CR" of a credit read only beside a currency, and those
+/// that are also a unit, a title or a word ("mn" of French minutes, "mi" of
+/// miles, "md" of a file, "tn" of tonnes, "cr" of course credits, "Mr", "5
+/// bin bags", "Bio" eggs) read unless the words around say so.
 fn longer_abbreviation(word: &str) -> Option<(u32, Needs, u16)> {
     let mut lower = [0_u8; 3];
     let lower = lower.get_mut(..word.len()).filter(|l| l.len() >= 2)?;
@@ -206,17 +211,21 @@ fn longer_abbreviation(word: &str) -> Option<(u32, Needs, u16)> {
     lower.make_ascii_lowercase();
     let found = match &*lower {
         b"tsd" | b"tys" | b"rb" => (3, Needs::Nothing, 0),
-        b"bin" => (3, Needs::Currency, 0),
-        b"mln" | b"jt" | b"tr" => (6, Needs::Nothing, 0),
-        b"mm" | b"mn" | b"mi" => (6, Needs::Currency, 0),
-        b"mio" => (6, Needs::DotOrCurrency, 0),
-        b"cr" => (7, Needs::Currency, 0),
+        b"bin" => (3, Needs::Unless(Unit::Bin), 0),
+        b"mln" | b"jt" | b"tr" | b"mio" => (6, Needs::Nothing, 0),
+        b"mm" => (6, Needs::Currency, 0),
+        b"mn" => (6, Needs::Unless(Unit::Time), 0),
+        b"mi" => (6, Needs::Unless(Unit::Length), 0),
+        // In capitals, accounting's credit after a balance ("3,000 CR").
+        b"cr" if word == "CR" => (7, Needs::Currency, 0),
+        b"cr" => (7, Needs::Unless(Unit::Credit), 0),
         b"bn" => (9, Needs::Nothing, powers(&[12])),
         b"mds" | b"mrd" | b"mld" | b"bi" => (9, Needs::Nothing, 0),
-        b"md" | b"mr" => (9, Needs::Currency, 0),
-        b"tn" => (12, Needs::CurrencyWhenSpaced, powers(&[3])),
+        b"md" => (9, Needs::Unless(Unit::File), 0),
+        b"mr" => (9, Needs::Unless(Unit::Title), 0),
+        b"tn" => (12, Needs::Unless(Unit::Weight), powers(&[3])),
         b"bln" | b"lcr" | b"nt" | b"tri" => (12, Needs::Nothing, 0),
-        b"bio" => (12, Needs::DotOrCurrency, 0),
+        b"bio" => (12, Needs::Unless(Unit::Word), 0),
         _ => return None,
     };
     Some(found)
@@ -659,11 +668,11 @@ fn continental(text: &str, end: usize) -> bool {
 }
 
 /// The decimal mark the language of the scale word `word` writes: a point
-/// after an English word; a comma after any other Latin word; after a letter
-/// every locale writes alike ("M", "k"), a comma where it is written as the
-/// continental locales write it ("M€"), all of which write a decimal comma,
-/// and none otherwise.
-fn word_mark(word: &str, continental: bool) -> Option<char> {
+/// after an English word; a comma after any other Latin word; and none after
+/// a letter every locale writes alike ("M", "k", "b"), even with a currency
+/// after it: "1,250 M€" is 1,250 million in an English report and 1.25
+/// million in a French one, so it is read on its grouping alone.
+fn word_mark(word: &str) -> Option<char> {
     const POINT: [&str; 14] = [
         "hundred", "thousand", "million", "billion", "trillion", "lakh", "lakhs", "crore",
         "crores", "bn", "tn", "cr", "lcr", "l",
@@ -671,7 +680,7 @@ fn word_mark(word: &str, continental: bool) -> Option<char> {
     const EITHER: [&str; 6] = ["k", "m", "b", "t", "mm", "mn"];
     if POINT.iter().any(|w| w.eq_ignore_ascii_case(word)) {
         Some('.')
-    } else if continental || !EITHER.iter().any(|w| w.eq_ignore_ascii_case(word)) {
+    } else if !EITHER.iter().any(|w| w.eq_ignore_ascii_case(word)) {
         Some(',')
     } else {
         None
@@ -736,7 +745,7 @@ pub(super) fn scale_after(
     }
     let continental = loose || continental(text, word_stop);
     let others = |also: u16| if continental { also } else { 0 };
-    let mark = word_mark(word, continental);
+    let mark = word_mark(word);
     if let Some((magnitude, also)) = word_magnitude(word) {
         let plain = Scale {
             magnitude,
@@ -754,12 +763,18 @@ pub(super) fn scale_after(
     } else {
         abbreviation(word)?
     };
-    let currency = || marked_before(text, start) || marked_after(text, word_stop);
+    let currency = || {
+        marked_before(text, start)
+            || marked_after(text, word_stop)
+            || currency_word_beside(text, start, word_stop)
+    };
+    let unit = |unit: Unit| names_unit(text, start, word_stop, unit);
     let reads = match needs {
         Needs::Nothing => true,
         Needs::CurrencyWhenSpaced => !spaced || currency(),
         Needs::Currency => currency(),
-        Needs::DotOrCurrency => bytes.get(word_stop) == Some(&b'.') || currency(),
+        Needs::GluedUnless(kind) => currency() || (!spaced && !unit(kind)),
+        Needs::Unless(kind) => currency() || !unit(kind),
     };
     reads.then_some(Scale {
         magnitude,

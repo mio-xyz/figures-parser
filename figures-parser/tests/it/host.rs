@@ -235,12 +235,33 @@ fn walks_the_runs_a_reply_drew_a_sheets_amounts_from() {
 // them, where it misreads the text; docs/guarantees.md gives each reason.
 
 #[test]
-fn reads_a_decimal_comma_before_a_continental_scale_where_the_host_reads_thousands() {
+fn reads_a_decimal_mark_before_a_scale_word_whose_language_writes_it() {
+    assert_eq!(ungrounded_figures("Долг 8,566 млрд.", "8566000000"), none());
     assert_eq!(
-        ungrounded_figures("Budget 1,250 M€.", "budget 1250000"),
+        ungrounded_figures("Revenue of 1.250 million.", "1250000"),
         none()
     );
-    assert_eq!(ungrounded_figures("Долг 8,566 млрд.", "8566000000"), none());
+    // Before a letter every locale writes alike, the run is thousands, as
+    // the host reads it.
+    assert_eq!(
+        ungrounded_figures("Budget 1,250 M€.", "budget 1250000"),
+        ["1,250 M€"]
+    );
+}
+
+#[test]
+fn reads_no_scale_that_moves_a_decimal_back_onto_the_printed_digits() {
+    for (reply, corpus) in [
+        ("Revenue 9.007 tn €", "x 9007"),
+        ("CHF 9.007 tn EUR", "x 9007"),
+        ("Revenue 9,007 tn €", "x 9007"),
+        ("Total 46,886b €", "{amount: 46886}"),
+        ("Total 46,886b€", "{amount: 46886}"),
+        ("Total 1,001b$", "1,001"),
+        ("Total 46,886k €", "46886"),
+    ] {
+        assert_eq!(ungrounded_figures(reply, corpus).len(), 1, "{reply}");
+    }
 }
 
 #[test]
@@ -306,7 +327,6 @@ fn reads_a_scale_abbreviation_that_is_also_a_word_or_a_unit_only_beside_a_curren
         ("Balance 3,000 CR.", "3000"),
         ("Wrote 5 md files.", ""),
         ("Ate 899'404 Bio eggs.", "899404"),
-        ("Sent 8 004 Mio messages.", "8004"),
     ] {
         assert_eq!(ungrounded_figures(reply, digits), none(), "{reply}");
     }
@@ -317,6 +337,11 @@ fn reads_a_scale_abbreviation_that_is_also_a_word_or_a_unit_only_beside_a_curren
         ("R$ 5 mi.", "5"),
         ("Sent 8 004 Mio. €", "8004"),
         ("Balance $3,000 CR.", "3000"),
+        ("Sent 8 004 Mio messages.", "8004"),
+        ("Gelir 5 bin TL.", "5"),
+        ("Revenue Rs 92 cr.", "92"),
+        ("Umsatz 5 Bio Euro.", "5"),
+        ("Revenue 3.2m dollars.", "3.2"),
     ] {
         assert_eq!(ungrounded_figures(reply, digits).len(), 1, "{reply}");
     }

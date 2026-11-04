@@ -27,8 +27,15 @@ export declare class PageHolds {
 /**
  * For each of `texts`, the amounts `reply` states that it carries, as the
  * reply wrote them; the reply is read once.
+
+ * A function that takes a text and returns the amounts `reply` states that
+ * the text carries, as the reply wrote them: `amountsSharedWith(reply)(text)`.
+ *
+ * # Errors
+ *
+ * When the function cannot be made, or is called without a string.
  */
-export declare function amountsSharedWith(reply: string, texts: Array<string>): Array<Array<string>>
+export declare function amountsSharedWith(reply: string): (text: string) => Array<string>
 
 /**
  * Whether `url` is a link a reply may build rather than copy: a page naming

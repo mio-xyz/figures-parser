@@ -60,7 +60,8 @@ the other checks use (stated and printed figures, numeric tokens). The
 library flags every input the TypeScript flags and passes every input it
 passes, except where the TypeScript reads the text wrongly, listed below;
 where the library flags more, it is a value no source carries (an amount
-behind a currency code, a scale word the TypeScript does not know, "Tsd",
+behind a currency code, a scale beside a currency written in letters ("24,7
+M d'euros", "31.53 t rupees"), a scale word the TypeScript does not know, "Tsd",
 "Mds", "MM", "crores", a Han multiplier after a space, a number in words,
 an approximation mark before a bare run, a sign against the opposite sign),
 and where it passes more, a value a source carries in the
@@ -78,22 +79,31 @@ apart, as it does everywhere in the library.
 Each of these is pinned by a test in `figures-parser/tests/it/host.rs` or
 `scales.rs`.
 
-- **A unit or a word is no scale.** "took 5m" (minutes), "5t" (tonnes),
-  "300l" (litres), "5 mi" (miles), "5 mn" (French minutes), "5 bin bags",
-  "92 cr" (credits), "3,000 CR" (a credit), "5 md files", "5 Mr", "5 tn" of
-  tonnes, "Bio" (organic) and "Mio" without its dot are read as scales only
-  beside a currency; the TypeScript reads each as a multiplier anywhere, and
-  holds "took 5m" as five million.
+- **A unit or a word is no scale where the words around say so.** "took
+  5m", "5m ago" and "1h 5m" (minutes), "5m tall" (metres), "a 2481t truck"
+  and "weighs 25 tn" (tonnes), "300l of water" (litres), "ran 5 mi" (miles),
+  "took 165489 mn" (French minutes), "5 bin bags", "earned 92 cr this term"
+  (credits), "5 md files", "5 Mr Smith" and "3 Bio eggs" (organic) are read
+  as units or words; the TypeScript reads each as a multiplier, and holds
+  "took 5m" as five million. Without such words the abbreviation is a scale,
+  as the TypeScript reads it ("3.2m users", "Revenue 5 Mio", "Gelir 729
+  bin"). "3,000 CR" after a balance is accounting's credit, a scale only
+  beside a currency.
 - **English reads its own scale.** "2tn" is 10¹² and "$2 billion" 10⁹, as
   English writes them; the TypeScript also reads them at the Swedish thousand
   and the French 10¹², so "2tn" is grounded by a printed 2,000. Written as the
   continental locales write it ("2 tn €", "1 billion d'euros"), a name reads
   at every power they give it, as the TypeScript does.
-- **A decimal comma before a continental scale.** "1,250 M€" is 1.25 million
-  as well as 1,250 million, since a currency after the scale is how the
-  continental locales write an amount and all of them write a decimal comma;
-  so is "8,566 млрд", Russian writing a decimal comma, and "1.250 million",
-  English a decimal point. The TypeScript reads such a run as thousands only.
+- **A decimal mark before a scale word whose language writes it.** "8,566
+  млрд" is 8.566 billion as well as 8,566 billion, Russian writing a decimal
+  comma; so are "1,250 Mio." (German), "12,500 rb" (Indonesian) and "1.250
+  million" (English, a decimal point). The TypeScript reads such a run as
+  thousands only. Before a letter every locale writes alike ("1,250 M€",
+  "46,886b €") the library reads the run as thousands too, as the TypeScript
+  does, since English and continental reports write it for values a
+  thousand apart. A decimal read through a word's own mark takes only that
+  word's own power: "9.007 tn €" is English, never the Swedish 9.007
+  thousand that would land on a printed 9,007.
 - **A compound scale after a plain space.** "2 lakh crore" is 2 × 10¹²; the
   TypeScript joins the compound only with the no-break space a locale
   formats it with, and reads "2 lakh".
