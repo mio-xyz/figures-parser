@@ -15,7 +15,7 @@ use regex::Regex;
 pub use grammar::Unit;
 use grammar::{Amount, Part, is_number_symbol, parts, starts_clean};
 
-use crate::number::scan::approximation_at;
+use crate::number::scan::approximation_apart;
 use crate::text::{compile, report_once};
 use crate::url::urls;
 
@@ -192,7 +192,7 @@ fn join<'a>(text: &'a str, parts: &[Part]) -> Vec<Duration<'a>> {
                 from,
                 place: part.place,
                 loose: part.loose.filter(|_| from.is_none()),
-                approximate: approximation_at(text, start).is_some(),
+                approximate: approximation_apart(text, start).is_some(),
                 stated: part.stated,
             });
         }

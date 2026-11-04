@@ -791,7 +791,6 @@ module.exports.groundingTokens = nativeBinding.groundingTokens
 module.exports.groundMessage = nativeBinding.groundMessage
 module.exports.groundPage = nativeBinding.groundPage
 module.exports.groundReply = nativeBinding.groundReply
-module.exports.hasSpeakerPrefix = nativeBinding.hasSpeakerPrefix
 module.exports.internalNames = nativeBinding.internalNames
 module.exports.linkFindings = nativeBinding.linkFindings
 module.exports.memoryClaim = nativeBinding.memoryClaim
@@ -799,25 +798,18 @@ module.exports.memoryGrounding = nativeBinding.memoryGrounding
 module.exports.mendedLinks = nativeBinding.mendedLinks
 module.exports.misdatedWeekdays = nativeBinding.misdatedWeekdays
 module.exports.mispairedPerUnit = nativeBinding.mispairedPerUnit
-module.exports.placeholderTargets = nativeBinding.placeholderTargets
-
 module.exports.numericTokens = nativeBinding.numericTokens
+module.exports.placeholderTargets = nativeBinding.placeholderTargets
 module.exports.printedFigures = nativeBinding.printedFigures
 module.exports.proseArithmetic = nativeBinding.proseArithmetic
 module.exports.rowsOutsideWindow = nativeBinding.rowsOutsideWindow
 module.exports.scrubMemoryLayout = nativeBinding.scrubMemoryLayout
 module.exports.sharesAmount = nativeBinding.sharesAmount
+module.exports.sheetFindings = nativeBinding.sheetFindings
 module.exports.silentSignal = nativeBinding.silentSignal
 module.exports.speakerPrefix = nativeBinding.speakerPrefix
-
-module.exports.sheetFindings = nativeBinding.sheetFindings
 module.exports.statedFigures = nativeBinding.statedFigures
-
-module.exports.sheetFindings = nativeBinding.sheetFindings
-module.exports.silentMarker = nativeBinding.silentMarker
 module.exports.statesFigure = nativeBinding.statesFigure
-module.exports.undottedSlackLink = nativeBinding.undottedSlackLink
-
 module.exports.undottedMessageLink = nativeBinding.undottedMessageLink
 module.exports.ungroundedDurations = nativeBinding.ungroundedDurations
 module.exports.ungroundedEmails = nativeBinding.ungroundedEmails

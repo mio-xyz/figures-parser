@@ -313,6 +313,26 @@ pub(crate) fn approximation_at(text: &str, at: usize) -> Option<usize> {
     Some(mark_end.saturating_sub(c.len_utf8()))
 }
 
+/// [`approximation_at`], for a mark that [stands apart](stands_apart) from
+/// what is before it: a reader for which "10 ~ 20" is a range and "var~20"
+/// no mark.
+pub(crate) fn approximation_apart(text: &str, at: usize) -> Option<usize> {
+    approximation_at(text, at).filter(|&start| stands_apart(text, start))
+}
+
+/// Whether the approximation mark at byte `start` stands apart from what
+/// is before it: no word letter or digit right before it, and no digit
+/// before the one space between ("10 ~ 20").
+fn stands_apart(text: &str, start: usize) -> bool {
+    let edge = before_marks(text, start);
+    let Some(head) = text.get(..edge) else {
+        return false;
+    };
+    let spaced = head.strip_suffix(char::is_whitespace);
+    !(char_before(head, edge).is_some_and(is_boundary)
+        || spaced.is_some_and(|h| char_before(h, h.len()).is_some_and(is_digit)))
+}
+
 /// Whether the text before `start` may hold a sign, an approximation mark, a
 /// currency mark or an opening parenthesis, read from the one or two
 /// characters before it, so most figures are settled without the full
@@ -344,6 +364,8 @@ pub(super) struct Prefix {
     pub sign: Sign,
     /// Whether an approximation mark stands before it.
     pub approximate: bool,
+    /// Whether that mark stands apart from a word or a figure before it.
+    pub marked_apart: bool,
     /// Where the sign or the approximation mark starts; the token's own
     /// start when neither is written.
     pub from: usize,
@@ -372,6 +394,7 @@ pub(super) fn look_back(text: &str, start: usize, end: usize) -> Prefix {
     Prefix {
         sign,
         approximate: mark.is_some(),
+        marked_apart: mark.is_some_and(|at| stands_apart(text, at)),
         from: mark.or_else(|| signed.map(|(_, at)| at)).unwrap_or(start),
     }
 }
@@ -439,6 +462,9 @@ pub struct Token<'a> {
     pub sign: Sign,
     /// Whether an approximation mark stands before it ("~12,500").
     pub approximate: bool,
+    /// Whether that mark stands apart from a word or a figure before it
+    /// ("~12,500", not "var~12,500" or "10 ~ 20,000").
+    pub marked_apart: bool,
     /// The power of ten a scale word after the digits multiplies it by
     /// ("1.2 million", "12.5K"); 0 without one.
     pub magnitude: u32,
@@ -695,6 +721,7 @@ impl<'a> Iterator for Tokens<'a> {
                 Prefix {
                     sign: Sign::Unsigned,
                     approximate: false,
+                    marked_apart: false,
                     from: start,
                 }
             };
@@ -705,6 +732,7 @@ impl<'a> Iterator for Tokens<'a> {
                 marked_after: self.marks && marked_after(text, written_end),
                 sign: prefix.sign,
                 approximate: prefix.approximate,
+                marked_apart: prefix.marked_apart,
                 magnitude: scale.map_or(0, |scale| scale.magnitude),
                 also: scale.map_or(0, |scale| scale.also),
                 decimal_mark: scale.and_then(|scale| scale.mark),
@@ -746,6 +774,7 @@ mod tests {
                         let none = Prefix {
                             sign: Sign::Unsigned,
                             approximate: false,
+                            marked_apart: false,
                             from: token.start,
                         };
                         assert!(

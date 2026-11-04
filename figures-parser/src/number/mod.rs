@@ -116,6 +116,12 @@ pub struct Figure<'a, D> {
     /// it ("~12,500"), or a scale word after its digits ("1.2 million"). Of
     /// a run's neighbours, only the first has the mark.
     pub approximate: bool,
+    /// Whether it is stated as an approximate amount, held from 10,000 up
+    /// as a figure with a currency is: a number in words, or a figure after
+    /// an approximation mark that stands apart from the word or figure
+    /// before it ("~12500", not "var~12500"). Of a run's neighbours, only
+    /// the first can be.
+    pub approximate_amount: bool,
     /// Whether a scale word or multiplier after its digits multiplies it
     /// ("1.2 million", "12.5K", "3億"); a number in words is not.
     pub scaled: bool,
@@ -169,6 +175,7 @@ impl<'a> From<Reading<'a, '_>> for Number<'a> {
             ambiguous: r.ambiguous,
             sign: r.sign,
             approximate: r.approximate,
+            approximate_amount: r.approximate_amount,
             scaled: r.scaled,
             magnitude: r.magnitude,
             full_text: r.full_text,
@@ -602,7 +609,7 @@ impl Reading<'_, '_> {
                 MIN_SEPARATED_FIGURE
             } else if self.currency {
                 MIN_CURRENCY_FIGURE
-            } else if bare_runs || self.approximate {
+            } else if bare_runs || self.approximate_amount {
                 MIN_BARE_FIGURE
             } else {
                 return None;

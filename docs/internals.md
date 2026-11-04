@@ -75,7 +75,9 @@ A token records what stands around it:
   currency, with at most one space of the same line between. A tilde
   between two figures ("10~20") marks the second too, read as a range or as
   "about"; the CJK wave dashes (`〜`, `～`) mean a range or "up to" and mark
-  nothing;
+  nothing. Only a mark that stands apart from the word or figure before it
+  ("~12500", not "var~12500" or "10 ~ 20") makes a bare run an amount held
+  from 10,000 up, and only such a mark makes a duration approximate;
 - a scale word after the digits (see [Scale words](#scale-words)).
 
 The digit table holds the 77 runs of ten decimal digits Unicode encodes,

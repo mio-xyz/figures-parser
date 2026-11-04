@@ -25,9 +25,6 @@ export declare class PageHolds {
 }
 
 /**
- * For each of `texts`, the amounts `reply` states that it carries, as the
- * reply wrote them; the reply is read once.
-
  * A function that takes a text and returns the amounts `reply` states that
  * the text carries, as the reply wrote them: `amountsSharedWith(reply)(text)`.
  *
@@ -41,13 +38,6 @@ export declare function amountsSharedWith(reply: string): (text: string) => Arra
  * Whether `url` is a link a reply may build rather than copy: a page naming
  * no item on one of `hosts`, or an item's link in its service's shape built
  * from ids `corpus` prints.
- */
-export declare function builtFromCorpus(url: string, corpus: string, hosts?: Array<string> | undefined | null): boolean
-
-/**
- * Whether `url` is a link a reply may build from what `corpus` printed: a
- * page naming no item on one of `hosts`, or an item's link in a shape a
- * service writes, from ids the corpus prints.
  */
 export declare function builtFromCorpus(url: string, corpus: string, hosts?: Array<string> | undefined | null): boolean
 
@@ -152,12 +142,6 @@ export interface ExtractOptions {
  */
 export declare function fabricatedUrls(reply: string, corpus: string, hosts?: Array<string> | undefined | null): Array<string>
 
-/**
- * The distinctive words of `text`, lowercased, in order, as
- * `memoryGrounding` compares them.
- */
-export declare function groundingTokens(text: string): Array<string>
-
 /** One thing a check found. */
 export interface Finding {
   /**
@@ -236,9 +220,6 @@ export declare function groundPage(text: string, corpus: string, said?: string |
  */
 export declare function groundReply(text: string, turn: Turn, attached?: ((arg: string) => boolean) | undefined | null): Grounding
 
-/** Whether `response` opens on a `[Name]:` speaker label. */
-export declare function hasSpeakerPrefix(response: string): boolean
-
 /** One identifier, with where it sits in the input. */
 export interface IdEntity {
   /** The kind of figure. */
@@ -315,11 +296,11 @@ export interface LinkFindings {
   unlinked: Array<string>
 }
 
-/** A row a script listed with the amount the reply states beside its total. */
+/** A row a checking helper listed with an amount. */
 export interface ListedFigure {
-  /** The amount as the script printed it ("19,851"). */
+  /** The amount as the helper printed it. */
   figure: string
-  /** The script's line for the row. */
+  /** The helper's line for the row. */
   name: string
 }
 
@@ -332,36 +313,14 @@ export interface LooseReading {
   length: LengthValue
   /** The step it is written to. */
   place: LengthValue
+}
 
+/**
  * The claim `reply` makes to have saved something to memory ("I'll
  * remember", "saved that to your preferences"), as written; null when it
  * makes none.
  */
 export declare function memoryClaim(reply: string): string | null
-
-/**
- * Which lines of `dossiers` (each a preloaded dossier's text) `response`
- * visibly draws on: two or more of a line's distinctive words and half of
- * them, or three of its words in a row.
- */
-export declare function memoryGrounding(response: string, dossiers: Array<string>): MemoryGrounding
-
-/** How much of a reply rests on the dossiers a turn preloaded. */
-export interface MemoryGrounding {
-  /** The dossier lines read: every non-empty line that is no heading. */
-  preloadedLines: number
-  /** The lines the reply draws on. */
-  groundedLines: number
-  /** Whether it draws on any. */
-  grounded: boolean
-
-/** A row a checking helper listed with an amount. */
-export interface ListedFigure {
-  /** The amount as the helper printed it. */
-  figure: string
-  /** The helper's line for the row. */
-  name: string
-}
 
 /** Which lines of the preloaded `notes` `response` visibly draws on. */
 export declare function memoryGrounding(response: string, notes: Array<string>): MemoryGrounding
@@ -481,11 +440,6 @@ export interface NumberValue {
   /** A neighbour reading of a thousands run: grounds, never stated. */
   derived: boolean
   /**
-   * The decimal reading of a token that also reads as thousands ("1,250"
-   * as 1.25), stated only with its fraction.
-   */
-  ambiguous: boolean
-  /**
    * The sign written before it; parentheses are accounting's negative or
    * an aside.
    */
@@ -520,6 +474,21 @@ export interface NumericToken {
  */
 export declare function numericTokens(text: string, loose?: boolean | undefined | null): Array<NumericToken>
 
+/** A name and the plain words it reads as. */
+export interface Phrase {
+  /** A folder under the memory root, or a file name. */
+  name: string
+  /** What it reads as. */
+  phrase: string
+}
+
+/**
+ * The target of every markdown link in `text` that is not a URL, a mail
+ * address or an anchor, in order, each as written (`url` in `[PR 512](url)`,
+ * `chart.png` in `![chart](chart.png)`).
+ */
+export declare function placeholderTargets(text: string): Array<string>
+
 /**
  * The figures `text`, a printed line, holds, in each reading ("1,250" is
  * 1250 and 1.25), a letter allowed after one and no scale word read.
@@ -532,21 +501,6 @@ export interface PrintedFigures {
   values: Array<number>
   /** The values behind a currency mark or with a decimal part. */
   amounts: Array<number>
-}
-
-/**
- * The target of every markdown link in `text` that is not a URL, a mail
- * address or an anchor, in order, each as written (`url` in `[PR 512](url)`,
- * `chart.png` in `![chart](chart.png)`).
- */
-export declare function placeholderTargets(text: string): Array<string>
-
-/** A name and the plain words it reads as. */
-export interface Phrase {
-  /** A folder under the memory root, or a file name. */
-  name: string
-  /** What it reads as. */
-  phrase: string
 }
 
 /**
@@ -582,6 +536,46 @@ export declare function scrubMemoryLayout(reply: string, said: string, layout: M
 export declare function sharesAmount(reply: string, text: string): boolean
 
 /**
+ * What `reply` owes the turn's script `runs`: the listed rows it leaves
+ * unstated, and the amounts it took off a sheet without the helpers that
+ * list their rows.
+ */
+export declare function sheetFindings(reply: string, runs: Array<SheetRun>): SheetFindings
+
+/** What a reply owes the runs it drew an amount from. */
+export interface SheetFindings {
+  /** Every row listed by a run the reply draws on, once per line. */
+  listed: Array<ListedFigure>
+  /** The listed rows whose amount the reply does not state. */
+  unstated: Array<ListedFigure>
+  /** The amounts read off a sheet with no helper that lists their rows. */
+  unchecked: UncheckedFigures
+}
+
+/** One script run of the turn, as the sheet checks read it. */
+export interface SheetRun {
+  /** What the run printed. */
+  stdout: string
+  /**
+   * Whether it called a helper that lists the rows its figures rest on;
+   * false when absent.
+   */
+  listsItsRows?: boolean
+  /**
+   * Whether it called a helper that takes a sheet as a frame of rows;
+   * false when absent.
+   */
+  framing?: boolean
+  /** Whether it read a worksheet's cells itself; false when absent. */
+  gridRead?: boolean
+  /**
+   * The rows a helper listed for the reply to name beside its total; none
+   * when absent.
+   */
+  listed?: Array<ListedFigure>
+}
+
+/**
  * The silent marker `raw` carries: the whole text, or a line of it read as
  * leaked; null when it carries none.
  */
@@ -604,36 +598,6 @@ export interface SilentSignal {
  */
 export declare function speakerPrefix(reply: string): string | null
 
- * What `reply` owes `runs`, the turn's script runs in order: the rows they
- * listed, those the reply leaves unstated, and the amounts it took from a
- * worksheet no check listed.
- */
-export declare function sheetFindings(reply: string, runs: Array<SheetRun>): SheetFindings
-
-/** What a reply owes the runs it drew a worksheet's amounts from. */
-export interface SheetFindings {
-  /** Every row listed by a run the reply draws on. */
-  listed: Array<ListedFigure>
-  /** The listed rows whose amount the reply leaves unstated. */
-  unstated: Array<ListedFigure>
-  /** The amounts taken from a worksheet that no check listed. */
-  unchecked: UncheckedFigures
-}
-
-/** What one script run did with a worksheet. */
-export interface SheetRun {
-  /** What the run printed. */
-  stdout: string
-  /** It ran a check whose print lists the rows its figures rest on. */
-  listsRows?: boolean
-  /** It took a ledger frame from a worksheet. */
-  frames?: boolean
-  /** It read a worksheet's grid itself. */
-  gridRead?: boolean
-  /** The rows it listed with their amounts. */
-  listed?: Array<ListedFigure>
-}
-
 /** A figure as a reply's clause states it. */
 export interface StatedFigure {
   /** As written, without its currency mark ("45.83"). */
@@ -652,69 +616,11 @@ export interface StatedFigure {
  */
 export declare function statedFigures(text: string): Array<StatedFigure>
 
- * What `reply` owes the turn's script `runs`: the listed rows it leaves
- * unstated, and the amounts it took off a sheet without the helpers that
- * list their rows.
- */
-export declare function sheetFindings(reply: string, runs: Array<SheetRun>): SheetFindings
-
-/** What a reply owes the runs it drew an amount from. */
-export interface SheetFindings {
-  /** Every row listed by a run the reply draws on, once per line. */
-  listed: Array<ListedFigure>
-  /** The listed rows whose amount the reply does not state. */
-  unstated: Array<ListedFigure>
-  /** The amounts read off a sheet with no helper that lists their rows. */
-  unchecked: UncheckedFigures
-}
-
-/** One script run of the turn, as the sheet checks read it. */
-export interface SheetRun {
-  /** What the run printed. */
-  stdout: string
-  /** Whether it called a helper that lists the rows its figures rest on. */
-  listsItsRows: boolean
-  /** Whether it called a helper that takes a sheet as a frame of rows. */
-  framing: boolean
-  /** Whether it read a worksheet's cells itself. */
-  gridRead: boolean
-  /** The rows a helper listed for the reply to name beside its total. */
-  listed: Array<ListedFigure>
-}
-
-/**
- * The abstention marker (`silent: <reason>`) `raw_text` holds, whole or
- * leaked inside a longer body; absent when it holds none.
- */
-export declare function silentMarker(rawText: string): SilentSignal | null
-
-/** An abstention marker a reply holds. */
-export interface SilentSignal {
-  /** The reason, one word. */
-  reason: string
-  /** Whether the marker is a line inside a longer reply. */
-  leaked: boolean
-}
-
 /**
  * Whether `text` states `figure` ("19,851", "1,234.50"), however it groups
  * it: the figure's whole part is matched.
  */
 export declare function statesFigure(text: string, figure: string): boolean
-
-/** The amounts a reply took from a worksheet without the checks. */
-export interface UncheckedFigures {
-  /** The amounts as the reply writes them. */
-  figures: Array<string>
-  /** Whether a run took a ledger frame and summed it by hand. */
-  framed: boolean
-}
-
-/**
- * `url` with the dot its Slack message ts kept dropped
- * (`…/p1791180327.741099` to `…/p1791180327741099`); null for any other link.
- */
-export declare function undottedSlackLink(url: string): string | null
 
 /** What a text is checked against: the turn so far. */
 export interface Turn {
@@ -755,8 +661,8 @@ export interface UncheckedFigures {
 }
 
 /**
- * `url`, a chat message link whose timestamp kept its dot, with the dot
- * dropped; absent for any other link.
+ * `url` with the dot its Slack message ts kept dropped
+ * (`…/p1791180327.741099` to `…/p1791180327741099`); null for any other link.
  */
 export declare function undottedMessageLink(url: string): string | null
 
@@ -818,9 +724,6 @@ export declare function ungroundedRatios(reply: string, corpus: string, said?: s
  */
 export declare function ungroundedUrls(reply: string, corpus: string, prompt?: string | undefined | null, hosts?: Array<string> | undefined | null): Array<string>
 
-/** The non-chat pages `text` links that are not in `opened`, once each. */
-export declare function unopenedLinks(text: string, opened?: Array<string> | undefined | null): Array<string>
-
 /**
  * The links in `text`, once each, that name a page to open: not a Slack
  * link, nor one of `opened`, the links the thread already went to.
@@ -860,9 +763,6 @@ export interface UrlEntity {
  * page links it by, the address parsed as a browser parses it.
  */
 export declare function urlPrintedIn(url: string, read: string): boolean
-
-/** `text` with each link it holds replaced by a space. */
-export declare function withoutLinks(text: string): string
 
 /** The names a reply must not show unless a person wrote them. */
 export interface Vocabulary {

@@ -737,10 +737,6 @@ fn shared<'r>(claims: &Claims<'r>) -> Vec<&'r str> {
 /// assert_eq!(figures_parser::ungrounded_figures("Over $3,000.", "close 3148.02"), ["3,000"]);
 /// ```
 #[must_use]
-#[expect(
-    clippy::redundant_closure_for_method_calls,
-    reason = "the method's path fixes the reading's lifetimes, which the bound leaves free"
-)]
 pub fn ungrounded_figures(reply: &str, corpus: &str) -> Vec<String> {
     let skip = link_spans(reply);
     let mut scratch = Scratch::default();
