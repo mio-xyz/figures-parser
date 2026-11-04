@@ -10,9 +10,13 @@
 
 use std::borrow::Cow;
 
+pub mod quality;
+pub mod turn;
+
 use figures_parser::utf16::{Utf16Cursor, units};
-use figures_parser::{Kind, durations, emails, identifiers, numbers, urls};
-use napi::bindgen_prelude::Either5;
+use figures_parser::{Kind, Length, durations, emails, identifiers, numbers, urls};
+use napi::Env;
+use napi::bindgen_prelude::{Either, Either5, Function};
 use napi_derive::napi;
 
 /// A number reading's comparable value.
@@ -39,6 +43,10 @@ pub struct NumberValue {
     /// Stated as rounded: an approximation mark before it ("~12,500") or a
     /// scale word after its digits ("1.2 million").
     pub approximate: bool,
+    /// The decimal reading of a run that also reads as thousands ("1,250"
+    /// as 1.25): grounds, and is stated only before a scale word whose
+    /// language writes that decimal mark.
+    pub ambiguous: bool,
 }
 
 /// One reading of one number, with where it sits in the input.
@@ -103,6 +111,34 @@ pub struct IdEntity {
     pub shape: String,
 }
 
+/// A length of time, in the two parts that do not convert into each other.
+#[napi(object)]
+pub struct LengthValue {
+    /// Its weeks, days, hours, minutes and seconds, in milliseconds.
+    pub milliseconds: i64,
+    /// Its years, quarters and months, in hundredths of a month.
+    pub centimonths: i64,
+}
+
+impl From<Length> for LengthValue {
+    fn from(length: Length) -> Self {
+        Self {
+            milliseconds: i64::try_from(length.milliseconds).unwrap_or(i64::MAX),
+            centimonths: i64::try_from(length.centimonths).unwrap_or(i64::MAX),
+        }
+    }
+}
+
+/// The other reading of a duration whose digits fit two, and the step it is
+/// written to.
+#[napi(object)]
+pub struct LooseReading {
+    /// The length it reads as.
+    pub length: LengthValue,
+    /// The step it is written to.
+    pub place: LengthValue,
+}
+
 /// One duration, with where it sits in the input.
 #[napi(object)]
 pub struct DurationEntity {
@@ -119,8 +155,25 @@ pub struct DurationEntity {
     pub milliseconds: i64,
     /// Its years, quarters and months, in hundredths of a month.
     pub centimonths: i64,
-    /// Whether a reply is held to it: false for a number glued to a bare
-    /// `s`, which may be a plural ("the 90s") as well as seconds.
+    /// A range's lower bound ("10" of "10–30 min"); `milliseconds` and
+    /// `centimonths` are its upper bound.
+    pub from: Option<LengthValue>,
+    /// The step it is written to: its smallest unit, a decimal place of it
+    /// or the fraction added to it. A printed length rounds to it within
+    /// half a step.
+    pub place: LengthValue,
+    /// The other reading of its digits, when a lone dot or comma before three
+    /// digits may group them or end the whole number ("1.250 Sekunden" is
+    /// 1,250 seconds, or 1.25). A corpus prints either; a reply states the
+    /// first reading alone.
+    pub loose: Option<LooseReading>,
+    /// Whether an approximation mark stands before it ("~5 minutes").
+    pub approximate: bool,
+    /// Whether a reply is held to it: false for a number beside a one-letter
+    /// symbol, which may be a plural ("the 90s"), a time of day ("15h",
+    /// "15h30") or a size as well as a length, and for a length in days or
+    /// longer units only, which a window ("the last 30 days") or a plan is
+    /// written with as well.
     pub stated: bool,
 }
 
@@ -181,6 +234,7 @@ pub fn extract(
                         derived: n.derived,
                         sign: n.sign.name().to_owned(),
                         approximate: n.approximate,
+                        ambiguous: n.ambiguous,
                     },
                 })
             })),
@@ -212,6 +266,13 @@ pub fn extract(
                     end,
                     milliseconds: i64::try_from(d.length.milliseconds).unwrap_or(i64::MAX),
                     centimonths: i64::try_from(d.length.centimonths).unwrap_or(i64::MAX),
+                    from: d.from.map(LengthValue::from),
+                    place: d.place.into(),
+                    loose: d.loose.map(|(length, place)| LooseReading {
+                        length: length.into(),
+                        place: place.into(),
+                    }),
+                    approximate: d.approximate,
                     stated: d.stated,
                 })
             })),
@@ -242,10 +303,41 @@ pub fn ungrounded_figures(reply: String, corpus: String) -> Vec<String> {
 /// No printed ratio or decimal rounds to one at the places the reply wrote,
 /// and no number the person stated, nor plain arithmetic over two of them,
 /// gives it.
+///
+/// `said` may be a function returning them, called only when a ratio is left
+/// that the corpus does not carry.
+///
+/// # Errors
+///
+/// What `said` throws.
 #[napi(catch_unwind)]
-#[must_use]
-pub fn ungrounded_ratios(reply: String, corpus: String, said: Option<String>) -> Vec<String> {
-    figures_parser::ungrounded_ratios(&reply, &corpus, said.as_deref().unwrap_or_default())
+pub fn ungrounded_ratios(
+    reply: String,
+    corpus: String,
+    #[napi(ts_arg_type = "string | (() => string)")] said: Option<
+        Either<String, Function<(), String>>,
+    >,
+) -> napi::Result<Vec<String>> {
+    let mut thrown = None;
+    let found =
+        figures_parser::ungrounded_ratios_with(&reply, &corpus, || called(said, &mut thrown));
+    thrown.map_or(Ok(found), Err)
+}
+
+/// The text `given` holds, or the one it returns when it is a function, an
+/// error it throws kept in `thrown`.
+fn called(
+    given: Option<Either<String, Function<(), String>>>,
+    thrown: &mut Option<napi::Error>,
+) -> String {
+    match given {
+        None => String::new(),
+        Some(Either::A(text)) => text,
+        Some(Either::B(function)) => function.call(()).unwrap_or_else(|e| {
+            *thrown = Some(e);
+            String::new()
+        }),
+    }
 }
 
 /// Whether `reply` states an amount that `text` carries: a figure the gate
@@ -256,22 +348,30 @@ pub fn shares_amount(reply: String, text: String) -> bool {
     figures_parser::shares_amount(&reply, &text)
 }
 
-/// For each of `texts`, the amounts `reply` states that it carries, as the
-/// reply wrote them; the reply is read once.
-#[napi(catch_unwind)]
-#[must_use]
-pub fn amounts_shared_with(reply: String, texts: Vec<String>) -> Vec<Vec<String>> {
-    let amounts = figures_parser::Amounts::of(&reply);
-    texts
-        .iter()
-        .map(|text| {
-            amounts
-                .shared_with(text)
+/// A function that takes a text and returns the amounts `reply` states that
+/// the text carries, as the reply wrote them: `amountsSharedWith(reply)(text)`.
+///
+/// # Errors
+///
+/// When the function cannot be made, or is called without a string.
+#[napi(catch_unwind, ts_return_type = "(text: string) => Array<string>")]
+pub fn amounts_shared_with(
+    env: &Env,
+    reply: String,
+) -> napi::Result<Function<'_, String, Vec<String>>> {
+    env.create_function_from_closure("sharedWith", move |call| {
+        let text: String = call.first_arg()?;
+        // A panic unwinding into Node aborts the process; the export's own
+        // catch does not cover a call made after it returned.
+        std::panic::catch_unwind(|| {
+            figures_parser::Amounts::of(&reply)
+                .shared_with(&text)
                 .into_iter()
                 .map(str::to_owned)
                 .collect()
         })
-        .collect()
+        .map_err(|_| napi::Error::from_reason("amountsSharedWith panicked"))
+    })
 }
 
 /// Whether `text` states `figure` ("19,851", "1,234.50"), however it groups
@@ -290,7 +390,143 @@ pub fn prose_arithmetic(reply: String, message: String, corpus: String) -> Vec<S
     figures_parser::prose_arithmetic(&reply, &message, &corpus)
 }
 
-/// The lowercased hosts the caller trusts pages on, as `&str`s.
+/// A per-unit amount a reply pairs with a total and a count it is not the
+/// quotient of.
+#[napi(object)]
+pub struct MispairedFigure {
+    /// The per-unit amount as written, its currency mark first ("$45.83").
+    pub per_unit: String,
+    /// The clause's total over its count, worked out ("$74.74 / 2 = $37.37").
+    pub stated: String,
+    /// The printed amount the per-unit one is that count's quotient of
+    /// ("$91.65 / 2").
+    pub printed: String,
+}
+
+/// Per-unit amounts in `reply` stated beside a total and a count they are
+/// not the quotient of.
+///
+/// A line of `corpus` shows each as another amount over that count.
+/// `corpus` may be a function returning it, called only once a clause holds
+/// a candidate.
+///
+/// # Errors
+///
+/// What `corpus` throws.
+#[napi(catch_unwind)]
+pub fn mispaired_per_unit(
+    reply: String,
+    #[napi(ts_arg_type = "string | (() => string)")] corpus: Either<String, Function<(), String>>,
+) -> napi::Result<Vec<MispairedFigure>> {
+    let mut thrown = None;
+    let found =
+        figures_parser::mispaired_per_unit_with(&reply, || called(Some(corpus), &mut thrown));
+    thrown.map_or_else(
+        || {
+            Ok(found
+                .into_iter()
+                .map(|m| MispairedFigure {
+                    per_unit: m.per_unit,
+                    stated: m.stated,
+                    printed: m.printed,
+                })
+                .collect())
+        },
+        Err,
+    )
+}
+
+/// A figure as a reply's clause states it.
+#[napi(object)]
+pub struct StatedFigure {
+    /// As written, without its currency mark ("45.83").
+    pub text: String,
+    /// Its value.
+    pub value: f64,
+    /// The decimal places written.
+    pub places: u32,
+    /// The currency mark written before it ("$", "USD"), or "" for none.
+    pub mark: String,
+}
+
+/// The figures `text`, a clause of a reply, states, in order: its links,
+/// ratios and scaled figures left out, a run that groups read as thousands.
+#[napi(catch_unwind)]
+#[must_use]
+pub fn stated_figures(text: String) -> Vec<StatedFigure> {
+    figures_parser::stated_figures(&text)
+        .into_iter()
+        .map(|f| StatedFigure {
+            text: f.text.to_owned(),
+            value: f.value,
+            places: u32::try_from(f.places).unwrap_or(u32::MAX),
+            mark: f.mark.to_owned(),
+        })
+        .collect()
+}
+
+/// The values a printed line holds, in each reading, and apart the amounts.
+#[napi(object)]
+pub struct PrintedFigures {
+    /// Every value, in order.
+    pub values: Vec<f64>,
+    /// The values behind a currency mark or with a decimal part.
+    pub amounts: Vec<f64>,
+}
+
+/// The figures `text`, a printed line, holds, in each reading ("1,250" is
+/// 1250 and 1.25), a letter allowed after one and no scale word read.
+#[napi(catch_unwind)]
+#[must_use]
+pub fn printed_figures(text: String) -> PrintedFigures {
+    let printed = figures_parser::printed_figures(&text);
+    PrintedFigures {
+        values: printed.values,
+        amounts: printed.amounts,
+    }
+}
+
+/// One numeric token as a result prints it.
+#[napi(object)]
+pub struct NumericToken {
+    /// UTF-16 offset of its first digit.
+    pub start: u32,
+    /// One past its last UTF-16 unit.
+    pub end: u32,
+    /// The values it reads as.
+    pub values: Vec<f64>,
+}
+
+/// The numeric tokens of `text` as a result prints them, each with the
+/// values it reads as; with `loose`, the decimal reading of a run that also
+/// groups too.
+#[napi(catch_unwind)]
+#[must_use]
+pub fn numeric_tokens(text: String, loose: Option<bool>) -> Vec<NumericToken> {
+    let mut cursor = Utf16Cursor::new(&text);
+    figures_parser::numeric_tokens(&text, loose.unwrap_or(false))
+        .into_iter()
+        .map(|t| {
+            let written = text.get(t.span.clone()).unwrap_or_default();
+            let (start, end) = place(&mut cursor, t.span.start, written);
+            NumericToken {
+                start,
+                end,
+                values: t.values,
+            }
+        })
+        .collect()
+}
+
+/// `text` with every http(s) link it holds put out as a space, wherever the
+/// link's text recurs.
+#[napi(catch_unwind)]
+#[must_use]
+pub fn without_links(text: String) -> String {
+    figures_parser::without_links(&text).into_owned()
+}
+
+/// A list the caller passed (hosts, links), as `&str`s; empty when absent.
 fn host_list(hosts: Option<&[String]>) -> Vec<&str> {
     hosts
         .unwrap_or_default()
@@ -386,20 +622,46 @@ pub fn mended_links(reply: String, corpus: String) -> MendedReply {
     }
 }
 
+/// `today` as a date.
+fn parse_today(today: &str) -> napi::Result<figures_parser::Date> {
+    today
+        .parse()
+        .map_err(|e| napi::Error::from_reason(format!("today is not a YYYY-MM-DD date: {e}")))
+}
+
 /// The weekday-and-date pairs in `reply` whose weekday is wrong for that date.
 ///
 /// `today` is `YYYY-MM-DD`; a date written without a year is read in the year
-/// nearest it.
+/// nearest it, and a weekday beside a bare day number against the dates
+/// around it.
 ///
 /// # Errors
 ///
 /// `today` is not a `YYYY-MM-DD` date.
 #[napi(catch_unwind)]
 pub fn misdated_weekdays(reply: String, today: String) -> napi::Result<Vec<String>> {
-    let today: figures_parser::Date = today
-        .parse()
-        .map_err(|e| napi::Error::from_reason(format!("today is not a YYYY-MM-DD date: {e}")))?;
-    Ok(figures_parser::misdated_weekdays(&reply, today))
+    Ok(figures_parser::misdated_weekdays(
+        &reply,
+        parse_today(&today)?,
+    ))
+}
+
+/// The rows of a table or list, under a heading that names a date window,
+/// whose own leading date falls outside it, each `"<date>" under "<window>"`.
+///
+/// A window is a range of dates or a day with a range of hours. `today` is
+/// `YYYY-MM-DD`; a date written without a year is read in the year nearest
+/// it.
+///
+/// # Errors
+///
+/// `today` is not a `YYYY-MM-DD` date.
+#[napi(catch_unwind)]
+pub fn rows_outside_window(reply: String, today: String) -> napi::Result<Vec<String>> {
+    Ok(figures_parser::rows_outside_window(
+        &reply,
+        parse_today(&today)?,
+    ))
 }
 
 /// The email addresses in `reply`, once each, that neither `corpus` nor
@@ -423,6 +685,18 @@ pub fn ungrounded_identifiers(
     figures_parser::ungrounded_identifiers(&reply, &corpus, prompt.as_deref().unwrap_or_default())
 }
 
+/// The opaque ids `reply` states outside its links (a typed id such as
+/// `prod_VU49BpM22sWxIM`, a UUID, a hex digest) that `corpus` never carries,
+/// case aside, once each.
+#[napi(catch_unwind)]
+#[must_use]
+pub fn unprinted_ids(reply: String, corpus: String) -> Vec<String> {
+    figures_parser::unprinted_ids(&reply, &corpus)
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
+}
+
 /// The long mixed tokens in `reply`, once each, that neither `corpus` nor
 /// `prompt` carries, for measurement only.
 #[napi(catch_unwind)]
@@ -432,11 +706,20 @@ pub fn unseen_tokens(reply: String, corpus: String, prompt: Option<String>) -> V
 }
 
 /// The durations in `reply`, once each, whose length neither `corpus` nor
-/// `prompt` carries, written out or as an API gives it.
+/// `prompt` carries, written out or as an API gives it, rounded at the place
+/// the reply writes it to.
 #[napi(catch_unwind)]
 #[must_use]
 pub fn ungrounded_durations(reply: String, corpus: String, prompt: Option<String>) -> Vec<String> {
     figures_parser::ungrounded_durations(&reply, &corpus, prompt.as_deref().unwrap_or_default())
+}
+
+/// Whether `read` carries `url` whole, without its scheme, or as the path a
+/// page links it by, the address parsed as a browser parses it.
+#[napi(catch_unwind)]
+#[must_use]
+pub fn url_printed_in(url: String, read: String) -> bool {
+    figures_parser::url_printed_in(&url, &read)
 }
 
 /// The links in `reply`, once each, that `corpus` does not carry.
@@ -451,4 +734,130 @@ pub fn fabricated_urls(reply: String, corpus: String, hosts: Option<Vec<String>>
         .into_iter()
         .map(str::to_owned)
         .collect()
+}
+
+/// The figures, ratios and opaque ids of a page's `text` that `corpus`, what
+/// the run read, does not carry.
+///
+/// `said`, what people wrote, grounds a ratio between their own numbers.
+/// Nothing is checked when the turn read pixels only (`pixel_only`).
+#[napi(catch_unwind)]
+#[must_use]
+pub fn ungrounded_on_page(
+    text: String,
+    corpus: String,
+    said: Option<String>,
+    pixel_only: Option<bool>,
+) -> Vec<String> {
+    figures_parser::ungrounded_on_page(
+        &text,
+        &corpus,
+        said.as_deref().unwrap_or_default(),
+        pixel_only.unwrap_or(false),
+    )
+}
+
+/// Which of a turn's rendered pages to hold back, file by file: a page is
+/// held back for a claim the run was not told about for that file, and a
+/// file at most three times.
+#[napi]
+#[derive(Default)]
+pub struct PageHolds {
+    /// The library's bookkeeping.
+    inner: figures_parser::PageHolds,
+}
+
+#[napi]
+impl PageHolds {
+    /// No page held back yet.
+    #[napi(constructor, catch_unwind)]
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Whether to hold back the page `filename` names, whose check found
+    /// `claims`; a hold records them as told for that file.
+    #[napi(catch_unwind)]
+    pub fn hold(&mut self, filename: String, claims: Vec<String>) -> bool {
+        self.inner.hold(&filename, &claims)
+    }
+}
+
+/// `url` with the dot its Slack message ts kept dropped
+/// (`…/p1791180327.741099` to `…/p1791180327741099`); null for any other link.
+#[napi(catch_unwind)]
+#[must_use]
+pub fn undotted_message_link(url: String) -> Option<String> {
+    figures_parser::undotted_message_link(&url)
+}
+
+/// The target of every markdown link in `text` that is not a URL, a mail
+/// address or an anchor, in order, each as written (`url` in `[PR 512](url)`,
+/// `chart.png` in `![chart](chart.png)`).
+#[napi(catch_unwind)]
+#[must_use]
+pub fn placeholder_targets(text: String) -> Vec<String> {
+    figures_parser::placeholder_targets(&text)
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The links in `text`, once each, that name a page to open: not a Slack
+/// link, nor one of `opened`, the links the thread already went to.
+#[napi(catch_unwind)]
+#[must_use]
+pub fn unopened_links(text: String, opened: Option<Vec<String>>) -> Vec<String> {
+    figures_parser::unopened_links(&text, &host_list(opened.as_deref()))
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Whether `url` is a link a reply may build rather than copy: a page naming
+/// no item on one of `hosts`, or an item's link in its service's shape built
+/// from ids `corpus` prints.
+#[napi(catch_unwind)]
+#[must_use]
+pub fn built_from_corpus(url: String, corpus: String, hosts: Option<Vec<String>>) -> bool {
+    figures_parser::built_from_corpus(&url, &corpus, &host_list(hosts.as_deref()))
+}
+
+/// The `[Name]: ` speaker prefix that opens `reply`'s first line, as
+/// written; null when it opens with none.
+#[napi(catch_unwind)]
+#[must_use]
+pub fn speaker_prefix(reply: String) -> Option<String> {
+    figures_parser::speaker_prefix(&reply).map(str::to_owned)
+}
+
+/// The claim `reply` makes to have saved something to memory ("I'll
+/// remember", "saved that to your preferences"), as written; null when it
+/// makes none.
+#[napi(catch_unwind)]
+#[must_use]
+pub fn memory_claim(reply: String) -> Option<String> {
+    figures_parser::memory_claim(&reply).map(str::to_owned)
+}
+
+/// A `silent: <reason>` marker a run's text carries.
+#[napi(object)]
+pub struct SilentSignal {
+    /// The reason, a single run without whitespace.
+    pub reason: String,
+    /// Whether the marker sat inside a longer body rather than being the
+    /// whole of it.
+    pub leaked: bool,
+}
+
+/// The silent marker `raw` carries: the whole text, or a line of it read as
+/// leaked; null when it carries none.
+#[napi(catch_unwind)]
+#[must_use]
+pub fn silent_signal(raw: String) -> Option<SilentSignal> {
+    figures_parser::silent_signal(&raw).map(|signal| SilentSignal {
+        reason: signal.reason.to_owned(),
+        leaked: signal.leaked,
+    })
 }

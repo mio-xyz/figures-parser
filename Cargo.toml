@@ -45,12 +45,14 @@ wildcard_enum_match_arm = "deny"
 aho-corasick = "1"
 unicode-general-category = "1.1"
 unicode-script = "0.5"
+unicode-segmentation = "1.13"
 iso_currency = "0.7"
 jiff = { version = "0.2", default-features = false, features = ["std"] }
 linkify = "0.11"
 memchr = "2"
 regex = "1"
 rustc-hash = "2"
+url = "2"
 stats_alloc = "0.1"
 criterion = { version = "0.8", default-features = false }
 napi = { version = "3", default-features = false, features = ["napi9"] }

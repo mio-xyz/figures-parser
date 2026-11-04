@@ -61,6 +61,9 @@ pub enum Reading {
     },
     /// Anything else a parser takes: it removes what it overlaps and merges with nothing.
     Other,
+    /// A date with a day or month of 0, which chrono reads, lets remove what
+    /// it overlaps, and drops with whatever merged into it at its last filter.
+    Void,
 }
 
 /// One result: its byte range in the text and what it read.
@@ -72,6 +75,9 @@ pub struct Found {
     pub end: usize,
     /// What it read.
     pub reading: Reading,
+    /// The last day of a range a month-name date writes ("Oct 23-30"), in
+    /// the same month and year.
+    pub to: Option<u8>,
 }
 
 /// How a language's refiner pairs a weekday with a date.
@@ -124,6 +130,9 @@ enum Kind {
         full: &'static [&'static str],
         /// Whether the result's text leaves out the `prefix` group ("in", "di").
         drop_prefix: bool,
+        /// Whether a two-digit year is held to English's check (not `18 Jan`,
+        /// `18 am`), the match backing out of the year where it fails.
+        english_year: bool,
     },
     /// A day and a month word, in either order.
     MonthName {
@@ -148,8 +157,11 @@ enum Kind {
     Iso,
     /// Vietnamese: `ngày D tháng M năm Y`.
     Vietnamese,
-    /// Japanese: `Y年M月D日`, `Y/M/D` or `M/D`, digits halfwidth or fullwidth.
+    /// Japanese: `Y年M月D日`, digits halfwidth or fullwidth.
     Japanese,
+    /// Japanese: `Y/M/D` or `M/D`, read day first where the first number
+    /// cannot be a month ("13/05", "31/10"), and never from inside a number.
+    JapaneseSlash,
     /// Chinese: `Y年M月D日`, digits or Chinese numerals.
     Chinese,
     /// Arabic: a day, a month word or number and an optional year, in
@@ -253,8 +265,32 @@ fn month_only(
             "{pre}(?P<prefix>{prefix})?(?P<m>{}){year}{MONTH_POST}",
             keys(months)
         ),
-        Kind::MonthOnly { full, drop_prefix },
+        Kind::MonthOnly {
+            full,
+            drop_prefix,
+            english_year: false,
+        },
     )
+}
+
+/// English's month-only parser, whose two-digit year chrono holds to the
+/// same check as a month-name date's.
+fn english_month_only(year: &str) -> Parser {
+    let pattern = |tail: &str| {
+        format!(
+            r"{PRE}(?P<prefix>in\s*)?(?P<m>{}){tail}{MONTH_POST}",
+            keys(names::EN_MONTHS)
+        )
+    };
+    Parser {
+        re: compile(&pattern(&format!(r"\s*(?:(?:,|-|of)?\s*(?P<y>{year})?)?"))),
+        no_year: compile(&pattern(r"\s*(?:(?:,|-|of)?\s*)?")),
+        kind: Kind::MonthOnly {
+            full: names::EN_FULL_MONTHS,
+            drop_prefix: true,
+            english_year: true,
+        },
+    }
 }
 
 /// A month written as a number and a four-digit year (`9/2026`): read only
@@ -396,14 +432,7 @@ fn english() -> Language {
                 ),
                 Kind::Other,
             ),
-            month_only(
-                PRE,
-                r"in\s*",
-                names::EN_MONTHS,
-                &format!(r"\s*(?:(?:,|-|of)?\s*(?:{year})?)?"),
-                names::EN_FULL_MONTHS,
-                true,
-            ),
+            english_month_only(year),
         ],
     }
 }
@@ -769,8 +798,8 @@ fn japanese() -> Language {
                 Kind::WeekdayChar(names::JA_WEEKDAYS),
             ),
             plain(
-                r"(?:(?P<y>[0-9０-９]{4})[/|／])?(?P<mn>[0-1０-１]?[0-9０-９])(?:[/|／](?P<d>[0-3０-３]?[0-9０-９]))",
-                Kind::Japanese,
+                r"(?:(?P<y>[0-9０-９]{4})[/|／])?(?P<mn>[0-3０-３]?[0-9０-９])(?:[/|／](?P<d>[0-3０-３]?[0-9０-９]))",
+                Kind::JapaneseSlash,
             ),
         ],
     }
@@ -907,6 +936,8 @@ fn ukrainian() -> Language {
 pub struct Entry {
     /// The language's code, as chrono names it.
     pub code: &'static str,
+    /// The weekday names Intl gives, long then short, Monday first.
+    pub names: &'static [&'static str],
     /// The gate's weekday names as one case-insensitive pattern.
     gate: Option<Regex>,
     /// The language's parsers.
@@ -914,9 +945,11 @@ pub struct Entry {
 }
 
 /// Whether `word` is written in a script without spaces, so it is found
-/// inside text rather than as a whole word.
+/// inside text rather than as a whole word. Its first letter decides: a
+/// mark other scripts share ("пʼятниця" writes U+02BC, which Thai uses too)
+/// does not.
 fn unspaced(word: &str) -> bool {
-    word.chars().any(is_unspaced_script)
+    word.chars().next().is_some_and(is_unspaced_script)
 }
 
 impl Entry {
@@ -930,6 +963,7 @@ impl Entry {
             .filter(|w| unspaced(w) || w.chars().count() >= 3);
         Self {
             code,
+            names,
             gate: compile(&format!("(?:{})", alternation(words))),
             language: LazyLock::new(build),
         }
@@ -1031,7 +1065,7 @@ fn chinese_year(text: &str) -> Option<i32> {
 }
 
 /// chrono's reading of a year below 100: after 50 the 1900s, else the 2000s.
-const fn likely_ad_year(year: i32) -> i32 {
+pub const fn likely_ad_year(year: i32) -> i32 {
     if year < 100 {
         if year > 50 { year + 1900 } else { year + 2000 }
     } else {
@@ -1107,26 +1141,40 @@ impl Language {
     /// removed as chrono removes them: of two that overlap, the longer stays.
     #[must_use]
     pub fn results(&self, text: &str) -> Vec<Found> {
-        let mut all: Vec<Found> = Vec::new();
-        for parser in &self.parsers {
-            run(parser, text, &mut all);
-        }
-        all.sort_by_key(|f| f.start);
+        let all = self.every_result(text);
         let mut kept: Vec<Found> = Vec::with_capacity(all.len());
         let mut iter = all.into_iter();
         let Some(mut prev) = iter.next() else {
             return kept;
         };
+        // chrono measures a result in UTF-16 units: "6 Jan" outgrows the
+        // "Jan\u{202f}" a month-only parser reads, though it has fewer bytes.
+        let width = |f: &Found| {
+            text.get(f.start..f.end)
+                .map_or(0, |t| t.chars().map(char::len_utf16).sum::<usize>())
+        };
         for found in iter {
             if found.start >= prev.end {
                 kept.push(prev);
                 prev = found;
-            } else if found.end - found.start > prev.end - prev.start {
+            } else if width(&found) > width(&prev) {
                 prev = found;
             }
         }
         kept.push(prev);
         kept
+    }
+
+    /// Every result of every parser over `text`, by where it starts, in
+    /// parser order where two start together: what chrono's first overlap
+    /// removal sees, before it removes any.
+    pub fn every_result(&self, text: &str) -> Vec<Found> {
+        let mut all: Vec<Found> = Vec::new();
+        for parser in &self.parsers {
+            run(parser, text, &mut all);
+        }
+        all.sort_by_key(|f| f.start);
+        all
     }
 }
 
@@ -1235,6 +1283,35 @@ fn written_or_nearest(year: Option<i32>) -> YearOf {
     year.map_or(YearOf::Nearest, YearOf::Written)
 }
 
+/// Whether the year `y` a month-name date that ends a range took is a count
+/// instead: one or two digits after a comma, then a word, and no other
+/// number on the line ("Aug 4 - Aug 5, 12 posts"). chrono reads it as the
+/// year 2012.
+fn counted(m: &Match<'_, '_>, y: &str) -> bool {
+    let comma = m
+        .caps
+        .name("m")
+        .zip(m.caps.name("y"))
+        .and_then(|(month, year)| {
+            m.text
+                .get(m.from.saturating_add(month.end())..m.from.saturating_add(year.start()))
+        })
+        .is_some_and(|gap| gap.contains(','));
+    let line = m.after("y").split('\n').next().unwrap_or_default();
+    let worded =
+        line.starts_with(char::is_whitespace) && line.trim_start().starts_with(char::is_alphabetic);
+    let date_start = m.from.saturating_add(
+        m.caps
+            .name("pre")
+            .map_or_else(|| m.caps.get(0).map_or(0, |w| w.start()), |pre| pre.end()),
+    );
+    let range_end = m
+        .text
+        .get(..date_start)
+        .is_some_and(|before| before.trim_end().ends_with(['-', '–']));
+    y.trim().len() <= 2 && comma && worded && range_end && !line.bytes().any(|b| b.is_ascii_digit())
+}
+
 /// A month-name date, or None where chrono's parser rejects it.
 fn read_month_name(
     m: &Match<'_, '_>,
@@ -1244,7 +1321,7 @@ fn read_month_name(
     year_check: YearCheck,
 ) -> Option<Reading> {
     let day_text = m.group("d")?;
-    let day = parse_day(day_text, words.ordinals).filter(|d| (1..=31).contains(d))?;
+    let day = parse_day(day_text, words.ordinals).filter(|&d| d <= 31)?;
     // Month first, a day followed by `am` or `pm` is a time.
     let after_day = m.after("d").trim_start();
     if !day_first
@@ -1254,9 +1331,24 @@ fn read_month_name(
     {
         return None;
     }
+    // Month first, a date followed by a colon and a digit is a time ("Nov
+    // 17:00").
+    let ends_on_clock = m
+        .caps
+        .name("post")
+        .and_then(|post| m.text.get(m.from.saturating_add(post.start())..))
+        .is_some_and(|after| {
+            let mut chars = after.chars();
+            chars.next() == Some(':') && chars.next().is_some_and(|c| c.is_ascii_digit())
+        });
+    if !day_first && ends_on_clock {
+        return None;
+    }
     let month = lookup(words.months, m.group("m")?)?;
     let year = match m.group("y") {
         Some(y) if !year_follows_well(year_check, y.trim(), m.after("y")) => return None,
+        Some(y) if counted(m, y) => return None,
+        Some(y) if names_hour(y.trim(), m.after("y")) => None,
         Some(y) => Some(parse_year(y)?),
         None => None,
     };
@@ -1265,11 +1357,37 @@ fn read_month_name(
     if skip_year_like && m.group("d2").is_none() && year.is_none() && year_like {
         return None;
     }
+    // chrono keeps a day of 0 until its last filter, so it still removes
+    // what it overlaps ("9:00-17:00 19 de nov" reads "00 19 de nov").
+    if day == 0 {
+        return Some(Reading::Void);
+    }
     Some(Reading::Date {
         day,
         month,
         year: written_or_nearest(year),
     })
+}
+
+/// Whether the two-digit number `year`, followed by `after`, is an hour a
+/// word or a letter of the hour names ("17 de noviembre 16 h", "16 horas",
+/// "16 Uhr"), not the date's year.
+fn names_hour(year: &str, after: &str) -> bool {
+    const HOURS: [&str; 12] = [
+        "h", "hs", "hrs", "hr", "hora", "horas", "heure", "heures", "ore", "uhr", "uur", "giờ",
+    ];
+    if !(year.len() == 2 && year.bytes().all(|b| b.is_ascii_digit())) {
+        return false;
+    }
+    let rest = after.trim_start_matches([' ', '\u{a0}', '\u{202f}']);
+    let word = rest
+        .get(
+            ..rest
+                .find(|c: char| !c.is_alphabetic())
+                .unwrap_or(rest.len()),
+        )
+        .unwrap_or_default();
+    HOURS.iter().any(|hour| crate::text::same_word(hour, word))
 }
 
 /// A month and a day that may have been written the other way round: a
@@ -1339,11 +1457,23 @@ fn read_slash(m: &Match<'_, '_>, end: usize, day_first: bool) -> Option<Found> {
         return None;
     }
     let (first, second): (u8, u8) = (a.as_str().parse().ok()?, m.group("b")?.parse().ok()?);
+    // A date written with dots is day first wherever it is written.
+    let day_first = day_first || !written.contains(['/', '-']);
     let (month, day) = if day_first {
         (second, first)
     } else {
         (first, second)
     };
+    // chrono keeps a month of 0 until its last filter, so it still removes
+    // what it overlaps ("15.00-0500" is no time).
+    if month == 0 && (1..=31).contains(&day) {
+        return Some(Found {
+            start: index,
+            end,
+            reading: Reading::Void,
+            to: None,
+        });
+    }
     let (month, day) = ordered(month, day)?;
     let year = match year {
         Some(y) => YearOf::Written(likely_ad_year(y.parse().ok()?)),
@@ -1353,6 +1483,7 @@ fn read_slash(m: &Match<'_, '_>, end: usize, day_first: bool) -> Option<Found> {
         start: index,
         end,
         reading: Reading::Date { day, month, year },
+        to: None,
     })
 }
 
@@ -1426,6 +1557,7 @@ fn read_arabic_slash(m: &Match<'_, '_>, end: usize) -> Option<Found> {
         start: index,
         end,
         reading: Reading::Date { day, month, year },
+        to: None,
     })
 }
 
@@ -1462,6 +1594,24 @@ fn read_wide(m: &Match<'_, '_>) -> Option<Reading> {
     })
 }
 
+/// A Japanese slash date. chrono reads month first and, rejecting a first
+/// number past 12, retries one digit in ("13/05" as 3/05); a reader takes
+/// the number that cannot be a month as the day.
+fn read_japanese_slash(m: &Match<'_, '_>, text: &str, start: usize) -> Option<Reading> {
+    if crate::text::char_before(text, start).is_some_and(|c| wide_digit(c).is_some()) {
+        return None;
+    }
+    let Reading::Date { day, month, year } = read_wide(m)? else {
+        return None;
+    };
+    let (day, month) = if month > 12 && m.group("y").is_none() && (1..=12).contains(&day) {
+        (month, day)
+    } else {
+        (day, month)
+    };
+    (month <= 12).then_some(Reading::Date { day, month, year })
+}
+
 /// A Chinese date; one without a day is no date to check.
 fn read_chinese(m: &Match<'_, '_>) -> Option<Reading> {
     let Some(day) = m.group("d") else {
@@ -1496,7 +1646,18 @@ fn extract(parser: &Parser, caps: &Captures<'_>, text: &str, from: usize) -> Opt
                 .map_or(Reading::Other, |&(_, day)| Reading::Weekday(day))
         }
         Kind::Other => Reading::Other,
-        Kind::MonthOnly { full, drop_prefix } => {
+        Kind::MonthOnly {
+            full,
+            drop_prefix,
+            english_year,
+        } => {
+            if english_year
+                && m.group("y").is_some_and(|y| {
+                    !year_follows_well(YearCheck::EnglishYear, y.trim(), m.after("y"))
+                })
+            {
+                return None;
+            }
             let prefix_end = caps.name("prefix").map(|p| from + p.end());
             let text_start = if drop_prefix {
                 prefix_end.unwrap_or(start)
@@ -1512,6 +1673,7 @@ fn extract(parser: &Parser, caps: &Captures<'_>, text: &str, from: usize) -> Opt
                 start: text_start,
                 end,
                 reading: Reading::Other,
+                to: None,
             });
         }
         Kind::MonthName {
@@ -1533,13 +1695,20 @@ fn extract(parser: &Parser, caps: &Captures<'_>, text: &str, from: usize) -> Opt
             year: written_or_nearest(m.group("y").and_then(parse_year)),
         },
         Kind::Japanese => read_wide(&m)?,
+        Kind::JapaneseSlash => read_japanese_slash(&m, text, start)?,
         Kind::Chinese => read_chinese(&m)?,
         Kind::Arabic => read_arabic(&m)?,
         Kind::ArabicSlash => return read_arabic_slash(&m, end),
+    };
+    let to = if let Kind::MonthName { words, .. } = parser.kind {
+        m.group("d2").and_then(|d| parse_day(d, words.ordinals))
+    } else {
+        None
     };
     Some(Found {
         start,
         end,
         reading,
+        to,
     })
 }

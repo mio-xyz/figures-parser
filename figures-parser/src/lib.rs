@@ -5,16 +5,27 @@
 //! returns what a text writes with its byte span, and a comparison, which
 //! takes a reply, the corpus it was written from and, where it matters, the
 //! prompt, and returns the reply's items that no source carries, once each,
-//! as written.
+//! as written. [`memory_grounding`] tells which lines of the memory a turn
+//! preloaded a reply draws on.
 //!
 //! | Kind | Reader | Comparison |
 //! |---|---|---|
-//! | Numbers | [`numbers`], [`extract_numbers`] | [`ungrounded_figures`], [`ungrounded_ratios`], [`prose_arithmetic`], [`Amounts`], [`states_figure`] |
-//! | Links | [`urls`] | [`ungrounded_urls`], [`link_findings`], [`fabricated_urls`], [`mended_links`] |
+//! | Numbers | [`numbers`], [`extract_numbers`], [`stated_figures`], [`printed_figures`], [`numeric_tokens`] | [`ungrounded_figures`], [`ungrounded_ratios`], [`prose_arithmetic`], [`mispaired_per_unit`], [`Amounts`], [`states_figure`] |
+//! | Links | [`urls`], [`placeholder_targets`], [`unopened_links`], [`without_links`] | [`ungrounded_urls`], [`link_findings`], [`fabricated_urls`], [`built_from_corpus`], [`mended_links`], [`undotted_message_link`], [`url_printed_in`] |
 //! | Weekdays beside dates | | [`misdated_weekdays`] |
+//! | Rows beside a date window | | [`rows_outside_window`] |
 //! | Email addresses | [`emails`] | [`ungrounded_emails`] |
-//! | Identifiers | [`identifiers`] | [`ungrounded_identifiers`], [`unseen_tokens`] |
+//! | Identifiers | [`identifiers`] | [`ungrounded_identifiers`], [`unprinted_ids`], [`unseen_tokens`] |
 //! | Durations | [`durations`] | [`ungrounded_durations`] |
+//! | Memory a reply draws on | [`grounding_tokens`] | [`memory_grounding`] |
+//! | A reply's form | [`speaker_prefix`], [`memory_claim`], [`silent_signal`] | [`claims_unwritten_memory`] |
+//! | An agent's own internals | | [`internal_names`], [`InternalsCheck`], [`scrub_memory_layout`] |
+//! | Amounts taken from a worksheet | | [`sheet_findings`] |
+//! | A turn's invariants | | [`evaluate_invariants`], [`claims_unbacked_action`], [`claims_refusal`] |
+//!
+//! [`ground_reply`], [`ground_message`] and [`ungrounded_on_page`] run the checks
+//! a turn runs on a reply, a message it sends and a page it makes, in one
+//! call.
 //!
 //! # Example
 //!
@@ -49,24 +60,47 @@ pub mod date;
 pub mod duration;
 mod email;
 pub mod id;
+mod internals;
+mod invariants;
 mod kind;
+mod memory;
+mod message;
 pub mod number;
+mod page;
+mod reply;
+mod sheet;
 mod text;
 mod url;
 pub mod utf16;
 
-pub use date::misdated_weekdays;
+pub use date::{misdated_weekdays, rows_outside_window};
 pub use duration::{Duration, Length, durations, ungrounded_durations};
 pub use email::{Email, emails, ungrounded_emails};
-pub use id::{Identifier, identifiers, ungrounded_identifiers, unseen_tokens};
+pub use id::{Identifier, identifiers, ungrounded_identifiers, unprinted_ids, unseen_tokens};
+pub use internals::{
+    InternalsCheck, MemoryLayout, Vocabulary, internal_names, scrub_memory_layout,
+};
+pub use invariants::{
+    Invariant, Status, TurnRecord, Verdict, claims_refusal, claims_unbacked_action,
+    claims_unwritten_memory, evaluate_invariants,
+};
 pub use jiff::civil::Date;
 pub use kind::{Kind, UnknownKind};
+pub use memory::{MemoryGrounding, grounding_tokens, memory_grounding};
+pub use message::{Detail, Finding, FindingKind, Grounding, Turn, ground_message, ground_reply};
 pub use number::{
-    Amounts, Figure, Number, Reading, Sign, extract_numbers, numbers, prose_arithmetic,
-    shares_amount, states_figure, ungrounded_figures, ungrounded_ratios,
+    Amounts, Figure, MispairedFigure, Number, NumericToken, PrintedFigures, Reading, Sign,
+    StatedFigure, extract_numbers, mispaired_per_unit, mispaired_per_unit_with, numbers,
+    numeric_tokens, printed_figures, prose_arithmetic, shares_amount, stated_figures,
+    states_figure, ungrounded_figures, ungrounded_ratios, ungrounded_ratios_with,
 };
+pub use page::{HOLDS_PER_PAGE, PageHolds, ungrounded_on_page};
+pub use reply::{SilentSignal, memory_claim, silent_signal, speaker_prefix};
+pub use sheet::{ListedFigure, SheetFindings, SheetRun, sheet_findings};
 pub use url::{
-    LinkFindings, Mended, Url, fabricated_urls, link_findings, mended_links, ungrounded_urls, urls,
+    LinkFindings, Mended, Url, built_from_corpus, fabricated_urls, link_findings, mended_links,
+    placeholder_targets, undotted_message_link, ungrounded_urls, unopened_links, url_printed_in,
+    urls, without_links,
 };
 
 /// The README's examples, run as doc tests so they stay true.

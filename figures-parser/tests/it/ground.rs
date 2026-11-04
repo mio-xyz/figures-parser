@@ -93,7 +93,7 @@ fn flags_a_bare_figure_written_behind_a_currency_sign_from_100_up() {
     );
     assert_eq!(
         ungrounded_figures("About $12.5K, or $8k a month, $99 fee.", ""),
-        vec!["12.5K", "8k"]
+        vec!["$12.5K", "$8k"]
     );
 }
 
@@ -317,9 +317,9 @@ fn reads_a_locales_decimal_a_comma_after_a_dot_grouped_whole_or_alone() {
     );
 }
 
-// "1.250" is 1,250 in Berlin and 1.25 in Boston: both sides read it both
-// ways, so a German amount is checked as the integer it states and a
-// printed value grounds it under either convention.
+// "1.250" is 1,250 in Berlin and 1.25 in Boston: a corpus reads it both
+// ways, while a reply is held to the integer, since "$1,250" never stands
+// for 1.25 and "$194,718" never for 194.
 #[test]
 fn reads_a_single_dot_or_comma_before_three_digits_both_ways() {
     assert_eq!(
@@ -357,16 +357,37 @@ fn keeps_a_figure_apart_from_the_id_version_or_unit_it_sits_in() {
 }
 
 #[test]
-fn grounds_a_figure_that_fits_two_readings_by_either() {
+fn holds_a_figure_that_also_groups_to_its_thousands_reading() {
+    // "$206,788" never states $206.788, so the decimal reading's whole part
+    // is no amount either.
     let reply = "Paid $123.456 in total.";
-    for corpus in ["amount 123456", "amount 123.456", "amount 123"] {
+    for corpus in ["amount 123456", "amount 123.456"] {
         assert_eq!(
             ungrounded_figures(reply, corpus),
             Vec::<String>::new(),
             "{corpus}"
         );
     }
-    assert_eq!(ungrounded_figures(reply, "amount 124"), ["123.456"]);
+    for corpus in [
+        "amount 123",
+        "amount 123.457",
+        "amount 123.46",
+        "amount 124",
+    ] {
+        assert_eq!(ungrounded_figures(reply, corpus), ["123.456"], "{corpus}");
+    }
+    assert_eq!(
+        ungrounded_figures(
+            "Revenue was $250,000 and costs $120,000.",
+            "rows 250, 120 kept"
+        ),
+        ["250,000", "120,000"]
+    );
+    assert_eq!(ungrounded_figures("Revenue $194,718", "194"), ["194,718"]);
+    assert_eq!(
+        ungrounded_figures("Paid $250,000", "250 seats"),
+        ["250,000"]
+    );
 }
 
 #[test]
@@ -487,7 +508,7 @@ fn grounds_a_lone_round_figure_by_a_printed_value_it_rounds_at_two_significant_d
     );
     // A round figure keeps its sign, and a link's digits round nothing.
     assert_eq!(
-        ungrounded_figures("It moved by -3,200.", "delta 3225"),
+        ungrounded_figures("It moved by -3,200.", "delta +3225"),
         ["-3,200"]
     );
     assert_eq!(

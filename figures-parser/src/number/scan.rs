@@ -6,6 +6,7 @@
 use unicode_general_category::{GeneralCategory, get_general_category};
 
 use super::Sign;
+use super::context::{currency_letters_after, currency_letters_before, currency_word_beside};
 use super::digits::digit_value;
 pub use super::readings::Scratch;
 use super::scale::{may_scale, scale_after};
@@ -24,14 +25,31 @@ pub(super) const fn is_decimal_symbol(c: char) -> bool {
 /// and the fullwidth comma and full stop. `tests/it/locales.rs` reads back
 /// the number each locale prints and fails when one prints a symbol missing
 /// here.
+///
+/// Every [plain spacing](is_plain_spacing) is one too.
 #[must_use]
 pub const fn is_symbol(c: char) -> bool {
     if c.is_ascii() {
-        return matches!(c, ',' | '.' | '\'' | ' ');
+        return matches!(c, ',' | '.' | '\'' | ' ' | '_');
     }
     matches!(
         c,
         '\u{2019}' | '\u{a0}' | '\u{202f}' | '\u{66c}' | '\u{66b}' | '\u{ff0c}' | '\u{ff0e}'
+    ) || is_plain_spacing(c)
+}
+
+/// Whether `c` groups digits as the plain space does, only ever into
+/// thousands.
+///
+/// These are the space, the spaces compatibility folds into it (the thin
+/// space SI groups with, the figure space tables align with, the
+/// ideographic space) and the underscore code writes as a digit separator.
+/// The no-break spaces are not: a locale prints them as its own group mark.
+#[must_use]
+pub const fn is_plain_spacing(c: char) -> bool {
+    matches!(
+        c,
+        ' ' | '_' | '\u{2000}'..='\u{200a}' | '\u{205f}' | '\u{3000}'
     )
 }
 
@@ -145,20 +163,36 @@ fn is_currency_code(run: &str, edge: Option<char>) -> bool {
 }
 
 /// Whether a currency sign or code ends the text before byte `start`, with
-/// at most one space between ("$729", "€ 1,458", "USD 99").
+/// at most one space between ("$729", "€ 1,458", "USD 99"). A code set apart
+/// from the figure that also follows another figure is that figure's ("2,685
+/// USD 2026").
 pub(super) fn marked_before(text: &str, start: usize) -> bool {
-    let before = text.get(..start).unwrap_or_default();
-    let before = before.strip_suffix(char::is_whitespace).unwrap_or(before);
-    match char_before(before, before.len()) {
+    let all = text.get(..start).unwrap_or_default();
+    let before = all.strip_suffix(char::is_whitespace).unwrap_or(all);
+    let spaced = before.len() < all.len();
+    let mark_start = match char_before(before, before.len()) {
         Some(c) if c.is_ascii_uppercase() => {
             let head = before.trim_end_matches(|w: char| w.is_ascii_alphanumeric());
-            before
+            let code = before
                 .get(head.len()..)
-                .is_some_and(|run| is_currency_code(run, char_before(head, head.len())))
+                .is_some_and(|run| is_currency_code(run, char_before(head, head.len())));
+            if !code {
+                return false;
+            }
+            head.len()
         }
-        Some(c) => is_currency_sign(c),
-        None => false,
-    }
+        Some(c) => return is_currency_sign(c),
+        None => return false,
+    };
+    !(spaced && follows_figure(text, mark_start))
+}
+
+/// Whether a figure ends right before byte `at` of `text`, with at most one
+/// space between.
+fn follows_figure(text: &str, at: usize) -> bool {
+    let before = text.get(..at).unwrap_or_default();
+    let before = before.strip_suffix(char::is_whitespace).unwrap_or(before);
+    char_before(before, before.len()).is_some_and(is_digit)
 }
 
 /// Whether `c` is a bidi mark a locale writes around a sign: the left-to-right
@@ -284,23 +318,37 @@ pub(super) const fn is_inline_space(c: char) -> bool {
 }
 
 /// Where an approximation mark right before byte `at` starts, with at most
-/// one space of the same line between ("~12", "≈ 12"), standing after no
-/// digit or word letter: after a digit, with or without a space, a tilde is
-/// a range ("10~20", "10 ~ 20").
-fn approximation_at(text: &str, at: usize) -> Option<usize> {
+/// one space of the same line between ("~12", "≈ 12"). A tilde between two
+/// figures ("10~20") marks the second too: whether it reads as a range or
+/// as "about", the figure after it is stated loosely.
+pub(crate) fn approximation_at(text: &str, at: usize) -> Option<usize> {
     let before = text.get(..at)?;
     let mark_end = before_marks(
         text,
         before.strip_suffix(is_inline_space).unwrap_or(before).len(),
     );
     let c = char_before(text, mark_end).filter(|&c| is_approximation_mark(c))?;
-    let start = mark_end.saturating_sub(c.len_utf8());
+    Some(mark_end.saturating_sub(c.len_utf8()))
+}
+
+/// [`approximation_at`], for a mark that [stands apart](stands_apart) from
+/// what is before it: a reader for which "10 ~ 20" is a range and "var~20"
+/// no mark.
+pub(crate) fn approximation_apart(text: &str, at: usize) -> Option<usize> {
+    approximation_at(text, at).filter(|&start| stands_apart(text, start))
+}
+
+/// Whether the approximation mark at byte `start` stands apart from what
+/// is before it: no word letter or digit right before it, and no digit
+/// before the one space between ("10 ~ 20").
+fn stands_apart(text: &str, start: usize) -> bool {
     let edge = before_marks(text, start);
-    let head = text.get(..edge)?;
+    let Some(head) = text.get(..edge) else {
+        return false;
+    };
     let spaced = head.strip_suffix(char::is_whitespace);
-    let joined = char_before(head, edge).is_some_and(is_boundary)
-        || spaced.is_some_and(|h| char_before(h, h.len()).is_some_and(is_digit));
-    (!joined).then_some(start)
+    !(char_before(head, edge).is_some_and(is_boundary)
+        || spaced.is_some_and(|h| char_before(h, h.len()).is_some_and(is_digit)))
 }
 
 /// Whether the text before `start` may hold a sign, an approximation mark, a
@@ -322,7 +370,11 @@ fn may_have_prefix(text: &str, start: usize, prev: char) -> bool {
                 || is_currency_sign(b)
         })
     } else {
-        prev == '(' || is_approximation_mark(prev) || is_bidi_mark(prev) || is_currency_sign(prev)
+        prev == '('
+            || prev.is_alphabetic()
+            || is_approximation_mark(prev)
+            || is_bidi_mark(prev)
+            || is_currency_sign(prev)
     }
 }
 
@@ -334,6 +386,8 @@ pub(super) struct Prefix {
     pub sign: Sign,
     /// Whether an approximation mark stands before it.
     pub approximate: bool,
+    /// Whether that mark stands apart from a word or a figure before it.
+    pub marked_apart: bool,
     /// Where the sign or the approximation mark starts; the token's own
     /// start when neither is written.
     pub from: usize,
@@ -362,30 +416,59 @@ pub(super) fn look_back(text: &str, start: usize, end: usize) -> Prefix {
     Prefix {
         sign,
         approximate: mark.is_some(),
+        marked_apart: mark.is_some_and(|at| stands_apart(text, at)),
         from: mark.or_else(|| signed.map(|(_, at)| at)).unwrap_or(start),
     }
 }
 
+/// Where the currency mark [`marked_after`] reads after byte `end` ends.
+pub(super) fn mark_after_end(text: &str, end: usize) -> Option<usize> {
+    if !marked_after(text, end) {
+        return None;
+    }
+    let after = text.get(end..)?;
+    let after = after.strip_prefix(char::is_whitespace).unwrap_or(after);
+    let lead = char_at(after, 0)?;
+    let len = if lead.is_ascii_uppercase() {
+        3
+    } else {
+        lead.len_utf8()
+    };
+    Some(text.len().saturating_sub(after.len()).saturating_add(len))
+}
+
 /// Whether a currency sign or code opens the text after byte `end`, with at
-/// most one space between ("99 USD", "12 €").
+/// most one space of the same line between ("99 USD", "12 €"), and marks no
+/// figure after it: a mark on the next line opens the figure there.
 pub(super) fn marked_after(text: &str, end: usize) -> bool {
     let after = text.get(end..).unwrap_or_default();
-    let after = after.strip_prefix(char::is_whitespace).unwrap_or(after);
-    match char_at(after, 0) {
+    let after = after.strip_prefix(is_inline_space).unwrap_or(after);
+    let rest = match char_at(after, 0) {
         Some(c) if c.is_ascii_uppercase() => {
             let rest = after.trim_start_matches(|w: char| w.is_ascii_alphanumeric());
             let run_len = after.len() - rest.len();
-            after
+            let code = after
                 .get(..run_len)
-                .is_some_and(|run| is_currency_code(run, char_at(rest, 0)))
+                .is_some_and(|run| is_currency_code(run, char_at(rest, 0)));
+            if !code {
+                return false;
+            }
+            rest
         }
-        Some(c) => is_currency_sign(c),
-        None => false,
-    }
+        Some(c) if is_currency_sign(c) => after.get(c.len_utf8()..).unwrap_or_default(),
+        _ => return false,
+    };
+    // A mark before another figure is that figure's ("12 $13", "12 USD 13").
+    let rest = rest.strip_prefix(char::is_whitespace).unwrap_or(rest);
+    !char_at(rest, 0).is_some_and(is_digit)
 }
 
 /// One numeric token, borrowed from the text it was found in.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag is a fact of its own about the token, not a state"
+)]
 pub struct Token<'a> {
     /// As written, symbols kept.
     pub text: &'a str,
@@ -401,12 +484,24 @@ pub struct Token<'a> {
     pub sign: Sign,
     /// Whether an approximation mark stands before it ("~12,500").
     pub approximate: bool,
+    /// Whether that mark stands apart from a word or a figure before it
+    /// ("~12,500", not "var~12,500" or "10 ~ 20,000").
+    pub marked_apart: bool,
     /// The power of ten a scale word after the digits multiplies it by
     /// ("1.2 million", "12.5K"); 0 without one.
     pub magnitude: u32,
+    /// The other powers the scale word stands for, a bit per power, where
+    /// the token is read at each ("2 billion €" is also 2 × 10¹²).
+    pub(super) also: u16,
+    /// The decimal mark the scale word's language writes, before which a run
+    /// that also reads as thousands reads as a decimal too.
+    pub(super) decimal_mark: Option<char>,
     /// What the sections written after a Han multiplier add to the scaled
     /// digits ("5000万" in "3億5000万"); 0 without them.
     pub(super) rest: u64,
+    /// Whether its digits are read as written beside their scaled reading,
+    /// as a corpus keeps them: a scale read loosely may be a unit ("5 m").
+    pub(super) keeps_digits: bool,
     /// The token through its scale word ("1.2 million"), and through the
     /// sections after a Han multiplier ("3億5000万"); the same as `text`
     /// without one.
@@ -427,6 +522,10 @@ impl Token<'_> {
 
 /// The numeric tokens of a text, found as they are asked for.
 #[derive(Debug, Clone)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag is an option of the scan, set on its own by a builder method"
+)]
 pub struct Tokens<'a> {
     /// The scanned text.
     text: &'a str,
@@ -438,6 +537,13 @@ pub struct Tokens<'a> {
     signs: bool,
     /// Whether a run may end against a word letter ("7,103MW").
     letters: bool,
+    /// Whether scale words are read as a corpus reads them, beside the
+    /// digits' own reading.
+    loose: bool,
+    /// Whether scale words are read at all.
+    scales: bool,
+    /// Whether a scaled token also yields its digits as printed.
+    keep_digits: bool,
 }
 
 /// The numeric tokens of `text`, in order.
@@ -457,6 +563,9 @@ pub const fn tokens(text: &str) -> Tokens<'_> {
         marks: true,
         signs: true,
         letters: false,
+        loose: false,
+        scales: true,
+        keep_digits: false,
     }
 }
 
@@ -489,6 +598,34 @@ impl Tokens<'_> {
         self
     }
 
+    /// These tokens with scale words read loosely, as a corpus prints them:
+    /// an abbreviation in any case and without the currency that tells it
+    /// from a unit in a reply ("5 m", "38.08 Mio"), and a name glued to the
+    /// digits even when it runs into a word ("43Kmembers"). A token with
+    /// such a scale also yields its digits' own readings, since the letters
+    /// may be a unit after all.
+    #[must_use]
+    pub const fn loose_scales(mut self) -> Self {
+        self.loose = true;
+        self
+    }
+
+    /// These tokens with a scaled one also read as its digits as printed:
+    /// "1,250 M€" is 1,250 too, as a print that carries the digits shows.
+    #[must_use]
+    pub const fn keep_digits(mut self) -> Self {
+        self.keep_digits = true;
+        self
+    }
+
+    /// These tokens with no scale word read, so each is its digits as
+    /// printed: "1.2 million" is 1.2.
+    #[must_use]
+    pub const fn without_scales(mut self) -> Self {
+        self.scales = false;
+        self
+    }
+
     /// The next digit at or after `at`, found by byte while the text is
     /// ASCII; None at the end.
     fn next_digit(&self, mut at: usize) -> Option<usize> {
@@ -508,6 +645,131 @@ impl Tokens<'_> {
                 at += c.len_utf8();
             }
         }
+    }
+
+    /// Whether the digits at `start`, glued after the letter `prev`, are an
+    /// amount all the same rather than part of a word: after a currency
+    /// written in letters ("Rp1.250.000", "Kč915", "USD12,500"), or grouped
+    /// into thousands as the digits of no word are ("de3,442,000").
+    fn glued_amount(&self, start: usize, prev: char) -> bool {
+        if !is_letter(prev) {
+            return false;
+        }
+        if currency_letters_before(self.text, start) {
+            return true;
+        }
+        let lead_end = self.digits_end(start);
+        let lead = self
+            .text
+            .get(start..lead_end)
+            .map_or(4, |l| l.chars().count());
+        let Some(symbol) = char_at(self.text, lead_end) else {
+            return false;
+        };
+        let group_start = lead_end.saturating_add(symbol.len_utf8());
+        let group_end = self.digits_end(group_start);
+        lead <= 3
+            && is_symbol(symbol)
+            && !is_plain_spacing(symbol)
+            && self
+                .text
+                .get(group_start..group_end)
+                .is_some_and(|g| g.chars().count() == 3)
+    }
+
+    /// The run of Indian grouping a plain space joins from `start`, two-digit
+    /// groups ending in one of three ("₹1 00 00 000"), where a currency or a
+    /// scale word beside it makes it one amount: the byte of its last space
+    /// and its end. Without one, such a run is a list of small values.
+    fn lakh_run(&self, start: usize) -> Option<(usize, usize)> {
+        let text = self.text;
+        let mut end = self.digits_end(start);
+        if !(1..=2).contains(&text.get(start..end)?.chars().count()) {
+            return None;
+        }
+        let mut twos = 0_usize;
+        loop {
+            let space = char_at(text, end).filter(|&c| is_plain_spacing(c) && c != '_')?;
+            let group_start = end.saturating_add(space.len_utf8());
+            let group_end = self.digits_end(group_start);
+            match text.get(group_start..group_end)?.chars().count() {
+                2 => twos = twos.saturating_add(1),
+                3 if twos > 0 => {
+                    let after = char_at(text, group_end);
+                    let beside = marked_before(text, start)
+                        || marked_after(text, group_end)
+                        || currency_word_beside(text, start, group_end)
+                        || after.is_some_and(|n| {
+                            is_inline_space(n)
+                                && scale_after(text, start, group_end, n, false).is_some()
+                        });
+                    let ends = after.is_none_or(|n| !is_boundary(n));
+                    return (beside && ends).then_some((end, group_end));
+                }
+                _ => return None,
+            }
+            end = group_end;
+        }
+    }
+
+    /// The end of the digit run starting at `start`, `prev` the character
+    /// before it, over every symbol that joins its groups, and where the last
+    /// such symbol stands.
+    fn run_end(&self, start: usize, prev: Option<char>) -> (usize, Option<usize>) {
+        let text = self.text;
+        let mut end = self.digits_end(start);
+        let mut next = char_at(text, end);
+        // Where the last joining symbol stands, once there is one.
+        let mut last_symbol: Option<usize> = None;
+        // Up to four code points of a group, enough to tell three.
+        let len =
+            |from: usize, to: usize| text.get(from..to).map_or(0, |g| g.chars().take(4).count());
+        // Whether a plain space may open thousands grouping: a lead of up
+        // to three digits that is no piece of a date or a time.
+        let lead_end = end;
+        let spaced_lead = || len(start, lead_end) <= 3 && !after_piece(text, start);
+        // Whether every symbol so far is a plain space joining groups of
+        // three, so one may still join the next.
+        let mut spaced_thousands = true;
+        // Extend over `symbol digits+` while a single symbol joins two groups.
+        while let Some(s) = next
+            && is_symbol(s)
+            && char_at(text, end + s.len_utf8()).is_some_and(is_digit)
+        {
+            let plain = is_plain_spacing(s);
+            // An underscore after one before the run joins the pieces of
+            // a name ("run_123_456"), not the groups of a figure.
+            if plain && (!(spaced_thousands && spaced_lead()) || (s == '_' && prev == Some('_'))) {
+                break;
+            }
+            let group_end = self.digits_end(end + s.len_utf8());
+            if plain {
+                if len(end + s.len_utf8(), group_end) != 3 {
+                    if last_symbol.is_none()
+                        && let Some((symbol, run_end)) = self.lakh_run(start)
+                    {
+                        last_symbol = Some(symbol);
+                        end = run_end;
+                    }
+                    break;
+                }
+            } else {
+                // A mark that only groups joins groups of three, and only
+                // to groups it joined before: "1,458\u{a0}5m" is two
+                // figures.
+                let grouped_by_other = last_symbol.is_some_and(|at| char_at(text, at) != Some(s));
+                if !is_decimal_symbol(s)
+                    && (len(end + s.len_utf8(), group_end) != 3 || grouped_by_other)
+                {
+                    break;
+                }
+                spaced_thousands = false;
+            }
+            last_symbol = Some(end);
+            end = group_end;
+            next = char_at(text, end);
+        }
+        (end, last_symbol)
     }
 
     /// The end of the digit run starting at `at`, by byte while it is ASCII.
@@ -536,57 +798,29 @@ impl<'a> Iterator for Tokens<'a> {
             let prev = char_before(text, start);
             // Digits that continue a word ("p1789368220119") or a number
             // already read ("v2.5") are not a token.
-            if prev
-                .is_some_and(|p| continues_word(text, start, p) || continues_number(text, start, p))
-            {
+            if prev.is_some_and(|p| {
+                (continues_word(text, start, p) && !self.glued_amount(start, p))
+                    || continues_number(text, start, p)
+            }) {
                 self.pos = self.digits_end(start);
                 continue;
             }
-            let mut end = self.digits_end(start);
-            let mut next = char_at(text, end);
-            // Where the last joining symbol stands, once there is one.
-            let mut last_symbol: Option<usize> = None;
-            // Up to four code points of a group, enough to tell three.
-            let len = |from: usize, to: usize| {
-                text.get(from..to).map_or(0, |g| g.chars().take(4).count())
-            };
-            // Whether a plain space may open thousands grouping: a lead of up
-            // to three digits that is no piece of a date or a time.
-            let lead_end = end;
-            let spaced_lead = || len(start, lead_end) <= 3 && !after_piece(text, start);
-            // Whether every symbol so far is a plain space joining groups of
-            // three, so one may still join the next.
-            let mut spaced_thousands = true;
-            // Extend over `symbol digits+` while a single symbol joins two groups.
-            while let Some(s) = next
-                && is_symbol(s)
-                && char_at(text, end + s.len_utf8()).is_some_and(is_digit)
-            {
-                if s == ' ' && !(spaced_thousands && spaced_lead()) {
-                    break;
-                }
-                let group_end = self.digits_end(end + s.len_utf8());
-                if s == ' ' {
-                    if len(end + 1, group_end) != 3 {
-                        break;
-                    }
-                } else {
-                    spaced_thousands = false;
-                }
-                last_symbol = Some(end);
-                end = group_end;
-                next = char_at(text, end);
-            }
+            let (mut end, last_symbol) = self.run_end(start, prev);
+            let next = char_at(text, end);
             self.pos = end;
-            let scale = if may_scale(text, end) {
-                next.and_then(|n| scale_after(text, start, end, n))
+            let scale = if self.scales && may_scale(text, end, self.loose) {
+                next.and_then(|n| scale_after(text, start, end, n, self.loose))
             } else {
                 None
             };
             // A run that ends against a word letter ("12.5kg") gives back its
             // last group; a single group against a letter ("2026h") is part of
             // that word and reads as nothing. A corpus keeps the run.
-            if scale.is_none() && !self.letters && next.is_some_and(|n| ends_word(text, end, n)) {
+            if scale.is_none()
+                && !self.letters
+                && next.is_some_and(|n| ends_word(text, end, n))
+                && !currency_letters_after(text, end)
+            {
                 let Some(at) = last_symbol else {
                     continue;
                 };
@@ -606,6 +840,7 @@ impl<'a> Iterator for Tokens<'a> {
                 Prefix {
                     sign: Sign::Unsigned,
                     approximate: false,
+                    marked_apart: false,
                     from: start,
                 }
             };
@@ -616,7 +851,11 @@ impl<'a> Iterator for Tokens<'a> {
                 marked_after: self.marks && marked_after(text, written_end),
                 sign: prefix.sign,
                 approximate: prefix.approximate,
+                marked_apart: prefix.marked_apart,
                 magnitude: scale.map_or(0, |scale| scale.magnitude),
+                also: scale.map_or(0, |scale| scale.also),
+                decimal_mark: scale.and_then(|scale| scale.mark),
+                keeps_digits: (self.loose || self.keep_digits) && scale.is_some(),
                 rest: scale.map_or(0, |scale| scale.rest),
                 written,
                 full: if prefix.from == start {
@@ -654,6 +893,7 @@ mod tests {
                         let none = Prefix {
                             sign: Sign::Unsigned,
                             approximate: false,
+                            marked_apart: false,
                             from: token.start,
                         };
                         assert!(

@@ -51,12 +51,14 @@ comparison reads the whole corpus: the worst case.
 | `ungrounded_identifiers` | The identifier comparison, worst case. |
 | `ungrounded_durations` | The duration comparison, worst case. |
 | `misdated_weekdays` | The weekday check over the corpus as a reply. |
+| `rows_outside_window` | The date-window check over the corpus as a reply. |
 | `ungrounded_ratios` | The ratio comparison, worst case. |
 | `prose_arithmetic` | The arithmetic comparison after a message of four values, worst case. |
 | `ungrounded_ratios/said` | The ratio comparison with the person's thirty numbers, none of whose ratios the reply states. |
 | `amounts/shared_with` | One print matched against amounts read once. |
 | `link_findings` | The link comparison by kind, worst case. |
 | `mended_links` | The link repair, with a dotted message link and an item to link. |
+| `mispaired_per_unit` | The per-unit check with a clause no printed line explains, so every line is read. |
 
 ## Allocations
 

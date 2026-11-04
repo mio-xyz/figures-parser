@@ -2,8 +2,11 @@
 //! reading of one is held to.
 
 mod arithmetic;
+mod context;
 pub mod digits;
 mod ground;
+mod per_unit;
+mod printed;
 mod ratio;
 mod readings;
 mod scale;
@@ -12,7 +15,11 @@ mod spelled;
 
 pub use arithmetic::prose_arithmetic;
 pub use ground::{Amounts, shares_amount, states_figure, ungrounded_figures};
-pub use ratio::ungrounded_ratios;
+pub use per_unit::{
+    MispairedFigure, StatedFigure, mispaired_per_unit, mispaired_per_unit_with, stated_figures,
+};
+pub use printed::{NumericToken, PrintedFigures, numeric_tokens, printed_figures};
+pub use ratio::{ungrounded_ratios, ungrounded_ratios_with};
 
 use std::borrow::Cow;
 use std::collections::VecDeque;
@@ -61,14 +68,15 @@ impl Sign {
     }
 
     /// Whether a corpus figure written with `read` carries a figure stated
-    /// with this sign: a minus needs one that is or may be negative, a plus
-    /// one that is not negative, and none takes either, since a reply may
-    /// put the sign in words ("fell by 12,500").
+    /// with this sign: a minus is contradicted by a plus, a plus by a minus,
+    /// and none takes either. An unsigned corpus figure carries a signed one,
+    /// since a source may put the sign in words ("fell by 12,500", "costs:
+    /// 2,000") where the reply writes it.
     #[must_use]
     pub const fn carried_by(self, read: Self) -> bool {
         match self {
             Self::Unsigned | Self::Parenthesized => true,
-            Self::Minus => matches!(read, Self::Minus | Self::Parenthesized),
+            Self::Minus => !matches!(read, Self::Plus),
             Self::Plus => !matches!(read, Self::Minus),
         }
     }
@@ -96,6 +104,11 @@ pub struct Figure<'a, D> {
     /// A neighbour reading of a run that also reads as thousands: the corpus
     /// may ground with it, the reply never states it.
     pub derived: bool,
+    /// The decimal reading of a run that also reads as thousands ("1,250"
+    /// as 1.25): the corpus may ground with it, and the reply states it only
+    /// before a scale word whose language writes that decimal mark ("8,566
+    /// млрд", "1,250 M€"), since "$206,788" never states $206.788.
+    pub ambiguous: bool,
     /// The sign written before it; of a run's neighbours, only the first has
     /// one.
     pub sign: Sign,
@@ -103,9 +116,25 @@ pub struct Figure<'a, D> {
     /// it ("~12,500"), or a scale word after its digits ("1.2 million"). Of
     /// a run's neighbours, only the first has the mark.
     pub approximate: bool,
+    /// Whether it is stated as an approximate amount, held from 10,000 up
+    /// as a figure with a currency is: a number in words, or a figure after
+    /// an approximation mark that stands apart from the word or figure
+    /// before it ("~12500", not "var~12500"). Of a run's neighbours, only
+    /// the first can be.
+    pub approximate_amount: bool,
+    /// Whether a scale word or multiplier after its digits multiplies it
+    /// ("1.2 million", "12.5K", "3億"); a number in words is not.
+    pub scaled: bool,
+    /// The power of ten that scale word or multiplier stands for in this
+    /// reading ("1.2 million" is read at 6); 0 without one.
+    pub magnitude: u8,
     /// Its text from its sign or approximation mark on ("~-$1.2 million");
     /// the same as `text` when neither stands before it.
     pub full_text: &'a str,
+    /// For a scaled figure, the power of ten its last written digit stands
+    /// for ("34,0M" is written to 10⁵, "1 000 mln" to 10⁶), which the
+    /// trailing zeros of the scaled digits do not show.
+    pub place: Option<u8>,
 }
 
 /// A reading as [`scan::Token::for_each_reading`] yields it: its digits
@@ -143,9 +172,14 @@ impl<'a> From<Reading<'a, '_>> for Number<'a> {
             grouped: r.grouped,
             currency: r.currency,
             derived: r.derived,
+            ambiguous: r.ambiguous,
             sign: r.sign,
             approximate: r.approximate,
+            approximate_amount: r.approximate_amount,
+            scaled: r.scaled,
+            magnitude: r.magnitude,
             full_text: r.full_text,
+            place: r.place,
         }
     }
 }
@@ -244,8 +278,12 @@ impl<'a> Words<'a> {
         }
     }
 
-    /// The next number, when it starts before byte `at`; any, for None.
+    /// The next number, when it starts before byte `at`; any, for None. A
+    /// number that starts inside a token already read ("mil millones" of
+    /// "78.78mil millones") is its scale word, and is dropped.
     fn before(&mut self, at: Option<usize>) -> Option<Spelled> {
+        let covered = self.covered;
+        while self.numbers.next_if(|n| n.span.start < covered).is_some() {}
         let number = self
             .numbers
             .next_if(|n| at.is_none_or(|at| n.span.start < at))?;
@@ -263,7 +301,10 @@ impl<'a> Words<'a> {
                 self.covered = number.span.end;
                 Standing::For(number)
             }
-            _ => Standing::Alone,
+            _ => {
+                self.covered = self.covered.max(token.end());
+                Standing::Alone
+            }
         }
     }
 }
@@ -448,25 +489,38 @@ impl Value {
 impl Around {
     /// The values that round to a figure written as `integer.fraction`, at
     /// the precision it is written with: its last digit for a decimal, its
-    /// last nonzero digit for a whole number ("~12,500" takes 12,450 to
-    /// 12,549). A power of ten with one significant digit takes from where a
-    /// value rounds up to it ("~10,000" takes 9,500 to 14,999). None when the
-    /// bounds overflow.
-    fn of(integer: &str, fraction: Option<&str>) -> Option<Self> {
+    /// last nonzero digit for a whole number ("1.2 million" takes 1,150,000
+    /// to 1,249,999), and at most `place`, the last digit a scaled figure
+    /// was written to ("34,0M" takes 33,950,000 to 34,049,999). A power of ten with one significant digit takes from
+    /// where a value rounds up to it ("10 million" takes 9,500,000 to
+    /// 14,999,999). A figure behind an approximation mark (`marked`) takes a
+    /// whole unit of that digit on either side, both ends included, since
+    /// "~3,440" is as often a figure cut as one rounded ("~12,500" takes
+    /// 12,400 to 12,600). None when the bounds overflow.
+    fn of(integer: &str, fraction: Option<&str>, place: Option<u32>, marked: bool) -> Option<Self> {
         let fraction = fraction.unwrap_or_default();
         let places = u32::try_from(fraction.len()).ok()?;
         let stated = scaled(integer, Some(fraction), places)?;
         let zeros = if fraction.is_empty() && stated != 0 {
-            integer.len() - integer.trim_end_matches('0').len()
+            let zeros = u32::try_from(integer.len() - integer.trim_end_matches('0').len()).ok()?;
+            place.map_or(zeros, |place| zeros.min(place))
         } else {
             0
         };
-        let unit = 10_u128.checked_pow(u32::try_from(zeros).ok()?)?;
-        let half_above = unit.checked_mul(50)?;
-        let half_below = if stated == unit {
-            unit.checked_mul(5)?
+        let unit = 10_u128.checked_pow(zeros)?;
+        let (half_below, half_above) = if marked {
+            let whole = unit.checked_mul(100)?;
+            (whole, whole.checked_add(1)?)
         } else {
-            half_above
+            let half = unit.checked_mul(50)?;
+            (
+                if stated == unit {
+                    unit.checked_mul(5)?
+                } else {
+                    half
+                },
+                half,
+            )
         };
         let scale = places
             .checked_add(2)
@@ -518,11 +572,13 @@ pub(super) fn scaled(integer: &str, fraction: Option<&str>, scale: u32) -> Optio
 
 impl Reading<'_, '_> {
     /// The key a reply states with this reading, or None when it is not held
-    /// to it: a derived reading, a figure under the floor its notation sets,
+    /// to it: a derived reading, the decimal reading of a token that also
+    /// reads as thousands, a figure under the floor its notation sets,
     /// or a bare digit run, which is a code, a zip or an order number as
     /// often as an amount ("541611", "40017731") and is never held to the
-    /// whole turn. A number written in words, with a scale word or after an
-    /// approximation mark is an amount, and is held from 10,000 up. An
+    /// whole turn. A figure with a scale word is a count or an amount, held
+    /// whatever its value ("4K", "3.2M teachers", "0.95k"); a number written in words or
+    /// after an approximation mark is an amount, held from 10,000 up. An
     /// approximate reading is also grounded by a value that rounds to it.
     #[must_use]
     pub fn stated(&self) -> Option<Key> {
@@ -534,7 +590,7 @@ impl Reading<'_, '_> {
     /// carries.
     #[must_use]
     pub fn stated_amount(&self, bare_runs: bool) -> Option<Key> {
-        if self.derived {
+        if self.derived || self.ambiguous {
             return None;
         }
         let value = if let Some(fraction) = self.fraction
@@ -545,11 +601,15 @@ impl Reading<'_, '_> {
                 fraction: fraction.to_owned(),
             }
         } else {
-            let floor = if self.grouped {
+            // A compact scale states an amount whatever its value ("0.95k"),
+            // zero aside; a hundred is a number in words.
+            let floor = if self.magnitude >= 3 {
+                1
+            } else if self.scaled || self.grouped {
                 MIN_SEPARATED_FIGURE
             } else if self.currency {
                 MIN_CURRENCY_FIGURE
-            } else if bare_runs || self.approximate {
+            } else if bare_runs || self.approximate_amount {
                 MIN_BARE_FIGURE
             } else {
                 return None;
@@ -570,7 +630,7 @@ impl Reading<'_, '_> {
     /// exactly.
     #[must_use]
     pub fn result(&self) -> Option<Key> {
-        if self.derived {
+        if self.derived || self.ambiguous {
             return None;
         }
         let count = || self.integer.parse::<u128>().is_ok_and(|n| n <= 10);
@@ -606,8 +666,21 @@ impl Reading<'_, '_> {
             sign: self.sign.stated(),
             around: self
                 .approximate
-                .then(|| Around::of(self.integer, self.fraction))
+                .then(|| {
+                    Around::of(
+                        self.integer,
+                        self.fraction,
+                        self.place.map(u32::from),
+                        self.marked(),
+                    )
+                })
                 .flatten(),
         }
+    }
+
+    /// Whether an approximation mark stands before it ("~12,500"): its full
+    /// text opens with the mark.
+    fn marked(&self) -> bool {
+        self.full_text.starts_with(['~', '\u{223c}', '\u{2248}'])
     }
 }

@@ -261,3 +261,166 @@ pub fn unseen_tokens(reply: &str, corpus: &str, prompt: &str) -> Vec<String> {
     }
     out
 }
+
+/// The shortest body after a typed id's prefix (`prod_` of
+/// `prod_VU49BpM22sWxIM`).
+const MIN_TYPED_BODY: usize = 10;
+
+/// The shortest typed body read in one case: a shorter one is an id only in
+/// mixed case, since a snake-case name (`df_sales2024q1`) holds digits in
+/// lower case alone.
+const MIN_PLAIN_TYPED_BODY: usize = 16;
+
+/// The most `_`-joined words a typed id's prefix holds (`cs_test_` of
+/// `cs_test_a1B2c3D4e5`).
+const MAX_TYPED_PREFIX_WORDS: usize = 3;
+
+/// The words that name an API key's mode, the only ones a typed id's prefix
+/// takes after its first (`cs_test_`, `sk_live_`): any other second word
+/// makes a `snake_case` name a reply coins (`utm_campaign_…`, `user_id_…`).
+const MODE_WORDS: [&str; 3] = ["test", "live", "sandbox"];
+
+/// Whether `run` is a typed id: a prefix of one word of two to eight
+/// lowercase letters, then up to two mode words (`test`, `live`,
+/// `sandbox`), each closed by `_`, then ASCII letters and digits mixing
+/// both, in mixed case or sixteen or more long.
+fn is_typed(run: &str) -> bool {
+    let Some((prefix, body)) = run.rsplit_once('_') else {
+        return false;
+    };
+    let mut words = prefix.split('_');
+    let first = words.next().unwrap_or_default();
+    prefix.split('_').count() <= MAX_TYPED_PREFIX_WORDS
+        && (2..=8).contains(&first.len())
+        && first.bytes().all(|b| b.is_ascii_lowercase())
+        && words.all(|word| MODE_WORDS.contains(&word))
+        && body.len() >= MIN_TYPED_BODY
+        && body.bytes().all(|b| b.is_ascii_alphanumeric())
+        && body.bytes().any(|b| b.is_ascii_digit())
+        && body.bytes().any(|b| !b.is_ascii_digit())
+        && (body.len() >= MIN_PLAIN_TYPED_BODY
+            || (body.bytes().any(|b| b.is_ascii_lowercase())
+                && body.bytes().any(|b| b.is_ascii_uppercase())))
+}
+
+/// Whether `run` is a hex digest: 8 to 64 hexadecimal digits, digits and
+/// letters both.
+fn is_digest(run: &str) -> bool {
+    (8..=64).contains(&run.len())
+        && run.bytes().all(|b| b.is_ascii_hexdigit())
+        && run.bytes().any(|b| b.is_ascii_digit())
+        && run.bytes().any(|b| !b.is_ascii_digit())
+}
+
+/// The byte ranges of `text` its links cover, as blanking each distinct link
+/// everywhere it occurs, longest first, would leave them: a link that starts
+/// another blanks only itself.
+fn link_cover(text: &str) -> Vec<Range<usize>> {
+    let mut links: Vec<&str> = Vec::new();
+    for url in urls(text) {
+        if !links.contains(&url.text) {
+            links.push(url.text);
+        }
+    }
+    links.sort_by_key(|link| std::cmp::Reverse(link.len()));
+    let bytes = text.as_bytes();
+    let mut cover: Vec<Range<usize>> = Vec::new();
+    for link in links {
+        let mut from = 0;
+        while let Some(at) = bytes
+            .get(from..)
+            .and_then(|rest| memchr::memmem::find(rest, link.as_bytes()))
+            .map(|found| from.saturating_add(found))
+        {
+            let end = at.saturating_add(link.len());
+            // A link holds no space, so an occurrence across a blanked link
+            // is none in the blanked text.
+            if cover.iter().any(|r| r.start < end && at < r.end) {
+                from = at.saturating_add(1);
+            } else {
+                cover.push(at..end);
+                from = end;
+            }
+        }
+    }
+    cover
+}
+
+/// The opaque ids `reply` states outside its links that `corpus` never
+/// carries, case aside, once each, as written.
+///
+/// Three shapes are read, each a run of ASCII letters, digits, `_` and `-`
+/// standing on its own: a typed id (`prod_VU49BpM22sWxIM`, `cs_test_…`: a
+/// word of two to eight lowercase letters, then up to two mode words
+/// (`test`, `live`, `sandbox`), each closed by `_`, then ten or more letters
+/// and digits mixing both, in mixed case unless sixteen or more long), a UUID, and a hex digest of 8
+/// to 64 digits mixing digits and letters (a trace id, a commit sha). A run
+/// right after `@` or `#` is a chat mention (`<@U…>`, `<#C…>`), not an id. A
+/// shortened id the corpus carries whole is grounded.
+///
+/// Unlike [`ungrounded_identifiers`], every id read is held to the corpus,
+/// whatever its prefix, inside code too, and no prompt grounds one: no
+/// reasoning or arithmetic yields an opaque id, so one the sources never
+/// printed is invented. The run is read whole, so `prod_…-x` or a key such as
+/// `CORE-1710` is none of the shapes.
+///
+/// # Examples
+///
+/// ```
+/// let reply = "Refunded prod_VU49BpM22sWxIM and prod_Zq81LmN07tYwPa; df_sales2024q1 is a name.";
+/// let corpus = r#"{"id": "prod_VU49BpM22sWxIM"}"#;
+/// assert_eq!(figures_parser::unprinted_ids(reply, corpus), ["prod_Zq81LmN07tYwPa"]);
+/// ```
+#[must_use]
+pub fn unprinted_ids<'r>(reply: &'r str, corpus: &str) -> Vec<&'r str> {
+    let cover = link_cover(reply);
+    let bytes = reply.as_bytes();
+    let mut stated: Vec<&str> = Vec::new();
+    let mut at = 0;
+    while let Some(start) = bytes
+        .get(at..)
+        .and_then(|rest| rest.iter().position(|&b| is_run_byte(b)))
+        .map(|found| at.saturating_add(found))
+    {
+        if let Some(link) = cover.iter().find(|r| r.contains(&start)) {
+            at = link.end;
+            continue;
+        }
+        let stop = cover
+            .iter()
+            .map(|r| r.start)
+            .filter(|&s| s > start)
+            .min()
+            .unwrap_or(bytes.len());
+        at = run_end(bytes, start, is_run_byte).min(stop);
+        // Right after a blanked link the character before is the blank.
+        let after_link = cover.iter().any(|r| r.end == start);
+        let mention = !after_link
+            && matches!(
+                start.checked_sub(1).and_then(|i| bytes.get(i)),
+                Some(b'@' | b'#')
+            );
+        let Some(run) = reply.get(start..at) else {
+            continue;
+        };
+        if !mention && (is_typed(run) || is_uuid(run) || is_digest(run)) && !stated.contains(&run) {
+            stated.push(run);
+        }
+    }
+    if stated.is_empty() {
+        return stated;
+    }
+    // Lowercasing turns the Kelvin sign into `k` and `İ` into `i` and a dot
+    // above, so a corpus holding either is read lowercased as well.
+    let folds = corpus.contains(['\u{212A}', '\u{130}']);
+    let lowered = std::cell::OnceCell::new();
+    stated.retain(|id| {
+        !(corpus.contains(id)
+            || crate::text::contains_ignoring_case(corpus, id)
+            || (folds
+                && lowered
+                    .get_or_init(|| corpus.to_lowercase())
+                    .contains(id.to_ascii_lowercase().as_str())))
+    });
+    stated
+}

@@ -66,11 +66,19 @@ what a text states, with byte spans.
 | [Amounts against one print](#amounts-against-one-print) | `Amounts`, `shares_amount`, `states_figure` | | one print carries the amount |
 | [Ratios](#ratios) | `ungrounded_ratios` | | a ratio or a printed decimal rounds to it, or the person's numbers give it |
 | [Arithmetic in prose](#arithmetic-in-prose) | `prose_arithmetic` | | the corpus prints the same value |
-| [Links](#links) | `ungrounded_urls`, `fabricated_urls` | `urls` | the corpus holds the link, with or without its scheme, its path under no other host, or the ids it was built from |
+| [Per-unit amounts](#per-unit-amounts) | `mispaired_per_unit` | | the clause's own total over its count gives it, or no printed line shows it as another quotient |
+| [Links](#links) | `ungrounded_urls`, `fabricated_urls`, `built_from_corpus` | `urls`, `placeholder_targets`, `unopened_links` | the corpus holds the link, with or without its scheme, its path under no other host, or the ids it was built from |
+| [Addresses read](#addresses-read) | `url_printed_in` | | the text read holds the address, without its scheme or by its path |
 | [Weekdays](#weekdays) | `misdated_weekdays` | | the weekday is the date's own |
+| [Rows under a date window](#rows-under-a-date-window) | `rows_outside_window` | | the row's date falls inside the window its heading names |
 | [Email addresses](#email-addresses) | `ungrounded_emails` | `emails` | the corpus or the prompt carries it, case aside |
-| [Identifiers](#identifiers) | `ungrounded_identifiers` | `identifiers` | the corpus or the prompt carries it |
+| [Identifiers](#identifiers) | `ungrounded_identifiers`, `unprinted_ids` | `identifiers` | the corpus or the prompt carries it |
 | [Durations](#durations) | `ungrounded_durations` | `durations` | the corpus carries the same length, in any form |
+| [Pages](#pages) | `ungrounded_on_page`, `PageHolds` | | the corpus carries its figures, ratios and ids |
+| [Memory](#memory) | `memory_grounding` | `grounding_tokens` | (counts the dossier lines it draws on: two of a line's words and half of them, or three in a row) |
+| [A reply's form](#a-replys-form) | `speaker_prefix`, `memory_claim`, `silent_signal` | | (reads a speaker prefix, a claim to have saved to memory, and the marker that delivers nothing) |
+| [A turn's checks](#a-turns-checks) | `ground_reply`, `ground_message`, `internal_names`, `scrub_memory_layout`, `sheet_findings` | | every check the text is held to passes |
+| [A turn's invariants](#a-turns-invariants) | `evaluate_invariants`, `claims_unbacked_action`, `claims_unwritten_memory`, `claims_refusal` | `speaker_prefix`, `silent_signal` | the reply claims nothing no call made, shows no speaker label, and abstains whole |
 
 ### Numbers
 
@@ -95,8 +103,10 @@ What to expect:
   [Amounts against one print](#amounts-against-one-print)). A thousands
   separator states an amount and is checked from 1,000 up, a currency mark
   from 100 up, and a decimal with four fractional digits or more always. A
-  number in words, with a scale word or after an approximation mark is an
-  amount too, checked from 10,000 up.
+  figure with a scale word ("3.2M teachers", "12k signups", "0.95k") is a
+  count or an amount, checked whatever its value, with or without a
+  currency. A number in words
+  or after an approximation mark is an amount too, checked from 10,000 up.
 - **A link's digits are the link check's.** A timestamp or an id inside a URL
   is no figure; a link's label ("[$206,000](…)") still is.
 - **A printed decimal grounds what it rounds to.** "327.76" grounds "328" as
@@ -110,13 +120,31 @@ What to expect:
   printed 3,225, any value that rounds to it at two significant digits. A
   figure of one significant digit is read at two as well, so "$3,000" takes
   2,950 to 3,049 and not 3,148. "$3,250" states a value and is matched whole.
-- **Signs count.** "-12,500" needs a negative value in the corpus. An
-  unsigned figure takes either sign, since prose often says "fell by 12,500".
-- **Rounded figures match what they round.** "~12,500", "≈ $12,500", "$1.2
-  million" and "twelve thousand five hundred" are grounded by any value that
-  rounds to them, such as 12,487.
-- **Ambiguous notations match either reading.** "1.250" is 1,250 in Berlin
-  and 1.25 in Boston; either value in the corpus grounds it.
+- **Signs count against a sign.** "-12,500" is not grounded by a printed
+  "+12,500", nor "+12,500" by "-12,500". An unsigned value grounds either,
+  since a source says "fell by 12,500" as often as it prints "-12500".
+- **Rounded figures match what they round.** "$1.2 million" and "twelve
+  thousand five hundred" are grounded by any value that rounds to them, such
+  as 1,234,567 and 12,487; a scaled figure rounds at the last digit written,
+  so "34,0M" is 33,950,000 to 34,049,999. A figure behind an approximation mark ("~12,500",
+  "≈ $12,500", "~3M") is grounded within a whole unit of its last nonzero
+  digit, 12,400 to 12,600, since "~" is written as often before a figure cut
+  as before one rounded.
+- **A corpus's scale words are read widely.** "38.08 M", "2,5 Mio", "12 k
+  rows" and "43Kmembers" in a result print values in units, and ground
+  "$38M", "€2,5 Mio.", "$12,000" and "43K"; the digits keep their own reading
+  too, and a name reads at every power a locale gives it ("billion" is also
+  10¹² in French). In a reply, a lone letter after a space needs a
+  currency ("500 m" is a length); one glued on, or a longer abbreviation that
+  is also a unit or a word ("m", "mn", "mi", "md", "bin", "tn"), is a scale
+  unless the words around name the unit: "3.2m users" scales, "took 5m" and
+  "5m tall" do not.
+- **Ambiguous notations.** "1.250" is 1,250 in Berlin and 1.25 in Boston;
+  either value in the corpus grounds a figure. A reply's "$1,250" states
+  1,250, and before a scale word it is a decimal too where the word's
+  language writes that mark: "8,566 млрд", "1,250 Mio." and "1.250 million".
+  Before a letter every locale writes alike it stays thousands: "1,250 M€"
+  is 1,250 million.
 - **A space groups only thousands.** "12 500" is one figure; "1,250,000
   980,000", as a script prints two values, is two.
 
@@ -173,6 +201,10 @@ assert_eq!(ungrounded_ratios(reply, corpus, ""), ["30%"]);
 // The person's own numbers give the share.
 let said = "the funnel: 1000 trials, 420 activated";
 assert!(ungrounded_ratios("58% never activate.", "", said).is_empty());
+
+// Built only when a ratio is left that the corpus does not carry.
+let found = figures_parser::ungrounded_ratios_with("58% never activate.", "", || said);
+assert!(found.is_empty());
 ```
 
 What to expect:
@@ -188,9 +220,9 @@ What to expect:
   percent"), or plain arithmetic over two of their numbers: a quotient or a
   change, as is or in percent.
 - **The size is compared.** "fell 30%" is grounded by "-29.9%".
-- **None and all pass.** 0% and 100% are read off a count, with no division.
 - **One ratio is named once** however its mark is written ("11 %", "11%",
-  "%11").
+  "%11"). A sign one space after a figure is that figure's: "84 % 8,322"
+  states 84%, "2027 %95" states %95.
 - **A size, a hex literal and a product are no multiples:** "1920x1080",
   "0x1F", "3 x 4".
 
@@ -222,6 +254,64 @@ What to expect:
 - **A value must be printed as one.** Trailing zeros aside ("15,325.0" is
   15325), the corpus has to print the same value: a group of a thousands run
   ("524" of "$1,524") or a piece of a time does not ground it.
+
+### Per-unit amounts
+
+`mispaired_per_unit(reply, corpus)` returns the per-unit amounts a reply
+states beside a total and a count that do not give them, when a printed line
+shows the amount is another total over the same count: a cost per lead from
+the lifetime window set beside yesterday's spend and leads. Each finding
+names the amount, the quotient the clause's own figures give, and the print
+it came from.
+
+```rust
+use figures_parser::mispaired_per_unit;
+
+let printed = "LT: $91.65 / 2 leads / CPL $45.83 | Y: $74.74 / 2 leads";
+let found = mispaired_per_unit("$74.74 spend, 2 leads, $45.83 CPL.", printed);
+assert_eq!(
+    (found[0].per_unit.as_str(), found[0].stated.as_str(), found[0].printed.as_str()),
+    ("$45.83", "$74.74 / 2 = $37.37", "$91.65 / 2")
+);
+assert!(mispaired_per_unit("$74.74 spend, 2 leads, $37.37 CPL.", printed).is_empty());
+```
+
+What to expect:
+
+- **A clause is a sentence or a line** holding two amounts behind a currency
+  mark and a whole count of two or more.
+- **The print, not a word, shows a quotient.** No word list is read: the
+  amount is held only when one printed line carries it, the count, and a
+  larger amount that the count divides into it.
+- **Its own total and count clear it.** "$1,679 lifetime, 24 leads, $69.98
+  CPL" passes, the total being cut or rounded ("$1,680").
+- **Round amounts pass.** A per-unit amount of fewer than three significant
+  digits ("$100") is one some amount over some count lands on by chance.
+- **Two per-unit amounts side by side are two**, not a total and its
+  quotient.
+- **The corpus may come late.** `mispaired_per_unit_with(reply, || corpus)`
+  builds it only once a clause holds a candidate.
+
+### Readers for other checks
+
+`stated_figures(clause)` gives the figures a reply's clause states, with
+their values, places and currency marks; `printed_figures(line)` every value
+a printed line holds, and apart its amounts; `numeric_tokens(text, loose)`
+each numeric token of a result with its values. `sheet_findings(reply, runs)` walks a turn's
+script runs for the worksheet checks: the rows a run listed beside a total
+that the reply leaves unstated, and the amounts it took from a worksheet no
+check listed.
+
+```rust
+use figures_parser::{ListedFigure, SheetRun, sheet_findings, stated_figures};
+
+let read: Vec<_> = stated_figures("$74.74 spend, 2 leads").iter().map(|f| f.value).collect();
+assert_eq!(read, [74.74, 2.0]);
+
+let listed = [ListedFigure { figure: "19,851", name: "row 6 TOTAL" }];
+let run = SheetRun { stdout: "total | 19,850", lists_its_rows: true, listed: &listed, ..SheetRun::default() };
+assert_eq!(sheet_findings("2027 holds $19,850.", &[run]).unstated, listed);
+```
 
 ### Links
 
@@ -269,13 +359,42 @@ assert!(fabricated_urls("Open https://acme.io/new.", "", &["acme.io"]).is_empty(
 ```
 
 `urls(text)` finds http(s) links, the `<url|label>` wrapping chat apps use and markdown links
-included, without the markup around them.
+included, without the markup around them. `placeholder_targets(text)` lists
+the link targets that are no URL (a template word, a file's name), and
+`unopened_links(text, opened)` the pages a message links, once each, less the
+chat's own links and those already opened; `without_links(text)` the text
+with every link put out as a space, wherever it recurs. `built_from_corpus(url, corpus,
+hosts)` is the test for a link a reply may build, and
+`undotted_message_link(url)` the repair `mended_links` makes to a message link.
+
+### Addresses read
+
+`url_printed_in(url, read)` tells whether an address a caller fetched was
+given or put together: it is true when `read` (every page, message and tool
+result read so far) holds the address whole, without its scheme
+("acme.com/blog/post"), or as the path a page links it by ("/blog/post").
+The address is parsed as a browser parses it: the host lowercased and
+without a leading `www.`, the path normalized and without a trailing `/`,
+the query kept and the fragment dropped. A failed read of an address no text
+printed says nothing about the site, since the address was built, often from
+a page's title.
+
+```rust
+use figures_parser::url_printed_in;
+
+let url = "https://acme.com/blog/when-marking-runs-late";
+assert!(url_printed_in(url, "[When marking runs late](/blog/when-marking-runs-late)"));
+assert!(!url_printed_in(url, "## The Journal\n## When marking runs late"));
+```
 
 ### Weekdays
 
 `misdated_weekdays(reply, today)` finds each weekday written beside a date
 and names the pairs whose weekday is wrong. `today` gives a date without a
-year its year. It reads 15 languages, Arabic included (see
+year its year. A weekday beside a bare day number ("mardi 4", "Tue 4th") is
+wrong when no date from three weeks before `today` to five weeks after it
+with that number falls on it; the finding names the nearest such date. It
+reads 15 languages, Arabic included (see
 [Language support](#language-support)).
 
 ```rust
@@ -289,6 +408,39 @@ assert_eq!(
 assert_eq!(
     misdated_weekdays("الاجتماع يوم الجمعة ٢٦ سبتمبر ٢٠٢٦", today),
     [r#""يوم الجمعة ٢٦ سبتمبر ٢٠٢٦" (2026-09-26 is a Saturday)"#]
+);
+
+// 2026-11-04 is a Wednesday; the Tuesday the 4th was in 2025.
+let today: Date = "2026-10-30".parse().unwrap();
+assert_eq!(
+    misdated_weekdays("Call on Tue 4 at 5pm", today),
+    [r#""Tue 4" (2026-11-04 is a Wednesday)"#]
+);
+// A count, an hour or a month date after the number is no bare day.
+assert!(misdated_weekdays("Monday 3 meetings, Tue 4 pm", today).is_empty());
+```
+
+### Rows under a date window
+
+`rows_outside_window(reply, today)` reads a table or list under a heading
+that names a range of dates ("past week (Oct 23-30)", "Oct 19 to Oct 26",
+"19-26 oct.") or a day with a range of hours ("Nov 4, 9:00-17:00") and
+names the rows whose leading date falls outside it. A row
+is a table row, read by its first cell, or a list item, read by what follows
+its bullet or number. A blank line, a label ending in a colon or an
+emphasised line keeps the window open; other prose closes it. It reads the
+languages the weekday check reads, Arabic aside.
+
+```rust
+use figures_parser::{Date, rows_outside_window};
+
+let today: Date = "2026-10-30".parse().unwrap();
+let reply = "Your posts from the past week (Oct 23–30):\n\
+             | Oct 29 | Sixteen plays | 39 |\n\
+             | Oct 20 | Paid ads through Slack | 540 |";
+assert_eq!(
+    rows_outside_window(reply, today),
+    [r#""Oct 20" under "Oct 23-30""#]
 );
 ```
 
@@ -329,30 +481,185 @@ assert_eq!(
 );
 ```
 
+`unprinted_ids(reply, corpus)` is the stricter check for opaque ids, which
+no reasoning yields: every typed id (`prod_VU49BpM22sWxIM`, `cs_test_…`: a
+lowercase prefix, a mode word such as `test` or `live` allowed after it, and a mixed body), UUID and hex digest the reply states outside its
+links is held to the corpus, whatever its prefix and inside code too. A run
+right after `@` or `#` is a chat mention and is left alone.
+
+```rust
+use figures_parser::unprinted_ids;
+
+let corpus = r#"{"id": "prod_TQ81xLmN20aB7c"}"#;
+assert_eq!(
+    unprinted_ids("Created prod_TQ81xLmN20aB7c and prod_VU49BpM22sWxIM.", corpus),
+    ["prod_VU49BpM22sWxIM"]
+);
+```
+
 `identifiers(text)` reads them. `unseen_tokens(reply, corpus, prompt)`
 returns long mixed tokens no source carries, for measurement only: they share
 their shape with product and model names, so they are never reported as
 errors.
 
+### Memory
+
+`memory_grounding(response, dossiers)` counts the lines of the dossiers a
+turn preloaded that a reply visibly draws on: it shares two or more of a
+line's distinctive words and half of them, or repeats three of them in a
+row. `grounding_tokens(text)` gives the words compared.
+
+```rust
+use figures_parser::memory_grounding;
+
+let dossier = "# Ana\nPrefers async standups at 10:00";
+assert!(memory_grounding("Standup at 10:00, async as Ana prefers.", &[dossier]).grounded);
+```
+
+### A reply's form
+
+`speaker_prefix(reply)` gives the `[Name]: ` prefix a reply's first line
+opens with, the history's speaker format echoed. `memory_claim(reply)` gives
+a claim to have saved something to memory ("I'll remember", "saved that to
+your preferences"), for the caller to hold to the memory writes the turn
+made. `silent_signal(raw)` reads the `silent: <reason>` marker a run writes
+to deliver nothing, and whether it leaked into a longer body.
+
+```rust
+use figures_parser::{memory_claim, silent_signal, speaker_prefix};
+
+assert_eq!(speaker_prefix("[Ana]: hello"), Some("[Ana]: "));
+assert_eq!(memory_claim("I've saved it to the wiki."), None);
+assert!(silent_signal("Summary.\nsilent: no_signal").is_some_and(|s| s.leaked));
+```
+
 ### Durations
 
 `ungrounded_durations(reply, corpus, prompt)` returns the lengths of time the
-corpus does not carry. A reply's "1h30" is grounded by "90 minutes",
-`PT1H30M`, `1:30:00` or `"elapsed_ms": 5400000`. Words and phrases are read
-in English, French, Spanish, Italian, Portuguese and Arabic ("an hour and a
-half", "deux heures et demie", "ساعة ونصف").
+corpus does not carry. A reply's "1h30m" is grounded by "90 minutes",
+`PT1H30M`, "took 1:30:00" or `"elapsed_ms": 5400000`, and its "6-minute" by
+"350 seconds", which rounds to it; "~5 minutes" takes a minute either way, and
+"10–30 min" any length inside it. Words and phrases are read in English,
+French, Spanish, Italian, Portuguese and Arabic ("an hour and a half",
+"deux heures et demie", "ساعة ونصف"), and a second, a minute and an hour in
+seventeen more languages ("5 Minuten", "2 часа", "3時間", "5 minuuttia"),
+in the digits of any script and the grouping of any locale ("३ घंटे", "1 250
+secondes").
 
 ```rust
 use figures_parser::ungrounded_durations;
 
 let corpus = r#"{"elapsed_ms": 5400000}"#;
 assert_eq!(
-    ungrounded_durations("The job ran 1h30, then 45 minutes.", corpus, ""),
+    ungrounded_durations("The job ran 1h30m, then 45 minutes.", corpus, ""),
     ["45 minutes"]
+);
+
+let corpus = "duration: 350 seconds";
+assert_eq!(
+    ungrounded_durations("A 6-minute walkthrough and a 2-minute recap.", corpus, ""),
+    ["2-minute"]
 );
 ```
 
 `durations(text)` reads them, each with its length.
+
+### Pages
+
+`ungrounded_on_page(text, corpus, said, pixel_only)` returns the figures,
+ratios and opaque ids of a page rendered for a person that the corpus does
+not carry: the page is held to what was read, as a sent message is, and
+nothing is checked on a turn that read pixels only. `PageHolds` decides
+which renders to hold back for them, file by file: a page is held back for a
+claim the run was not told about for that file, and a file at most
+`HOLDS_PER_PAGE` times, so a page whose figures are placeholders on purpose
+costs one render more, never a loop.
+
+```rust
+use figures_parser::{PageHolds, ungrounded_on_page};
+
+let page = "Activation up 12% on 1,840 sign-ups.";
+let claims = ungrounded_on_page(page, "signups 1840", "", false);
+assert_eq!(claims, ["12%"]);
+
+let mut holds = PageHolds::default();
+assert!(holds.hold("mockup.png", &claims));
+assert!(!holds.hold("mockup.png", &claims));
+```
+
+### A turn's checks
+
+`ground_message(text, turn)` runs every check a sent message is held to, in
+one call: its links mended and its memory layout put in plain words, then
+links, figures, ids, ratios, per-unit amounts, sheet amounts, weekdays, date
+windows and the agent's own internals, each finding keyed by its kind.
+`ground_reply` is the same for a reply before it is delivered;
+[`ungrounded_on_page`](#pages) holds a page to its figures, ratios and ids.
+
+```rust
+use figures_parser::{MemoryLayout, Turn, ground_message};
+
+let turn = Turn {
+    corpus: "revenue 194,718",
+    prompt: "",
+    said: "",
+    today: "2026-10-20".parse().unwrap(),
+    pixel_only: false,
+    hosts: &[],
+    attached: &|_| false,
+    layout: &MemoryLayout::default(),
+    internals: None,
+    vouching: "",
+    runs: &[],
+};
+let keys: Vec<String> = ground_message("Revenue of $188,027.", &turn)
+    .findings.iter().map(|f| f.key()).collect();
+assert_eq!(keys, ["figure:188,027"]);
+```
+
+The parts run alone too. `internal_names(reply, said, vocabulary, vouching)`
+returns the names of the agent's machinery a reply shows that no person
+wrote: its tools (`web_search`, or `learn` written as a call), its memory
+files, the directories and variables its code runs under.
+`scrub_memory_layout(reply, said, layout)` puts the memory paths, file names
+and tool names in plain words. `sheet_findings(reply, runs)` returns the rows a
+checking helper listed that the reply leaves unstated and the amounts it took
+off a sheet with no such helper (see [Readers for other checks](#readers-for-other-checks)).
+
+```rust
+use figures_parser::{Vocabulary, internal_names};
+
+let vocabulary = Vocabulary {
+    names: &["web_search", "learn"],
+    files: &["workspace.md"],
+    roots: &["/memory/"],
+    fixed: &[],
+};
+assert_eq!(
+    internal_names("I'll learn the API, then call web_search.", "", &vocabulary, ""),
+    ["web_search"]
+);
+```
+
+### A turn's invariants
+
+`evaluate_invariants(turn, invariants)` gives each invariant a turn is held
+to a verdict: no action claimed that no write call or pending action stands
+behind, no link no tool result printed (a link built on one of the turn's
+`hosts` from what it read passes, as the link check lets it), no `[Name]:`
+speaker label on the
+first line, an abstention marker (`silent: <reason>`) that is the whole
+reply, the step budget kept, and no memory save claimed that no memory write
+made. An invariant whose input the turn lacks is not evaluable. Each check
+runs alone too, and reads a reply's form with the readers of
+[A reply's form](#a-replys-form).
+
+```rust
+use figures_parser::{claims_unbacked_action, claims_unwritten_memory};
+
+assert!(claims_unbacked_action("I've created the ticket.", 0, &["web_search"]));
+assert!(claims_unwritten_memory("Noted, I’ll remember that.", &[]));
+```
 
 ## From Node
 
@@ -380,15 +687,26 @@ npm install @mio-xyz/figures-parser
 const fp = require("@mio-xyz/figures-parser");
 
 fp.ungroundedFigures(reply, corpus);             // ["48,200"]
-fp.amountsSharedWith(reply, [print1, print2]);   // [["19,850"], []]; also sharesAmount, statesFigure
-fp.ungroundedRatios(reply, corpus, said);        // ["30%"]
+[print1, print2].map(fp.amountsSharedWith(reply)); // [["19,850"], []]; also sharesAmount, statesFigure
+fp.ungroundedRatios(reply, corpus, said);        // ["30%"]; said may be () => string
 fp.proseArithmetic(reply, message, corpus);      // ["61,300"]
+fp.mispairedPerUnit(reply, corpus);              // [{ perUnit, stated, printed }]; corpus may be () => string
+fp.sheetFindings(reply, runs);                   // { listed, unstated, unchecked }
+fp.statedFigures(clause);                        // also printedFigures, numericTokens, withoutLinks
 fp.ungroundedUrls(reply, corpus, prompt, hosts); // also fabricatedUrls, linkFindings
-fp.mendedLinks(reply, corpus); // { text, mends }
+fp.mendedLinks(reply, corpus); // { text, mends }; also undottedMessageLink, builtFromCorpus
+fp.unopenedLinks(message, opened);               // also placeholderTargets, urlPrintedIn
+fp.memoryGrounding(reply, notes);                // { preloadedLines, groundedLines, grounded }
 fp.misdatedWeekdays(reply, "2026-10-09");
 fp.ungroundedEmails(reply, corpus, prompt);
 fp.ungroundedIdentifiers(reply, corpus, prompt); // also unseenTokens
 fp.ungroundedDurations(reply, corpus, prompt);
+fp.ungroundedOnPage(text, corpus, said, pixelOnly);
+new fp.PageHolds().hold("mockup.png", claims); // true: hold the page back
+
+fp.groundMessage(text, { corpus, today: "2026-10-20", layout, vocabulary }, attached); // { ok, text, mends, findings }
+fp.groundReply(text, turn, attached);
+fp.internalNames(reply, said, vocabulary, vouching); fp.scrubMemoryLayout(reply, said, layout);
 
 // Every item with its place in the input; kinds: number, url, email, id, duration.
 fp.extract("Fee $1,250 at https://acme.io/x", { kinds: ["number", "url"] });
@@ -415,12 +733,12 @@ in one forward pass, as the binding does.
 
 | Kind | Languages and scripts |
 |---|---|
-| Numbers | Any language: digits of every script Unicode encodes, and the separators every CLDR locale prints, Indian grouping included. Scale words and numbers in words: English, French, German, Spanish, Italian, Portuguese, lakh and crore, and Han numerals. |
+| Numbers | Any language: digits of every script Unicode encodes, and the separators every CLDR locale prints, Indian grouping included. Scale words: English, French, German, Spanish, Italian, Portuguese, Dutch, Polish, Swedish, Turkish, Indonesian, Vietnamese, Russian, Arabic, Persian, Hebrew, Hindi, Thai, lakh and crore, and Han and Hangul multipliers. Numbers in words: English, French, German, Spanish, Italian, Portuguese and Han numerals. |
 | Links | Any language, internationalized domain names included. |
-| Weekdays | English, French, German, Spanish, Italian, Portuguese, Dutch, Swedish, Finnish, Russian, Ukrainian, Japanese, Chinese (simplified and traditional), Vietnamese and Arabic (the month names of every Arab country, Arabic-Indic digits). |
+| Weekdays and date windows | English, French, German, Spanish, Italian, Portuguese, Dutch, Swedish, Finnish, Russian, Ukrainian, Japanese, Chinese (simplified and traditional), Vietnamese and Arabic (the month names of every Arab country, Arabic-Indic digits). |
 | Email addresses | Any language, a local part outside ASCII included. |
 | Identifiers | ASCII letters, digits, `-` and `_`, whatever the language around them. |
-| Durations | English, French, Spanish, Italian, Portuguese and Arabic for words; unit symbols (`ms`, `s`, `h`, `d`, `w`, `y`) in any language. |
+| Durations | English, French, Spanish, Italian, Portuguese and Arabic for words; seconds, minutes and hours under their CLDR names in German, Dutch, Polish, Swedish, Turkish, Indonesian, Vietnamese, Russian, Hebrew, Persian, Hindi, Japanese, Korean, Chinese and Thai too; unit symbols (`ms`, `s`, `h`, `d`, `w`, `y`) in any language. |
 
 ## Documentation
 

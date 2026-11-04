@@ -1,4 +1,4 @@
-use figures_parser::urls;
+use figures_parser::{unopened_links, urls, without_links};
 
 /// The link check with no integration hosts declared.
 fn fabricated_urls<'r>(reply: &'r str, corpus: &str) -> Vec<&'r str> {
@@ -342,14 +342,139 @@ fn a_prompt_link_grounds_a_reply_link_except_on_an_example_domain() {
     );
 }
 
-// linkify reads a host only under a top-level domain of two letters or more,
-// which every real one has; a host without a dot or an address still counts.
+// A host is read as linkify-it reads one after a scheme: any run of labels,
+// one letter long or an address included, and a port up to 65535.
 #[test]
-fn a_host_under_a_one_letter_top_level_domain_is_not_a_link() {
-    assert_eq!(texts("https://a.b/c"), Vec::<&str>::new());
+fn reads_a_host_of_any_labels_and_a_port_as_linkify_it_does() {
+    assert_eq!(texts("https://a.b/c"), ["https://a.b/c"]);
     assert_eq!(
         texts("http://localhost:3000/x and http://10.0.0.1/y"),
         ["http://localhost:3000/x", "http://10.0.0.1/y"]
+    );
+    assert_eq!(texts("http://acme.io:65535/x"), ["http://acme.io:65535/x"]);
+    // A port past 65535, or a host a dash or an underscore closes, is no link.
+    for none in [
+        "http://acme.io:65536/x",
+        "https://acme.io-",
+        "https://acme_x.io/a",
+    ] {
+        assert_eq!(texts(none), Vec::<&str>::new(), "{none}");
+    }
+}
+
+// A bracket that closes nothing ends a link, and one the path opens and
+// closes stays in it, as linkify-it reads them.
+#[test]
+fn ends_a_link_at_a_bracket_that_closes_nothing() {
+    assert_eq!(
+        texts("(see https://acme.io/a(b)/c) and https://acme.io/d(日本"),
+        ["https://acme.io/a(b)/c", "https://acme.io/d"]
+    );
+    assert_eq!(
+        texts("https://acme.io/x)https://acme.io/y"),
+        ["https://acme.io/x", "https://acme.io/y"]
+    );
+}
+
+// An ftp link and a link without a scheme are read as linkify-it reads
+// them, so a link inside one is part of it.
+#[test]
+fn reads_no_link_inside_another_scheme_s() {
+    assert_eq!(texts("ftp://acme.io/https://b.io/x"), Vec::<&str>::new());
+    assert_eq!(texts("(//acme.io/https://b.io/x)"), Vec::<&str>::new());
+}
+
+// linkify-it reads a user name as the host ("https://user"), so the link
+// ends before the `@`; the host is the one after it.
+#[test]
+fn reads_a_user_name_before_the_host() {
+    assert_eq!(
+        texts("Open https://user@acme.io/settings now."),
+        ["https://user@acme.io/settings"]
+    );
+    // Marks no user name takes unescaped are no user name.
+    assert_eq!(
+        texts("https://www.github.com\"@the"),
+        ["https://www.github.com"]
+    );
+    assert_eq!(texts("https://docs.acme.io<@x"), ["https://docs.acme.io"]);
+}
+
+// linkify-it reads the label of a chat link whose `<` is missing, a
+// markdown link's label written right after a link, and a backtick, as part
+// of the link: each ends it here.
+#[test]
+fn ends_a_link_where_chat_or_markdown_syntax_opens() {
+    assert_eq!(
+        texts("https://acme.io/88a|the doc> later"),
+        ["https://acme.io/88a"]
+    );
+    assert_eq!(
+        texts("https://acme.io/88a\\|the doc>"),
+        ["https://acme.io/88a"]
+    );
+    assert_eq!(
+        texts("https://acme.io/x[docs](https://b.io/y)"),
+        ["https://acme.io/x", "https://b.io/y"]
+    );
+    assert_eq!(texts("https://acme.io/a``,issue"), ["https://acme.io/a"]);
+    // A pipe no label follows stays in the link, as some links hold one.
+    assert_eq!(
+        texts("https://fonts.example.org/css?family=Roboto|Open+Sans"),
+        ["https://fonts.example.org/css?family=Roboto|Open+Sans"]
+    );
+}
+
+// A `>` later in the sentence that is an arrow, a comparison or `>=` closes
+// no chat label, so the pipe before it stays in the link, as linkify-it
+// reads it, and an invented link is not cut down to one the corpus holds.
+#[test]
+fn reads_on_through_a_pipe_when_the_later_angle_bracket_is_prose() {
+    let reply = "Fonts: https://fonts.example.org/css?family=Roboto|Inter -> used on the site";
+    assert_eq!(
+        texts(reply),
+        ["https://fonts.example.org/css?family=Roboto|Inter"]
+    );
+    assert_eq!(
+        fabricated_urls(reply, "https://fonts.example.org/css?family=Roboto"),
+        ["https://fonts.example.org/css?family=Roboto|Inter"]
+    );
+    assert_eq!(
+        texts("https://acme.io/blog/(draft|v2) -> published"),
+        ["https://acme.io/blog/(draft|v2)"]
+    );
+    assert_eq!(
+        texts("https://grafana.acme.io/d/abc?var-env=prod|staging (filter > 5)"),
+        ["https://grafana.acme.io/d/abc?var-env=prod|staging"]
+    );
+    assert_eq!(
+        texts("https://acme.io/q?a=1|2 => b and x|y>=3"),
+        ["https://acme.io/q?a=1|2"]
+    );
+    assert_eq!(
+        texts("https://acme.io/q?a=1|b>=3"),
+        ["https://acme.io/q?a=1|b"]
+    );
+    assert_eq!(
+        texts("https://acme.io/88a|the doc>."),
+        ["https://acme.io/88a"]
+    );
+    // A `)` the label never opened closes a group the link opened.
+    assert_eq!(
+        texts("https://acme.io/blog/(draft|v2)>."),
+        ["https://acme.io/blog/(draft|v2)"]
+    );
+}
+
+// A link read where linkify-it reads none (glued to a letter, or after a
+// scheme that opens no link, which linkify-it then skips past) never takes
+// in one linkify-it reads on its own.
+#[test]
+fn a_glued_link_ends_before_a_link_linkify_it_reads() {
+    assert_eq!(texts("http:https://b.io/x"), ["https://b.io/x"]);
+    assert_eq!(
+        texts("😀https://acme.io/x=;https://b.io/y"),
+        ["https://acme.io/x=", "https://b.io/y"]
     );
 }
 
@@ -614,6 +739,31 @@ const PR: &str = "https://github.com/mio-xyz/coworker/pull/3647";
 const DOTTED: &str = "https://mioxyz.slack.com/archives/C09R2NX3D1R/p1791180327.741099";
 const UNDOTTED: &str = "https://mioxyz.slack.com/archives/C09R2NX3D1R/p1791180327741099";
 
+// A link no browser opens (a port past 65535, a host it rejects, an
+// unclosed address) links no item, so a number's label on it is misdirected.
+#[test]
+fn takes_a_number_on_a_link_that_does_not_parse_as_misdirected() {
+    let reply = "[#12](https://acme.io:65536/org/prod_VU49Bp) ; [#12](https://%zz.io/org/a1b) ; [#12](https://[::1/x1y)";
+    assert_eq!(
+        figures_parser::link_findings(reply, "", "", &[]).misdirected,
+        [
+            "[#12](https://acme.io:65536/org/prod_VU49Bp)",
+            "[#12](https://%zz.io/org/a1b)",
+            "[#12](https://[::1/x1y)"
+        ]
+    );
+    assert_eq!(
+        figures_parser::link_findings("[#12](https://acme.io:8080/org/prod_VU49Bp)", "", "", &[])
+            .misdirected,
+        Vec::<&str>::new()
+    );
+    // A host of ASCII labels whose punycode does not decode still parses.
+    assert_eq!(
+        figures_parser::link_findings("[#12](https://xn--zz.io/org/a1b)", "", "", &[]).misdirected,
+        Vec::<&str>::new()
+    );
+}
+
 #[test]
 fn keeps_the_findings_apart_by_kind_and_lists_them_as_the_flat_check_does() {
     let reply =
@@ -700,4 +850,397 @@ fn a_mended_reply_passes_the_check_and_names_each_repair_made() {
         mended.mends,
         [format!("{DOTTED} → {UNDOTTED}"), format!("#3647 → {PR}")]
     );
+}
+
+#[test]
+fn an_address_is_printed_whole_without_its_scheme_or_by_its_path() {
+    use figures_parser::url_printed_in;
+    let url = "https://www.acme.com/blog/when-marking-runs-late/";
+    for read in [
+        "[When marking runs late](/blog/when-marking-runs-late)",
+        "see acme.com/blog/when-marking-runs-late",
+        "<https://www.acme.com/blog/when-marking-runs-late/>",
+    ] {
+        assert!(url_printed_in(url, read), "{read}");
+    }
+    // A site's root the asker gave without a scheme.
+    assert!(url_printed_in(
+        "https://acme.com",
+        "the site is live on <http://acme.com|acme.com>"
+    ));
+}
+
+#[test]
+fn an_address_built_from_a_title_is_not_printed() {
+    use figures_parser::url_printed_in;
+    let read = "the site is live on acme.com\n## The Journal\n## When marking runs late\n\
+                ![](/blog-images/marking.jpg)";
+    assert!(!url_printed_in(
+        "https://acme.com/blog/when-marking-runs-late",
+        read
+    ));
+    assert!(!url_printed_in("https://acme.com", "nothing"));
+}
+
+#[test]
+fn an_address_is_compared_as_a_browser_parses_it() {
+    use figures_parser::url_printed_in;
+    assert!(url_printed_in("https://ACME.com/x", "acme.com/x"));
+    assert!(url_printed_in("https://acme.com:443/x", "acme.com/x"));
+    assert!(url_printed_in("https://acme.com:8080/x", "acme.com:8080/x"));
+    assert!(!url_printed_in("https://acme.com:8080/", "acme.com"));
+    assert!(url_printed_in("https://acme.com/a b", "/a%20b"));
+    assert!(url_printed_in("https://acme.com/a/../b", "acme.com/b"));
+    assert!(url_printed_in("https://bücher.de/x", "xn--bcher-kva.de/x"));
+    assert!(url_printed_in("https://acme.com/?q=1", "?q=1"));
+    // One that does not parse is printed only whole.
+    assert!(url_printed_in("acme.com/x/", "acme.com/x"));
+    assert!(!url_printed_in("acme.com/x", "/x"));
+}
+
+// Node's URL parser keeps a `file:` path's empty segments, escapes a `^` and
+// reads a drive letter only in a `file:` path; the `url` crate does none of
+// that, so the path is read the browser's way.
+#[test]
+fn an_address_s_path_is_parsed_as_a_browser_parses_it() {
+    use figures_parser::url_printed_in;
+    assert!(url_printed_in("file:////x", "//x"));
+    assert!(!url_printed_in("file:////x", "see /x."));
+    assert!(url_printed_in("https://acme.com/a^b/c", "/a%5Eb/c"));
+    assert!(url_printed_in("https://acme.com/C|/.%2E/x", "acme.com/x"));
+    // A scheme with no special meaning and a port that is no number does not
+    // parse, so it is printed only whole.
+    assert!(!url_printed_in("foo://C:\\x?a", "foo://c:\\x?a"));
+}
+
+#[test]
+fn names_each_link_target_that_is_no_url() {
+    use figures_parser::placeholder_targets;
+    let reply = "![chart](chart.png), [again](chart.png), [notes](notes.md), [top](#top), [mail](mailto:a@b.c) and [doc](https://acme.io/doc).";
+    assert_eq!(
+        placeholder_targets(reply),
+        ["chart.png", "chart.png", "notes.md"]
+    );
+}
+
+#[test]
+fn drops_the_dot_a_slack_message_link_kept_and_leaves_any_other() {
+    use figures_parser::undotted_message_link;
+    assert_eq!(
+        undotted_message_link(
+            "https://acme.slack.com/archives/C1/p1791180327.741099?thread_ts=1791180327.741099"
+        )
+        .as_deref(),
+        Some("https://acme.slack.com/archives/C1/p1791180327741099?thread_ts=1791180327.741099")
+    );
+    for left in [
+        "https://acme.slack.com/archives/C1/p1791180327741099",
+        "https://acme.slack.com/archives/C1/p179118032.741099",
+        "https://acme.io/archives/C1/p1791180327.741099",
+    ] {
+        assert_eq!(undotted_message_link(left), None, "{left}");
+    }
+}
+
+#[test]
+fn lists_the_pages_a_message_links_once_each_less_slack_and_the_opened() {
+    use figures_parser::unopened_links;
+    assert_eq!(
+        unopened_links(
+            "the footer should be a png with <http://acme.example.com|acme.example.com> logo",
+            &[]
+        ),
+        ["http://acme.example.com"]
+    );
+    assert_eq!(
+        unopened_links(
+            "compare https://a.example.org/pricing and <https://b.example.org> with https://a.example.org/pricing",
+            &[]
+        ),
+        ["https://a.example.org/pricing", "https://b.example.org"]
+    );
+    assert_eq!(
+        unopened_links(
+            "see <https://acme.slack.com/archives/C0123ABCD/p1793264631123499> and https://acme.example.com/brand",
+            &[]
+        ),
+        ["https://acme.example.com/brand"]
+    );
+    assert_eq!(
+        unopened_links("make the footer nicer, acme.example.com style", &[]),
+        Vec::<&str>::new()
+    );
+    assert_eq!(
+        unopened_links(
+            "again: https://a.example.org/pricing, https://a.example.org/faq and https://b.example.org",
+            &["https://a.example.org/pricing", "https://b.example.org"]
+        ),
+        ["https://a.example.org/faq"]
+    );
+}
+
+// A query's values are read decoded, as a browser reads them, and the
+// slashes after an http(s) scheme as a browser reads them; another scheme's
+// link on a service's host is no page the service serves.
+#[test]
+fn reads_a_built_link_s_query_decoded_and_its_scheme_as_a_browser_does() {
+    use figures_parser::built_from_corpus;
+    assert!(built_from_corpus(
+        "https://www.facebook.com/ads/library/?view_all_page_id=%31%32",
+        "page 12",
+        &[]
+    ));
+    assert!(built_from_corpus(
+        "https://www.facebook.com/ads/library/?view%5Fall_page_id=12",
+        "page 12",
+        &[]
+    ));
+    assert!(built_from_corpus(
+        "https://a.slack.com/archives/C1/p1791180327741099?cid=C%31",
+        "a.slack.com C1 1791180327.741099",
+        &[]
+    ));
+    assert!(!built_from_corpus(
+        "https://a.slack.com/archives/C1/p1791180327741099?cid=C%32",
+        "a.slack.com C1 1791180327.741099",
+        &[]
+    ));
+    for link in [
+        "https:/notion.so/library",
+        "https:///notion.so",
+        "https:notion.so",
+        "HTTPS:\\\\notion.so\\library",
+    ] {
+        assert!(built_from_corpus(link, "", &["notion.so"]), "{link}");
+    }
+    for link in [
+        "ftp://notion.so/library",
+        "ws://notion.so",
+        "file://app.pipedrive.com",
+        "hxxp://facebook.com#",
+        "https:",
+    ] {
+        assert!(!built_from_corpus(link, "", &["notion.so"]), "{link}");
+    }
+}
+
+// A browser resolves `.` and `..` and reads `\` as `/`, so a link that
+// resolves to a host's root is that root.
+#[test]
+fn reads_a_built_link_s_path_as_a_browser_resolves_it() {
+    use figures_parser::built_from_corpus;
+    assert!(built_from_corpus("https://facebook.com/.", "", &[]));
+    assert!(built_from_corpus("https://app.pipedrive.com/x/..", "", &[]));
+    assert!(built_from_corpus("https://github.com/a/../new", "", &HOSTS));
+    assert!(built_from_corpus("https://github.com\\new", "", &HOSTS));
+    assert!(!built_from_corpus(
+        "https://facebook.com/someinventedpage",
+        "",
+        &[]
+    ));
+}
+
+// Node percent-encodes a page name outside ASCII, so the TypeScript check
+// finds digits in `é` and holds the page to an item; the name has none.
+#[test]
+fn reads_a_page_name_outside_ascii_as_written() {
+    use figures_parser::built_from_corpus;
+    assert!(built_from_corpus("https://github.com/équipe", "", &HOSTS));
+    assert_eq!(
+        ungrounded_urls(
+            "[#4](https://bücher.de/x/é_x)",
+            "https://bücher.de/x/é_x",
+            ""
+        ),
+        ["[#4](https://bücher.de/x/é_x)"]
+    );
+}
+
+// The TypeScript check reads a workspace's host in the corpus as written,
+// so an upper-cased one grounds nothing; a host has no case.
+#[test]
+fn a_workspace_host_printed_in_any_case_grounds_its_root() {
+    use figures_parser::built_from_corpus;
+    assert!(built_from_corpus(
+        "https://acme.slack.com/",
+        "workspace ACME.SLACK.COM",
+        &[]
+    ));
+}
+
+// The TypeScript check finds a link printed without its scheme only under a
+// top-level domain it lists, and without a port or an address; a printed
+// `acme.app/x`, `acme.io:8080/x` or `127.0.0.1/x` is the same link.
+#[test]
+fn grounds_a_link_printed_without_its_scheme_under_any_host() {
+    for (link, printed) in [
+        (
+            "https://linear.app/acme/issue/CORE-1",
+            "url: linear.app/acme/issue/CORE-1",
+        ),
+        ("https://acme.io:8080/deal/352", "at acme.io:8080/deal/352"),
+        (
+            "https://127.0.0.1/runs/572/logs",
+            "see 127.0.0.1/runs/572/logs.",
+        ),
+    ] {
+        assert_eq!(fabricated_urls(link, printed), Vec::<&str>::new(), "{link}");
+    }
+}
+
+#[test]
+fn takes_links_out_wherever_their_text_recurs() {
+    assert_eq!(
+        without_links("a.com/ https://a.com/206788 and https://a.com/ x"),
+        "a.com/   and   x"
+    );
+    assert_eq!(
+        without_links("<https://acme.io/p/1|label> 1,250"),
+        "< |label> 1,250"
+    );
+    assert_eq!(
+        without_links("12:30 at ftp://x.io/9"),
+        "12:30 at ftp://x.io/9"
+    );
+}
+
+#[test]
+fn lists_the_pages_a_message_links_that_no_turn_opened() {
+    let text = "Like https://acme.io/brand and https://acme.io/brand, not https://ACME.Slack.com/archives/C1/p1 or https://slack.com/x";
+    assert_eq!(unopened_links(text, &[]), ["https://acme.io/brand"]);
+    assert_eq!(
+        unopened_links(
+            "see <https://acme.io/a|a> and https://b.io",
+            &["https://b.io"]
+        ),
+        ["https://acme.io/a"]
+    );
+    assert_eq!(
+        unopened_links("https://notslack.com.evil.io/x", &[]),
+        ["https://notslack.com.evil.io/x"]
+    );
+}
+
+// A `>` closes a chat label only where it ends one: not inside a later
+// link's query, after a comparison glued to what follows or spaced by any
+// space, nor as the `">` that ends an attribute.
+#[test]
+fn reads_on_past_a_prose_or_markup_angle_bracket() {
+    let read =
+        |text: &str| -> Vec<String> { urls(text).iter().map(|u| u.text.to_owned()).collect() };
+    assert_eq!(
+        read("see https://acme.io/a|b and https://b.io/?q=a>b end"),
+        ["https://acme.io/a|b", "https://b.io/?q=a"]
+    );
+    assert_eq!(
+        read("filter https://grafana.acme.io/d/abc?var=prod|staging (x>5)"),
+        ["https://grafana.acme.io/d/abc?var=prod|staging"]
+    );
+    assert_eq!(
+        read("see https://acme.io/a|b, then x>y"),
+        ["https://acme.io/a|b"]
+    );
+    assert_eq!(
+        read("<a href=\"https://acme.io/x|y/blob?x=1\">doc</a>"),
+        ["https://acme.io/x|y/blob?x=1"]
+    );
+    for space in [' ', '\u{a0}', '\u{2009}', '\u{202f}', '\u{3000}'] {
+        assert_eq!(
+            read(&format!("see https://acme.io/a|b/c x{space}> 5 more")),
+            ["https://acme.io/a|b/c"],
+            "{space:?}"
+        );
+    }
+    assert_eq!(read("see https://acme.io/a|doc>."), ["https://acme.io/a"]);
+}
+
+// A doubled scheme cut short leaves no link of its own: the bare scheme
+// names no host.
+#[test]
+fn a_bare_scheme_is_no_link() {
+    for text in [
+        "_https://https://acme.io",
+        "`https://https://acme.io/x`",
+        "éhttps://https://acme.io",
+        "`https://http://acme.io`",
+    ] {
+        assert!(
+            urls(text).iter().all(|u| u.text.len() > "https://".len()),
+            "{text}"
+        );
+        assert!(!fabricated_urls(text, "").contains(&"https://"), "{text}");
+        assert!(
+            without_links(&format!("{text} https://")).ends_with("https://"),
+            "{text}"
+        );
+    }
+}
+
+// A schemeless print grounds only the same host: a letter of a spaced
+// script before it, or more of a host after a root, make another one.
+#[test]
+fn a_schemeless_print_grounds_only_its_own_host() {
+    for corpus in [
+        "ëacme.io/x",
+        "éacme.io/x",
+        "ßacme.io/x",
+        "ſacme.io/x",
+        "пacme.io/x",
+    ] {
+        assert_eq!(
+            fabricated_urls("see https://acme.io/x", corpus),
+            ["https://acme.io/x"],
+            "{corpus}"
+        );
+    }
+    assert_eq!(
+        fabricated_urls("see https://acme.io/x", "see acme.io/x here"),
+        none()
+    );
+    assert_eq!(
+        fabricated_urls("see https://acme.io/x", "日本acme.io/x"),
+        none()
+    );
+    for corpus in [
+        "acme.iox",
+        "acme.ioé",
+        "acme.io-x",
+        "acme.io_x",
+        "acme.io.evil",
+    ] {
+        assert_eq!(
+            fabricated_urls("see https://acme.io", corpus),
+            ["https://acme.io"],
+            "{corpus}"
+        );
+    }
+    assert_eq!(
+        fabricated_urls("see https://acme.io", "visit acme.io."),
+        none()
+    );
+    assert_eq!(
+        fabricated_urls("see https://acme.io", "visit acme.io/pricing"),
+        none()
+    );
+}
+
+// A template's unfilled placeholder is no page name a reply may build.
+#[test]
+fn an_unfilled_placeholder_names_no_page() {
+    let hosts = ["github.com", "linear.app"];
+    for link in [
+        "https://github.com/{owner}",
+        "https://github.com/settings/{tab}",
+        "https://linear.app/{x}/",
+    ] {
+        assert!(
+            !figures_parser::built_from_corpus(link, "x", &hosts),
+            "{link}"
+        );
+    }
+    assert!(figures_parser::built_from_corpus(
+        "https://github.com/new",
+        "x",
+        &hosts
+    ));
 }

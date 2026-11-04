@@ -9,8 +9,10 @@ use super::items::{
 };
 use super::scan::urls;
 use super::scheme_len;
-use super::shapes::{Parts, built_from_corpus, undotted_slack_link};
-use crate::text::{char_at, char_before, is_ascii_word, is_example_domain};
+use super::shapes::{Parts, built_from_corpus, undotted_message_link};
+use crate::text::{
+    char_at, char_before, is_ascii_word, is_example_domain, is_letter, is_unspaced_script,
+};
 
 /// Whether `segment` names one item rather than a page: eight or more word
 /// characters or dashes, a digit among them.
@@ -130,17 +132,38 @@ fn is_example_host(url: &str) -> bool {
 /// Whether `corpus` printed `url` without its scheme ("github.com/org/repo"),
 /// as a note or a result may, or a longer link that starts so: the
 /// occurrence stands apart from what precedes it, so it is no part of a
-/// schemed link, an address or a longer host.
+/// schemed link, an address or a longer host, and a link to a host's root
+/// is not the start of a longer host ("acme.iox", "acme.io.evil").
 fn schemeless_grounds(url: &str, corpus: &str) -> bool {
     let Some(rest) = scheme_len(url, true).and_then(|n| url.get(n..)) else {
         return false;
     };
     let host = rest.split(['/', '?', '#']).next().unwrap_or(rest);
+    let root = host.len() == rest.len();
     host.contains('.')
         && occurrences(corpus, rest).any(|at| {
-            !char_before(corpus, at)
-                .is_some_and(|c| is_ascii_word(c) || matches!(c, '.' | '-' | '@' | '/' | ':'))
+            !(char_before(corpus, at)
+                .is_some_and(|c| continues_host(c) || matches!(c, '.' | '-' | '@' | '/' | ':'))
+                || (root && host_goes_on(corpus, at.saturating_add(rest.len()))))
         })
+}
+
+/// Whether `c` continues a host written before or after it: an ASCII word
+/// character, or a letter of a script written with spaces, which an
+/// internationalized host carries ("ëacme.io" is another host). A letter of
+/// a script written without spaces sets a host apart ("日本acme.io").
+fn continues_host(c: char) -> bool {
+    is_ascii_word(c) || (!c.is_ascii() && is_letter(c) && !is_unspaced_script(c))
+}
+
+/// Whether a host printed up to byte `at` of `text` goes on past it: a host
+/// character follows, or a dot before one.
+fn host_goes_on(text: &str, at: usize) -> bool {
+    char_at(text, at).is_some_and(|c| {
+        continues_host(c)
+            || c == '-'
+            || (c == '.' && char_at(text, at.saturating_add(1)).is_some_and(continues_host))
+    })
 }
 
 /// Whether `corpus` grounds `url`: verbatim, with or without its scheme, as
@@ -188,9 +211,25 @@ pub fn fabricated_urls<'r>(reply: &'r str, corpus: &str, hosts: &[&str]) -> Vec<
 /// Whether `url` stands in for a number rather than linking a thing of
 /// its own: its last path segment names no item (a repo: no digit in it) or
 /// another number ("/pull/418"). A link to a thing of another kind, such as
-/// a Slack message, is that thing's own.
+/// a Slack message, is that thing's own. A link a browser cannot open (a
+/// port past 65535, a host it rejects) links nothing, so it stands in too.
 fn stands_in_for_number(url: &str) -> bool {
-    let last = Parts::of(url)
+    let parts = Parts::of(url);
+    // A host of plain ASCII labels whose punycode does not decode is one
+    // Node's parser takes, so it parses here too.
+    let plain_host = || {
+        parts.as_ref().is_some_and(|parts| {
+            parts
+                .host
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.'))
+        })
+    };
+    if url::Url::parse(url).is_err_and(|error| error != url::ParseError::IdnaError || !plain_host())
+    {
+        return true;
+    }
+    let last = parts
         .and_then(|parts| parts.segments().last())
         .unwrap_or_default();
     let digits = last.bytes().filter(u8::is_ascii_digit).count();
@@ -393,7 +432,7 @@ pub fn mended_links(reply: &str, corpus: &str) -> Mended {
             continue;
         }
         seen.push(url.text);
-        if let Some(undotted) = undotted_slack_link(url.text) {
+        if let Some(undotted) = undotted_message_link(url.text) {
             mends.push(format!("{} → {undotted}", url.text));
             text = Cow::Owned(text.replace(url.text, &undotted));
         }

@@ -7,8 +7,8 @@ use unicode_general_category::{GeneralCategory, get_general_category};
 
 use super::digits::digit_value;
 use super::scan::{
-    Scratch, Token, after_marks, before_marks, is_boundary, is_decimal_symbol, is_inline_space,
-    is_symbol, is_times_sign, tokens,
+    Scratch, Token, after_marks, before_marks, digits_start, is_boundary, is_decimal_symbol,
+    is_inline_space, is_symbol, is_times_sign, tokens,
 };
 use super::{Reading, for_each_reading_in, scaled};
 use crate::text::{char_at, char_before};
@@ -42,8 +42,9 @@ const MAX_SAID_NUMBERS: usize = 30;
 /// Where the percent mark after byte `end` of `text` ends: a percent sign
 /// after at most one space of the line and any bidi marks ("12%", "12,5 %",
 /// "٥٠٪"), or a percent word after one space ("12 percent"). None without
-/// one, or when a letter or a digit continues past it ("50%off", "12
-/// percentage points", the "%25" of an encoded link).
+/// one, or when a digit or a link's escape continues past the sign (the
+/// "%25" of an encoded link), or a letter past the word ("12 percentage
+/// points").
 fn percent_after(text: &str, end: usize) -> Option<usize> {
     let rest = text.get(end..)?;
     let spaced = rest.strip_prefix(is_inline_space);
@@ -61,7 +62,13 @@ fn percent_after(text: &str, end: usize) -> Option<usize> {
     let at = after_marks(text, space_end);
     if let Some(sign) = char_at(text, at).filter(|&c| is_percent_sign(c)) {
         let mark_end = at.saturating_add(sign.len_utf8());
-        return ends(mark_end).then_some(mark_end);
+        // A word glued on ("50%off") still follows a percentage; a digit or
+        // two hex digits make the sign a link's escape ("%25", "%2C").
+        let escape = text
+            .get(mark_end..)
+            .is_some_and(|after| after.bytes().take(2).filter(u8::is_ascii_hexdigit).count() == 2);
+        let word = char_at(text, mark_end).is_some_and(|c| digit_value(c).is_none());
+        return (ends(mark_end) || (word && !escape)).then_some(mark_end);
     }
     spaced?;
     PERCENT_WORDS
@@ -103,7 +110,7 @@ const fn opens(c: char) -> bool {
 /// `text` starts, as Turkish and Basque write one ("%11", "% 11"): bidi
 /// marks and at most one space of the line between, and nothing, whitespace
 /// or an opening bracket or quote before the sign, so the "%20" of an
-/// encoded link is none.
+/// encoded link is none, nor a sign that marks a figure before it.
 fn percent_before(text: &str, start: usize) -> Option<usize> {
     // A sign, a space before one, or a bidi mark ends in one of these bytes.
     if !matches!(
@@ -119,9 +126,22 @@ fn percent_before(text: &str, start: usize) -> Option<usize> {
     };
     let sign = char_before(text, at).filter(|&c| is_percent_sign(c))?;
     let sign_at = at.saturating_sub(sign.len_utf8());
-    char_before(text, sign_at)
-        .is_none_or(opens)
-        .then_some(sign_at)
+    // A sign set apart from the figure after it and one space after a figure
+    // is that figure's ("84 % 8,322").
+    let mark_of_figure_before = || {
+        let before = before_marks(text, sign_at);
+        let before = match char_before(text, before) {
+            Some(c) if is_inline_space(c) => {
+                before_marks(text, before.saturating_sub(c.len_utf8()))
+            }
+            _ => before,
+        };
+        let digits = digits_start(text, before);
+        digits < before
+            && !char_before(text, digits).is_some_and(is_boundary)
+            && char_at(text, at).is_none_or(|c| digit_value(c).is_none())
+    };
+    (char_before(text, sign_at).is_none_or(opens) && !mark_of_figure_before()).then_some(sign_at)
 }
 
 /// A ratio's mark.
@@ -184,6 +204,10 @@ fn mark_of(text: &str, token: &Token<'_>) -> Option<(Range<usize>, Mark, bool)> 
     if let Some(mark_end) = times_after(text, end) {
         return Some((full_start..mark_end, Mark::Times, false));
     }
+    // A currency mark between a sign and the figure makes it an amount.
+    if token.marked_before {
+        return None;
+    }
     let mark_start = percent_before(text, full_start)?;
     Some((mark_start..end, Mark::Percent, true))
 }
@@ -237,15 +261,6 @@ impl Stated {
         usize::try_from(digits.saturating_sub(self.places))
             .unwrap_or(usize::MAX)
             .max(1)
-    }
-
-    /// None or all, which a count shows without a division.
-    fn is_bound(&self) -> bool {
-        self.value == 0
-            || 10_u128
-                .checked_pow(self.places)
-                .and_then(|p| p.checked_mul(100))
-                == Some(self.value)
     }
 
     /// Whether a printed value, `integer.fraction` times `10^shift`, rounds
@@ -394,8 +409,11 @@ fn said_numbers(said: &str) -> Vec<f64> {
     let mut numbers: Vec<f64> = Vec::with_capacity(MAX_SAID_NUMBERS);
     let mut scratch = Scratch::default();
     let mut written = String::new();
+    // A scaled figure is the person's digits as written as well as its value
+    // ("1.2 million" gives 1.2 and 1,200,000).
     let read = tokens(said)
         .against_letters()
+        .keep_digits()
         .without_currency()
         .without_signs();
     for_each_reading_in(said, read, &mut scratch, |r| {
@@ -450,8 +468,7 @@ fn said_carries(numbers: &[f64], stated: &Stated) -> bool {
 /// words, carries a ratio with a number they stated ("up 12 percent") or
 /// with plain arithmetic over two of their numbers: a quotient, or a change,
 /// each also as a percentage. The size is compared, not the sign ("fell 30%"
-/// against "-29.9%"), and none and all (0% and 100%) are never held. One
-/// ratio is named once however its mark is written.
+/// against "-29.9%"). One ratio is named once however its mark is written.
 ///
 /// # Examples
 ///
@@ -466,6 +483,29 @@ fn said_carries(numbers: &[f64], stated: &Stated) -> bool {
 /// ```
 #[must_use]
 pub fn ungrounded_ratios(reply: &str, corpus: &str, said: &str) -> Vec<String> {
+    ungrounded_ratios_with(reply, corpus, || said)
+}
+
+/// [`ungrounded_ratios`] with the person's words given by `said`, called only
+/// when a ratio of the reply is left that the corpus does not carry: a
+/// caller that builds them from the thread pays for it only then.
+///
+/// # Examples
+///
+/// ```
+/// let mut asked = false;
+/// let found = figures_parser::ungrounded_ratios_with("No ratio here.", "", || {
+///     asked = true;
+///     "1000 trials, 420 activated"
+/// });
+/// assert!(found.is_empty() && !asked);
+/// ```
+#[must_use]
+pub fn ungrounded_ratios_with<S: AsRef<str>>(
+    reply: &str,
+    corpus: &str,
+    said: impl FnOnce() -> S,
+) -> Vec<String> {
     let mut scratch = Scratch::default();
     let mut claims: Vec<Claim<'_>> = Vec::new();
     for ratio in ratios(reply) {
@@ -484,14 +524,16 @@ pub fn ungrounded_ratios(reply: &str, corpus: &str, said: &str) -> Vec<String> {
                 readings.push(stated);
             }
         });
-        if ratio.mark == Mark::Percent && readings.iter().all(Stated::is_bound) {
-            continue;
-        }
-        let text = reply
-            .get(ratio.span.clone())
-            .unwrap_or(figure)
+        let written = reply.get(ratio.span.clone()).unwrap_or(figure);
+        // A sign is named against its figure ("11 %" as "11%"); a word keeps
+        // its space ("12 percent").
+        let word = written.chars().last().is_some_and(char::is_alphabetic);
+        let text = written
             .chars()
-            .filter(|&c| !c.is_whitespace() && get_general_category(c) != GeneralCategory::Format)
+            .filter(|&c| {
+                (word && c == ' ')
+                    || (!c.is_whitespace() && get_general_category(c) != GeneralCategory::Format)
+            })
             .collect();
         claims.push(Claim {
             figure,
@@ -551,6 +593,8 @@ pub fn ungrounded_ratios(reply: &str, corpus: &str, said: &str) -> Vec<String> {
             return Vec::new();
         }
     }
+    let said = said();
+    let said = said.as_ref();
     if !said.is_empty() {
         let numbers = said_numbers(said);
         claims.retain(|claim| {

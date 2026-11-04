@@ -304,7 +304,7 @@ fn holds_a_number_led_by_digits_to_the_sign_before_them() {
         [("-2 and a half million", Sign::Minus)]
     );
     assert_eq!(
-        ungrounded_figures("It fell by -2 and a half million.", "change: 2,500,000"),
+        ungrounded_figures("It fell by -2 and a half million.", "change: +2,500,000"),
         ["-2 and a half million"]
     );
     assert_eq!(

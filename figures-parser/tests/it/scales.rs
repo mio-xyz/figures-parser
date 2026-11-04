@@ -2,6 +2,11 @@ use std::borrow::Cow;
 
 use figures_parser::{Sign, extract_numbers, ungrounded_figures};
 
+/// No finding.
+const fn none() -> Vec<String> {
+    Vec::new()
+}
+
 /// The first stated-side reading of `text`: as written, its integer and
 /// fraction, and whether it reads as approximate.
 fn first(text: &str) -> Option<(String, String, Option<String>, bool)> {
@@ -76,17 +81,15 @@ fn keeps_what_the_scale_leaves_a_fraction() {
 fn reads_a_letter_that_names_a_unit_only_beside_a_currency() {
     for text in [
         "took 5m",
-        "a 7B model",
         "5mm thick",
         "12 K",
         "5 M users",
         "5Mbps",
         "12.5kg",
         "5 mi away",
-        "5 cr",
-        "3T drive",
+        "a 7 B model",
+        "5 bin bags",
         "12.5K9",
-        "a thread of 2 Mio messages",
         "3 Bio products",
     ] {
         let scaled: Vec<_> = extract_numbers(text)
@@ -106,7 +109,7 @@ fn carries_the_sign_and_the_mark_through_the_word() {
         .unwrap_or_else(|| panic!("no reading"));
     assert_eq!((n.sign, n.full_text), (Sign::Minus, "-$1.2M"));
     assert_eq!(
-        ungrounded_figures("It fell -$1.2M.", "delta: 1234567"),
+        ungrounded_figures("It fell -$1.2M.", "delta: +1234567"),
         ["-$1.2M"]
     );
     assert_eq!(
@@ -124,7 +127,7 @@ fn grounds_a_scaled_figure_by_a_value_that_rounds_to_it() {
     );
     assert_eq!(
         ungrounded_figures(reply, "revenue 1260000, signups 12600"),
-        ["1.2 million", "12.5K"]
+        ["$1.2 million", "12.5K"]
     );
 }
 
@@ -141,25 +144,70 @@ fn grounds_an_exact_figure_by_a_scaled_corpus_value_of_the_same_value() {
 }
 
 #[test]
-fn grounds_a_scaled_figure_that_fits_two_readings_by_either() {
-    let reply = "Debt of €12,500 million.";
-    for corpus in ["12500000000", "12500000"] {
+fn reads_a_scaled_run_that_groups_as_a_decimal_where_the_word_writes_that_mark() {
+    // A comma decimal before a word of a language that writes one; a point
+    // before an English word.
+    for (reply, corpus) in [
+        ("Долг 8,566 млрд.", "8566000000"),
+        ("Umsatz 1,250 Mio. Euro.", "1250000"),
+        ("Budget 1,250 M€.", "1250000000"),
+        ("Revenue of 1.250 million.", "1250000"),
+        ("Revenue of 1.250 million.", "1250000000"),
+        ("Pendapatan 12,500 rb.", "12500"),
+    ] {
         assert_eq!(
             ungrounded_figures(reply, corpus),
             Vec::<String>::new(),
+            "{reply} | {corpus}"
+        );
+    }
+    // Elsewhere the run is thousands, as "$206,788" is: before a letter every
+    // locale writes alike, a currency after it included, since an English
+    // report writes "1,250 M€" for 1.25 billion.
+    for (reply, corpus) in [
+        ("Budget 1,250 M€.", "1250000"),
+        ("Total 46,886b €", "46886"),
+        ("Debt of €12,500 million.", "12500000"),
+        ("Debt of £1,250 million.", "1250000"),
+        ("Budget 1.250 M€.", "1250000"),
+        ("Umsatz 1.250 Mio. Euro.", "1250000"),
+    ] {
+        assert_eq!(
+            ungrounded_figures(reply, corpus).len(),
+            1,
+            "{reply} | {corpus}"
+        );
+    }
+    assert_eq!(
+        ungrounded_figures("Debt of €12,500 million.", "12500000000"),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn holds_a_scaled_figure_whose_digits_group_to_the_grouped_reading() {
+    let reply = "Debt of €12,500 million.";
+    assert_eq!(
+        ungrounded_figures(reply, "12500000000"),
+        Vec::<String>::new()
+    );
+    for corpus in ["12500000", "12600000"] {
+        assert_eq!(
+            ungrounded_figures(reply, corpus),
+            ["€12,500 million"],
             "{corpus}"
         );
     }
-    assert_eq!(ungrounded_figures(reply, "12600000"), ["12,500 million"]);
 }
 
 #[test]
 fn holds_a_scaled_figure_to_the_floors() {
+    assert_eq!(ungrounded_figures("5k users", "nothing"), ["5k"]);
     assert_eq!(
-        ungrounded_figures("5k users", "nothing"),
+        ungrounded_figures("2 hundred users", "nothing"),
         Vec::<String>::new()
     );
-    assert_eq!(ungrounded_figures("$5k budget", "nothing"), ["5k"]);
+    assert_eq!(ungrounded_figures("$5k budget", "nothing"), ["$5k"]);
 }
 
 #[test]
@@ -275,4 +323,333 @@ fn a_han_figure_past_the_integer_type_keeps_its_head() {
             true
         ))
     );
+}
+
+#[test]
+fn reads_scale_words_glued_and_in_more_languages() {
+    for (text, written, integer) in [
+        ("12million users", "12million", "12000000"),
+        ("3 miljoen", "3 miljoen", "3000000"),
+        ("2 miljarder", "2 miljarder", "2000000000"),
+        ("4 miliony", "4 miliony", "4000000"),
+        ("3 tysiące", "3 tysiące", "3000"),
+        ("5 milyar", "5 milyar", "5000000000"),
+        ("7 juta", "7 juta", "7000000"),
+        ("2 triệu", "2 triệu", "2000000"),
+        ("3 tỷ", "3 tỷ", "3000000000"),
+        ("1,5 bln", "1,5 bln", "1500000000000"),
+        ("5 mila miliardi", "5 mila miliardi", "5000000000000"),
+        ("2 lakh crore", "2 lakh crore", "2000000000000"),
+        ("3 млн рублей", "3 млн", "3000000"),
+        ("2 миллиарда", "2 миллиарда", "2000000000"),
+        ("5 مليون", "5 مليون", "5000000"),
+        ("4 میلیارد", "4 میلیارد", "4000000000"),
+        ("3 מיליון", "3 מיליון", "3000000"),
+        ("2 लाख", "2 लाख", "200000"),
+        ("5ล้านคน", "5ล้าน", "5000000"),
+        ("3억 명", "3억", "300000000"),
+        ("3억5000만원", "3억5000만", "350000000"),
+        ("5천만", "5천만", "50000000"),
+        ("a 7B model", "7B", "7000000000"),
+        ("2.8T tokens", "2.8T", "2800000000000"),
+        ("1.5b users", "1.5b", "1500000000"),
+    ] {
+        assert_eq!(
+            first(text),
+            Some((written.to_owned(), integer.to_owned(), None, true)),
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn checks_a_count_written_with_a_scale_and_no_currency() {
+    let reply = "The district counts 3.2M teachers.";
+    assert_eq!(ungrounded_figures(reply, ""), ["3.2M"]);
+    assert_eq!(ungrounded_figures(reply, "teachers: 3,312,000"), ["3.2M"]);
+    for corpus in [
+        "teachers: 3,213,480",
+        "3.2 million teachers in the district",
+    ] {
+        assert_eq!(
+            ungrounded_figures(reply, corpus),
+            Vec::<String>::new(),
+            "{corpus}"
+        );
+    }
+    let counts = "12k signups, 1.5bn views, 3.2 million users.";
+    assert_eq!(
+        ungrounded_figures(counts, "signups 12040\nviews 1500000000\nusers 3190000"),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        ungrounded_figures(counts, ""),
+        ["12k", "1.5bn", "3.2 million"]
+    );
+    assert_eq!(
+        ungrounded_figures("A 16B model with 4K users and 3M views.", ""),
+        ["16B", "4K", "3M"]
+    );
+    assert_eq!(
+        ungrounded_figures("See p1789368220119 and v3.1, about 12.5K.", "visits 12480"),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn is_not_grounded_by_a_bare_printed_figure_of_the_same_digits() {
+    assert_eq!(
+        ungrounded_figures("The district counts 3.2M teachers.", "ratio 3.2"),
+        ["3.2M"]
+    );
+}
+
+#[test]
+fn reads_a_lone_letter_a_space_parts_from_the_digits_as_a_unit_or_a_word() {
+    for reply in [
+        "A 500 m mesh at 1750 N Highway 121, 3 M users.",
+        "Le prélèvement du 27/10/26 n'a pas pu être effectué.",
+        "The job took 5m.",
+    ] {
+        assert_eq!(
+            ungrounded_figures(reply, ""),
+            Vec::<String>::new(),
+            "{reply}"
+        );
+    }
+}
+
+#[test]
+fn reads_a_corpus_scale_loosely() {
+    for (reply, corpus) in [
+        (
+            "r/matheducation has 43K members.",
+            "r/matheducation 43Kmembers Forum",
+        ),
+        ("1.5bn views", "1.5bnviews"),
+        ("12K users", "size 12Kb"),
+        ("3.2 million teachers", "3.2millionteachers"),
+        ("$38M revenue", "revenue 38.08 M"),
+        ("$38M revenue", "revenue 38.08 Mio"),
+        ("$38M revenue", "revenue 38.08m"),
+        ("$5,000,000 raised", "took 5 m"),
+        ("$12,000 spent", "12 k rows"),
+        ("€2,5 Mio. Umsatz", "2,5 Mio"),
+        ("$1,200,000 total", "total 1.2 M"),
+        ("Revenue $3M.", "revenue 3 млн"),
+        ("Revenue $3M.", "revenue 3млн"),
+        ("Budget 3 Mrd. €", "budget 3 mrd"),
+    ] {
+        assert_eq!(
+            ungrounded_figures(reply, corpus),
+            Vec::<String>::new(),
+            "{reply} | {corpus}"
+        );
+    }
+    assert_eq!(
+        ungrounded_figures(
+            "r/matheducation has 43K members.",
+            "r/matheducation 43members"
+        ),
+        ["43K"]
+    );
+}
+
+#[test]
+fn keeps_the_digits_of_a_corpus_figure_read_with_a_scale() {
+    for (reply, corpus) in [
+        ("Ran 1,500 laps.", "ran 1500 m"),
+        ("Signups 12,500 overall.", "signups 12,500 k-factor"),
+        ("Shipped 2,500 units.", "shipped 2,500 M"),
+    ] {
+        assert_eq!(
+            ungrounded_figures(reply, corpus),
+            Vec::<String>::new(),
+            "{reply} | {corpus}"
+        );
+    }
+}
+
+#[test]
+fn reads_an_abbreviation_at_the_scale_of_the_language_that_writes_it_so() {
+    // "tn" is a thousand in Swedish and a trillion in English; a reply is
+    // read at the one English writes.
+    assert_eq!(ungrounded_figures("Raised 2tn.", "raised 2000"), ["2tn"]);
+    assert_eq!(
+        ungrounded_figures("Raised 2tn.", "raised 2000000000000"),
+        Vec::<String>::new()
+    );
+}
+
+/// What a generated figure is built from: a mark, a currency, digits, a gap,
+/// a scale word, and what follows it.
+const MARKS: &[&str] = &["", "", "~", "≈ "];
+const CURRENCIES: &[&str] = &["", "", "$", "€ ", "-"];
+const FIGURES: &[&str] = &[
+    "12", "3.2", "1,250", "2,5", "0.5", "7", "38.08", "1 811", "12,500",
+];
+const GAPS: &[&str] = &["", " ", "\u{a0}"];
+const SCALES: &[&str] = &[
+    "",
+    "M",
+    "m",
+    "K",
+    "k",
+    "B",
+    "b",
+    "T",
+    "bn",
+    "tn",
+    "Mio",
+    "Mio.",
+    "Mrd",
+    "mln",
+    "bln",
+    "million",
+    "Millionen",
+    "mil",
+    "mil millones",
+    "mila miliardi",
+    "lakh",
+    "crore",
+    "miljoen",
+    "tysiące",
+    "tỷ",
+    "млн",
+    "مليون",
+    "ล้าน",
+    "억",
+    "만",
+    "천",
+    "万",
+    "億",
+    "千",
+    "€",
+];
+const TAILS: &[&str] = &["", " users", "members", ".", ",", "\n", ")", "x", "%"];
+
+#[test]
+fn every_generated_text_grounds_its_own_scaled_figures() {
+    let mut state: u64 = 0x2545_F491_4F6C_DD1D;
+    let mut pick = |from: &[&'static str]| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        let at = usize::try_from(state % u64::try_from(from.len()).unwrap_or(1)).unwrap_or(0);
+        from.get(at).copied().unwrap_or("")
+    };
+    for _ in 0..20_000 {
+        let mut text = String::new();
+        for _ in 0..3 {
+            for part in [MARKS, CURRENCIES, FIGURES, GAPS, SCALES, TAILS] {
+                text.push_str(pick(part));
+            }
+            text.push(' ');
+        }
+        assert_eq!(
+            ungrounded_figures(&text, &text),
+            Vec::<String>::new(),
+            "{text:?}"
+        );
+    }
+}
+
+#[test]
+fn every_scale_word_of_another_script_starts_with_a_listed_initial() {
+    for word in [
+        "тыс",
+        "млн",
+        "млрд",
+        "трлн",
+        "ألف",
+        "آلاف",
+        "مليون",
+        "ملايين",
+        "مليار",
+        "ترليون",
+        "هزار",
+        "میلیون",
+        "میلیارد",
+        "تریلیون",
+        "אלף",
+        "מיליון",
+        "מיליארד",
+        "טריליון",
+        "हज़ार",
+        "लाख",
+        "अरब",
+        "खरब",
+        "พัน",
+        "ล้าน",
+    ] {
+        assert_eq!(
+            first(&format!("3 {word}")).map(|(written, ..)| written),
+            Some(format!("3 {word}")),
+            "{word}"
+        );
+    }
+}
+
+#[test]
+fn reads_an_abbreviation_that_is_also_a_unit_as_a_scale_unless_the_words_around_name_the_unit() {
+    for reply in [
+        "We have 3.2m users.",
+        "Revenue 206,788m.",
+        "Revenue 872 426m",
+        "Budget 100,000m d'euros",
+        "Revenue 5 mn",
+        "Revenue 5mn people",
+        "Gelir 8 mn",
+        "Revenue 58 md",
+        "Revenue 5 Mio",
+        "Revenue 12 mi",
+        "Revenue 5 cr",
+        "Gelir 5 Mr",
+        "Gelir 729 bin",
+        "Revenue 25 tn",
+        "Umsatz 5 Bio",
+        "Revenue 3t",
+        "Revenue 5L",
+    ] {
+        assert_eq!(ungrounded_figures(reply, "").len(), 1, "{reply}");
+    }
+    for reply in [
+        "The job took 5m.",
+        "Took about 5m.",
+        "It finished 5m ago.",
+        "Done in 1h 5m.",
+        "Waited 5m 30s.",
+        "a 3D model, 5m tall",
+        "A room 3m x 4m.",
+        "Took 165489 mn.",
+        "Ça prend en 5 mn.",
+        "Wrote 5 md files.",
+        "Ran 5 mi.",
+        "It is 5 mi away.",
+        "Earned 92 cr this term.",
+        "Table 5 Mr Smith.",
+        "Bought 5 bin bags.",
+        "It weighs 25 tn.",
+        "A 2481t truck.",
+        "300l of water.",
+        "Ate 3 Bio eggs.",
+    ] {
+        assert_eq!(ungrounded_figures(reply, ""), none(), "{reply}");
+    }
+}
+
+#[test]
+fn holds_a_figure_with_a_compact_scale_whatever_its_value() {
+    for reply in [
+        "Total 0.95k",
+        "Total 0.957k",
+        "Revenue 0,81k",
+        "Total 0.95 mil",
+        "Total 0,94 тыс.",
+        "Total 0,94 हज़ार",
+        "Total 0.4661 mil",
+    ] {
+        assert_eq!(ungrounded_figures(reply, "").len(), 1, "{reply}");
+    }
+    assert_eq!(ungrounded_figures("Total 0.95k", "950"), none());
 }

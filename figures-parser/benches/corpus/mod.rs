@@ -6,9 +6,15 @@ use std::hint::black_box;
 use figures_parser::number::scan::tokens;
 use figures_parser::{
     Amounts, Date, extract_numbers, link_findings, mended_links, misdated_weekdays,
-    prose_arithmetic, ungrounded_durations, ungrounded_emails, ungrounded_figures,
-    ungrounded_identifiers, ungrounded_ratios, ungrounded_urls, urls,
+    mispaired_per_unit, prose_arithmetic, rows_outside_window, ungrounded_durations,
+    ungrounded_emails, ungrounded_figures, ungrounded_identifiers, ungrounded_ratios,
+    ungrounded_urls, urls,
 };
+
+/// A clause with a total, a count and a per-unit amount that no corpus
+/// prints as a quotient, so the per-unit check reads the whole corpus.
+const PER_UNIT_REPLY: &str =
+    "Yesterday: $74.74 spend, 2 leads, $45.83 CPL; lifetime $1,679.41, 24 leads.";
 
 /// The size every corpus is built to, in bytes.
 const SIZE: usize = 300 * 1024;
@@ -52,7 +58,7 @@ pub struct Case {
 pub type Path<'c> = (&'static str, Box<dyn Fn() -> usize + 'c>);
 
 /// The hot paths both benches measure over `case`.
-pub fn paths(case: &Case) -> [Path<'_>; 17] {
+pub fn paths(case: &Case) -> [Path<'_>; 19] {
     let text = case.text.as_str();
     let amounts = Amounts::of(UNGROUNDED_REPLY);
     [
@@ -95,6 +101,12 @@ pub fn paths(case: &Case) -> [Path<'_>; 17] {
             Box::new(move || misdated_weekdays(black_box(text), Date::constant(2026, 10, 2)).len()),
         ),
         (
+            "rows_outside_window",
+            Box::new(move || {
+                rows_outside_window(black_box(text), Date::constant(2026, 10, 2)).len()
+            }),
+        ),
+        (
             "ungrounded_ratios",
             Box::new(move || ungrounded_ratios(PERCENT_REPLY, black_box(text), "").len()),
         ),
@@ -123,6 +135,10 @@ pub fn paths(case: &Case) -> [Path<'_>; 17] {
         (
             "mended_links",
             Box::new(move || mended_links(MEND_REPLY, black_box(text)).mends.len()),
+        ),
+        (
+            "mispaired_per_unit",
+            Box::new(move || mispaired_per_unit(PER_UNIT_REPLY, black_box(text)).len()),
         ),
     ]
 }

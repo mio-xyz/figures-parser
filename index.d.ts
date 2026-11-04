@@ -10,10 +10,51 @@
 export declare const __napiBindingTarget: 'native' | 'wasm32-wasi' | 'wasm32-wasip1'
 
 /**
- * For each of `texts`, the amounts `reply` states that it carries, as the
- * reply wrote them; the reply is read once.
+ * Which of a turn's rendered pages to hold back, file by file: a page is
+ * held back for a claim the run was not told about for that file, and a
+ * file at most three times.
  */
-export declare function amountsSharedWith(reply: string, texts: Array<string>): Array<Array<string>>
+export declare class PageHolds {
+  /** No page held back yet. */
+  constructor()
+  /**
+   * Whether to hold back the page `filename` names, whose check found
+   * `claims`; a hold records them as told for that file.
+   */
+  hold(filename: string, claims: Array<string>): boolean
+}
+
+/**
+ * A function that takes a text and returns the amounts `reply` states that
+ * the text carries, as the reply wrote them: `amountsSharedWith(reply)(text)`.
+ *
+ * # Errors
+ *
+ * When the function cannot be made, or is called without a string.
+ */
+export declare function amountsSharedWith(reply: string): (text: string) => Array<string>
+
+/**
+ * Whether `url` is a link a reply may build rather than copy: a page naming
+ * no item on one of `hosts`, or an item's link in its service's shape built
+ * from ids `corpus` prints.
+ */
+export declare function builtFromCorpus(url: string, corpus: string, hosts?: Array<string> | undefined | null): boolean
+
+/** Whether `response` claims a refusal or a capability it lacks. */
+export declare function claimsRefusal(response: string): boolean
+
+/**
+ * Whether `response` claims an action done that no pending action and no
+ * write tool among `tools_called` stands behind.
+ */
+export declare function claimsUnbackedAction(response: string, pendingActionCount: number, toolsCalled: Array<string>): boolean
+
+/**
+ * Whether `response` claims a memory save that no memory write among
+ * `tools_called` attempted.
+ */
+export declare function claimsUnwrittenMemory(response: string, toolsCalled: Array<string>): boolean
 
 /** One duration, with where it sits in the input. */
 export interface DurationEntity {
@@ -30,8 +71,31 @@ export interface DurationEntity {
   /** Its years, quarters and months, in hundredths of a month. */
   centimonths: number
   /**
-   * Whether a reply is held to it: false for a number glued to a bare
-   * `s`, which may be a plural ("the 90s") as well as seconds.
+   * A range's lower bound ("10" of "10–30 min"); `milliseconds` and
+   * `centimonths` are its upper bound.
+   */
+  from?: LengthValue
+  /**
+   * The step it is written to: its smallest unit, a decimal place of it
+   * or the fraction added to it. A printed length rounds to it within
+   * half a step.
+   */
+  place: LengthValue
+  /**
+   * The other reading of its digits, when a lone dot or comma before three
+   * digits may group them or end the whole number ("1.250 Sekunden" is
+   * 1,250 seconds, or 1.25). A corpus prints either; a reply states the
+   * first reading alone.
+   */
+  loose?: LooseReading
+  /** Whether an approximation mark stands before it ("~5 minutes"). */
+  approximate: boolean
+  /**
+   * Whether a reply is held to it: false for a number beside a one-letter
+   * symbol, which may be a plural ("the 90s"), a time of day ("15h",
+   * "15h30") or a size as well as a length, and for a length in days or
+   * longer units only, which a window ("the last 30 days") or a plan is
+   * written with as well.
    */
   stated: boolean
 }
@@ -47,6 +111,12 @@ export interface EmailEntity {
   /** One past the last UTF-16 unit. */
   end: number
 }
+
+/**
+ * The verdicts of the invariants named in `names` (all of them when
+ * absent, in order) on `input`; an unknown name is skipped.
+ */
+export declare function evaluateInvariants(input: InvariantInput, names?: Array<string> | undefined | null): Array<InvariantVerdict>
 
 /**
  * Every reading of every figure in `text`, kind by kind.
@@ -72,6 +142,78 @@ export interface ExtractOptions {
  */
 export declare function fabricatedUrls(reply: string, corpus: string, hosts?: Array<string> | undefined | null): Array<string>
 
+/** One thing a check found. */
+export interface Finding {
+  /**
+   * What it is about: `link`, `placeholder`, `misdirected`, `unlinked`,
+   * `attached`, `figure`, `id`, `ratio`, `per-unit`, `unstated`,
+   * `unchecked`, `weekday`, `window` or `internal`.
+   */
+  kind: string
+  /** What was found. */
+  value: string
+  /**
+   * For a `per-unit` finding, the clause's total over its count, worked
+   * out ("$74.74 / 2 = $37.37").
+   */
+  stated?: string
+  /**
+   * For a `per-unit` finding, the printed amount the per-unit one is that
+   * count's quotient of ("$91.65 / 2").
+   */
+  printed?: string
+  /** For an `unstated` finding, the helper's line for the row. */
+  name?: string
+  /**
+   * For an `unchecked` finding, whether a run that gave such an amount
+   * took a frame of rows and summed it by hand.
+   */
+  framed?: boolean
+}
+
+/** A text with its mendable defects put right, and what it still fails on. */
+export interface Grounding {
+  /** Whether the text fails on nothing. */
+  ok: boolean
+  /** The text, mended. */
+  text: string
+  /** Each link repair, as `from → to`. */
+  mends: Array<string>
+  /** What the mended text fails on, in check order. */
+  findings: Array<Finding>
+}
+
+/**
+ * The distinctive words of `text`, lowercased: no freshness marker,
+ * markdown mark, stopword or short token.
+ */
+export declare function groundingTokens(text: string): Array<string>
+
+/**
+ * A message the run sends itself, checked as the reply's round checks a
+ * reply.
+ *
+ * Its links are mended, its memory layout put in plain words, then it is
+ * held to the turn so far. `attached` says whether a link target names a file
+ * the run made.
+ *
+ * # Errors
+ *
+ * `turn.today` is not a `YYYY-MM-DD` date.
+ */
+export declare function groundMessage(text: string, turn: Turn, attached?: ((arg: string) => boolean) | undefined | null): Grounding
+
+/**
+ * A reply before it is delivered, checked as the correction round checks
+ * it: its links mended, then held to the turn so far, a link to a file the
+ * run made and a listed sheet row left unstated included.
+ *
+ * # Errors
+ *
+ * `turn.today` is not a `YYYY-MM-DD` date.
+ */
+export declare function groundReply(text: string, turn: Turn, attached?: ((arg: string) => boolean) | undefined | null): Grounding
+
 /** One identifier, with where it sits in the input. */
 export interface IdEntity {
   /** The kind of figure. */
@@ -84,6 +226,52 @@ export interface IdEntity {
   end: number
   /** Its shape. */
   shape: "uuid" | "hex" | "key" | "prefixed" | "token"
+}
+
+/**
+ * The names of an agent's own internals `reply` shows that no person wrote
+ * in `said`: code names (lowercased), memory files no tool result in
+ * `vouching` holds whole, then roots and fixed names, as given.
+ */
+export declare function internalNames(reply: string, said: string, vocabulary: Vocabulary, vouching?: string | undefined | null): Array<string>
+
+/** What a turn's invariants read. */
+export interface InvariantInput {
+  /** The reply as delivered. */
+  response: string
+  /** The loop's output before the presenter; absent when it was not kept. */
+  rawText?: string
+  /** The tools the turn called, by name. */
+  toolsCalled: Array<string>
+  /** The actions the turn queued for a person to approve. */
+  pendingActionCount: number
+  /** The turn's tool results; absent when they were not kept. */
+  toolResultCorpus?: string
+  /** Whether the loop ran out of steps; absent when not recorded. */
+  hitStepLimit?: boolean
+  /**
+   * The hosts of the integrations the turn reaches, on which a link the
+   * reply builds from what it read passes unprinted.
+   */
+  hosts?: Array<string>
+}
+
+/** One invariant's verdict on a turn. */
+export interface InvariantVerdict {
+  /** The invariant's name. */
+  name: "no_hallucinated_action" | "no_fabricated_url" | "no_speaker_prefix" | "silent_marker_is_whole_body" | "step_budget" | "memory_honesty"
+  /** How it came out. */
+  status: "pass" | "fail" | "not_evaluable"
+  /** Why it failed; absent when it did not. */
+  reason?: string
+}
+
+/** A length of time, in the two parts that do not convert into each other. */
+export interface LengthValue {
+  /** Its weeks, days, hours, minutes and seconds, in milliseconds. */
+  milliseconds: number
+  /** Its years, quarters and months, in hundredths of a month. */
+  centimonths: number
 }
 
 /**
@@ -107,6 +295,63 @@ export interface LinkFindings {
   unlinked: Array<string>
 }
 
+/** A row a checking helper listed with an amount. */
+export interface ListedFigure {
+  /** The amount as the helper printed it. */
+  figure: string
+  /** The helper's line for the row. */
+  name: string
+}
+
+/**
+ * The other reading of a duration whose digits fit two, and the step it is
+ * written to.
+ */
+export interface LooseReading {
+  /** The length it reads as. */
+  length: LengthValue
+  /** The step it is written to. */
+  place: LengthValue
+}
+
+/**
+ * The claim `reply` makes to have saved something to memory ("I'll
+ * remember", "saved that to your preferences"), as written; null when it
+ * makes none.
+ */
+export declare function memoryClaim(reply: string): string | null
+
+/** Which lines of the preloaded `notes` `response` visibly draws on. */
+export declare function memoryGrounding(response: string, notes: Array<string>): MemoryGrounding
+
+/** How much of a reply rests on the preloaded memory. */
+export interface MemoryGrounding {
+  /** The lines of content the notes held. */
+  preloadedLines: number
+  /** The lines the reply draws on. */
+  groundedLines: number
+  /** Whether the reply draws on any. */
+  grounded: boolean
+}
+
+/** Where an agent keeps its memory, and the plain words each part reads as. */
+export interface MemoryLayout {
+  /** The memory directory, with its trailing slash ("/memory/"). */
+  root: string
+  /** The prefix every memory tool's name carries ("memory_"). */
+  toolPrefix: string
+  /** The folders under the root, checked first. */
+  folders: Array<Phrase>
+  /** The file names a path ends in, or written alone, in order. */
+  files: Array<Phrase>
+  /** What the root alone reads as. */
+  rootPhrase: string
+  /** What any other path under the root reads as. */
+  otherPhrase: string
+  /** What a memory tool's name reads as. */
+  toolPhrase: string
+}
+
 /**
  * `reply` with the link defects a rule can put right put right.
  *
@@ -128,13 +373,44 @@ export interface MendedReply {
  * The weekday-and-date pairs in `reply` whose weekday is wrong for that date.
  *
  * `today` is `YYYY-MM-DD`; a date written without a year is read in the year
- * nearest it.
+ * nearest it, and a weekday beside a bare day number against the dates
+ * around it.
  *
  * # Errors
  *
  * `today` is not a `YYYY-MM-DD` date.
  */
 export declare function misdatedWeekdays(reply: string, today: string): Array<string>
+
+/**
+ * A per-unit amount a reply pairs with a total and a count it is not the
+ * quotient of.
+ */
+export interface MispairedFigure {
+  /** The per-unit amount as written, its currency mark first ("$45.83"). */
+  perUnit: string
+  /** The clause's total over its count, worked out ("$74.74 / 2 = $37.37"). */
+  stated: string
+  /**
+   * The printed amount the per-unit one is that count's quotient of
+   * ("$91.65 / 2").
+   */
+  printed: string
+}
+
+/**
+ * Per-unit amounts in `reply` stated beside a total and a count they are
+ * not the quotient of.
+ *
+ * A line of `corpus` shows each as another amount over that count.
+ * `corpus` may be a function returning it, called only once a clause holds
+ * a candidate.
+ *
+ * # Errors
+ *
+ * What `corpus` throws.
+ */
+export declare function mispairedPerUnit(reply: string, corpus: string | (() => string)): Array<MispairedFigure>
 
 /** One reading of one number, with where it sits in the input. */
 export interface NumberEntity {
@@ -172,6 +448,58 @@ export interface NumberValue {
    * scale word after its digits ("1.2 million").
    */
   approximate: boolean
+  /**
+   * The decimal reading of a run that also reads as thousands ("1,250"
+   * as 1.25): grounds, and is stated only before a scale word whose
+   * language writes that decimal mark.
+   */
+  ambiguous: boolean
+}
+
+/** One numeric token as a result prints it. */
+export interface NumericToken {
+  /** UTF-16 offset of its first digit. */
+  start: number
+  /** One past its last UTF-16 unit. */
+  end: number
+  /** The values it reads as. */
+  values: Array<number>
+}
+
+/**
+ * The numeric tokens of `text` as a result prints them, each with the
+ * values it reads as; with `loose`, the decimal reading of a run that also
+ * groups too.
+ */
+export declare function numericTokens(text: string, loose?: boolean | undefined | null): Array<NumericToken>
+
+/** A name and the plain words it reads as. */
+export interface Phrase {
+  /** A folder under the memory root, or a file name. */
+  name: string
+  /** What it reads as. */
+  phrase: string
+}
+
+/**
+ * The target of every markdown link in `text` that is not a URL, a mail
+ * address or an anchor, in order, each as written (`url` in `[PR 512](url)`,
+ * `chart.png` in `![chart](chart.png)`).
+ */
+export declare function placeholderTargets(text: string): Array<string>
+
+/**
+ * The figures `text`, a printed line, holds, in each reading ("1,250" is
+ * 1250 and 1.25), a letter allowed after one and no scale word read.
+ */
+export declare function printedFigures(text: string): PrintedFigures
+
+/** The values a printed line holds, in each reading, and apart the amounts. */
+export interface PrintedFigures {
+  /** Every value, in order. */
+  values: Array<number>
+  /** The values behind a currency mark or with a decimal part. */
+  amounts: Array<number>
 }
 
 /**
@@ -181,10 +509,111 @@ export interface NumberValue {
 export declare function proseArithmetic(reply: string, message: string, corpus: string): Array<string>
 
 /**
+ * The rows of a table or list, under a heading that names a date window,
+ * whose own leading date falls outside it, each `"<date>" under "<window>"`.
+ *
+ * A window is a range of dates or a day with a range of hours. `today` is
+ * `YYYY-MM-DD`; a date written without a year is read in the year nearest
+ * it.
+ *
+ * # Errors
+ *
+ * `today` is not a `YYYY-MM-DD` date.
+ */
+export declare function rowsOutsideWindow(reply: string, today: string): Array<string>
+
+/**
+ * `reply` with each memory path, memory file named alone and memory tool
+ * name the person did not write in `said` put in its plain words.
+ */
+export declare function scrubMemoryLayout(reply: string, said: string, layout: MemoryLayout): string
+
+/**
  * Whether `reply` states an amount that `text` carries: a figure the gate
  * holds, or a bare digit run from 10,000 up; never a ratio's figure.
  */
 export declare function sharesAmount(reply: string, text: string): boolean
+
+/**
+ * What `reply` owes the turn's script `runs`: the listed rows it leaves
+ * unstated, and the amounts it took off a sheet without the helpers that
+ * list their rows.
+ */
+export declare function sheetFindings(reply: string, runs: Array<SheetRun>): SheetFindings
+
+/** What a reply owes the runs it drew an amount from. */
+export interface SheetFindings {
+  /** Every row listed by a run the reply draws on, once per line. */
+  listed: Array<ListedFigure>
+  /** The listed rows whose amount the reply does not state. */
+  unstated: Array<ListedFigure>
+  /** The amounts read off a sheet with no helper that lists their rows. */
+  unchecked: UncheckedFigures
+}
+
+/** One script run of the turn, as the sheet checks read it. */
+export interface SheetRun {
+  /** What the run printed. */
+  stdout: string
+  /**
+   * Whether it called a helper that lists the rows its figures rest on;
+   * false when absent.
+   */
+  listsItsRows?: boolean
+  /**
+   * Whether it called a helper that takes a sheet as a frame of rows;
+   * false when absent.
+   */
+  framing?: boolean
+  /** Whether it read a worksheet's cells itself; false when absent. */
+  gridRead?: boolean
+  /**
+   * The rows a helper listed for the reply to name beside its total; none
+   * when absent.
+   */
+  listed?: Array<ListedFigure>
+}
+
+/**
+ * The silent marker `raw` carries: the whole text, or a line of it read as
+ * leaked; null when it carries none.
+ */
+export declare function silentSignal(raw: string): SilentSignal | null
+
+/** A `silent: <reason>` marker a run's text carries. */
+export interface SilentSignal {
+  /** The reason, a single run without whitespace. */
+  reason: string
+  /**
+   * Whether the marker sat inside a longer body rather than being the
+   * whole of it.
+   */
+  leaked: boolean
+}
+
+/**
+ * The `[Name]: ` speaker prefix that opens `reply`'s first line, as
+ * written; null when it opens with none.
+ */
+export declare function speakerPrefix(reply: string): string | null
+
+/** A figure as a reply's clause states it. */
+export interface StatedFigure {
+  /** As written, without its currency mark ("45.83"). */
+  text: string
+  /** Its value. */
+  value: number
+  /** The decimal places written. */
+  places: number
+  /** The currency mark written before it ("$", "USD"), or "" for none. */
+  mark: string
+}
+
+/**
+ * The figures `text`, a clause of a reply, states, in order: its links,
+ * ratios and scaled figures left out, a run that groups read as thousands.
+ */
+export declare function statedFigures(text: string): Array<StatedFigure>
 
 /**
  * Whether `text` states `figure` ("19,851", "1,234.50"), however it groups
@@ -192,9 +621,54 @@ export declare function sharesAmount(reply: string, text: string): boolean
  */
 export declare function statesFigure(text: string, figure: string): boolean
 
+/** What a text is checked against: the turn so far. */
+export interface Turn {
+  /** The thread, the request and the run's tool results. */
+  corpus: string
+  /**
+   * The system prompt, which grounds a link but never an example-domain
+   * one.
+   */
+  prompt?: string
+  /** What the people in the thread wrote. */
+  said?: string
+  /** The turn's date, `YYYY-MM-DD`. */
+  today: string
+  /** Whether an attachment the turn read rides only as pixels. */
+  pixelOnly?: boolean
+  /** The lowercased hosts the caller trusts a built link on. */
+  hosts?: Array<string>
+  /**
+   * Where the agent keeps its memory; a sent message's layout is put in
+   * plain words.
+   */
+  layout?: MemoryLayout
+  /** The names of the agent's internals, when the caller checks them. */
+  vocabulary?: Vocabulary
+  /** The tool results other than the memory tools'. */
+  vouching?: string
+  /** The turn's script runs, for the sheet checks. */
+  runs?: Array<SheetRun>
+}
+
+/** The amounts a reply took from a worksheet without the helpers' checks. */
+export interface UncheckedFigures {
+  /** The amounts, as the reply writes them. */
+  figures: Array<string>
+  /** Whether a run that gave one took a frame of rows and summed it by hand. */
+  framed: boolean
+}
+
+/**
+ * `url` with the dot its Slack message ts kept dropped
+ * (`…/p1791180327.741099` to `…/p1791180327741099`); null for any other link.
+ */
+export declare function undottedMessageLink(url: string): string | null
+
 /**
  * The durations in `reply`, once each, whose length neither `corpus` nor
- * `prompt` carries, written out or as an API gives it.
+ * `prompt` carries, written out or as an API gives it, rounded at the place
+ * the reply writes it to.
  */
 export declare function ungroundedDurations(reply: string, corpus: string, prompt?: string | undefined | null): Array<string>
 
@@ -215,14 +689,30 @@ export declare function ungroundedFigures(reply: string, corpus: string): Array<
 export declare function ungroundedIdentifiers(reply: string, corpus: string, prompt?: string | undefined | null): Array<string>
 
 /**
+ * The figures, ratios and opaque ids of a page's `text` that `corpus`, what
+ * the run read, does not carry.
+ *
+ * `said`, what people wrote, grounds a ratio between their own numbers.
+ * Nothing is checked when the turn read pixels only (`pixel_only`).
+ */
+export declare function ungroundedOnPage(text: string, corpus: string, said?: string | undefined | null, pixelOnly?: boolean | undefined | null): Array<string>
+
+/**
  * Ratios in `reply` (percentages and multiples) that neither `corpus` nor
  * `said`, the person's own words, supports.
  *
  * No printed ratio or decimal rounds to one at the places the reply wrote,
  * and no number the person stated, nor plain arithmetic over two of them,
  * gives it.
+ *
+ * `said` may be a function returning them, called only when a ratio is left
+ * that the corpus does not carry.
+ *
+ * # Errors
+ *
+ * What `said` throws.
  */
-export declare function ungroundedRatios(reply: string, corpus: string, said?: string | undefined | null): Array<string>
+export declare function ungroundedRatios(reply: string, corpus: string, said?: string | (() => string)): Array<string>
 
 /**
  * The parts of `reply` that neither `corpus` nor `prompt` grounds.
@@ -234,6 +724,19 @@ export declare function ungroundedRatios(reply: string, corpus: string, said?: s
  * the link a result carried.
  */
 export declare function ungroundedUrls(reply: string, corpus: string, prompt?: string | undefined | null, hosts?: Array<string> | undefined | null): Array<string>
+
+/**
+ * The links in `text`, once each, that name a page to open: not a Slack
+ * link, nor one of `opened`, the links the thread already went to.
+ */
+export declare function unopenedLinks(text: string, opened?: Array<string> | undefined | null): Array<string>
+
+/**
+ * The opaque ids `reply` states outside its links (a typed id such as
+ * `prod_VU49BpM22sWxIM`, a UUID, a hex digest) that `corpus` never carries,
+ * case aside, once each.
+ */
+export declare function unprintedIds(reply: string, corpus: string): Array<string>
 
 /**
  * The long mixed tokens in `reply`, once each, that neither `corpus` nor
@@ -255,3 +758,33 @@ export interface UrlEntity {
   /** One past the last UTF-16 unit. */
   end: number
 }
+
+/**
+ * Whether `read` carries `url` whole, without its scheme, or as the path a
+ * page links it by, the address parsed as a browser parses it.
+ */
+export declare function urlPrintedIn(url: string, read: string): boolean
+
+/** The names a reply must not show unless a person wrote them. */
+export interface Vocabulary {
+  /**
+   * The tools and sandbox functions; one with an underscore counts as a
+   * word, one without only as a call.
+   */
+  names: Array<string>
+  /**
+   * Memory file names ("workspace.md"); a tool result in `vouching` that
+   * holds one vouches for it.
+   */
+  files: Array<string>
+  /** Directories ("/memory/"), counted only where they begin a path. */
+  roots: Array<string>
+  /** Other names (programs, environment variables), counted anywhere. */
+  fixed: Array<string>
+}
+
+/**
+ * `text` with every http(s) link it holds put out as a space, wherever the
+ * link's text recurs.
+ */
+export declare function withoutLinks(text: string): string
