@@ -134,7 +134,7 @@ pub struct Figure<'a, D> {
     /// For a scaled figure, the power of ten its last written digit stands
     /// for ("34,0M" is written to 10⁵, "1 000 mln" to 10⁶), which the
     /// trailing zeros of the scaled digits do not show.
-    pub place: Option<u32>,
+    pub place: Option<u8>,
 }
 
 /// A reading as [`scan::Token::for_each_reading`] yields it: its digits
@@ -666,7 +666,14 @@ impl Reading<'_, '_> {
             sign: self.sign.stated(),
             around: self
                 .approximate
-                .then(|| Around::of(self.integer, self.fraction, self.place, self.marked()))
+                .then(|| {
+                    Around::of(
+                        self.integer,
+                        self.fraction,
+                        self.place.map(u32::from),
+                        self.marked(),
+                    )
+                })
                 .flatten(),
         }
     }

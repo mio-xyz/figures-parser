@@ -355,9 +355,10 @@ impl<'a> Token<'a> {
                     scaled: r.scaled,
                     magnitude: small(power),
                     full_text: r.full_text,
-                    place: u32::try_from(r.fraction.map_or(0, |written| written.chars().count()))
+                    place: u8::try_from(r.fraction.map_or(0, |written| written.chars().count()))
                         .ok()
-                        .and_then(|places| power.checked_sub(places)),
+                        .zip(u8::try_from(power).ok())
+                        .and_then(|(places, power)| power.checked_sub(places)),
                 });
             }
         });
