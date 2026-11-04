@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
-const { extract, ungroundedFigures, ungroundedRatios, mispairedPerUnit, amountsSharedWith, sharesAmount, statesFigure, proseArithmetic, ungroundedUrls, linkFindings, mendedLinks, fabricatedUrls, ungroundedEmails, misdatedWeekdays, rowsOutsideWindow, ungroundedIdentifiers, unseenTokens, ungroundedDurations, unprintedIds, urlPrintedIn, ungroundedOnPage, PageHolds, undottedSlackLink, placeholderTargets, unopenedLinks, memoryGrounding, groundingTokens, builtFromCorpus } = createRequire(import.meta.url)("./index.js");
+const { extract, ungroundedFigures, ungroundedRatios, mispairedPerUnit, amountsSharedWith, sharesAmount, statesFigure, proseArithmetic, ungroundedUrls, linkFindings, mendedLinks, fabricatedUrls, ungroundedEmails, misdatedWeekdays, rowsOutsideWindow, ungroundedIdentifiers, unseenTokens, ungroundedDurations, unprintedIds, urlPrintedIn, ungroundedOnPage, PageHolds, undottedSlackLink, placeholderTargets, unopenedLinks, memoryGrounding, groundingTokens, builtFromCorpus, speakerPrefix, memoryClaim, silentSignal } = createRequire(import.meta.url)("./index.js");
 
 const entities = extract("Total $1,250 and ١٢", { kinds: ["number"] });
 const has = (text, integer) => entities.some((e) => e.text === text && e.value.integer === integer);
@@ -78,4 +78,14 @@ assert.deepEqual(groundingTokens("**Owner:** Ana at 10:00"), ["owner", "ana", "1
 assert.deepEqual(unprintedIds("Session cs_test_a1B2c3D4e5F6 opened.", ""), ["cs_test_a1B2c3D4e5F6"]);
 assert.equal(builtFromCorpus("https://github.com/new", "", ["github.com"]), true);
 assert.equal(builtFromCorpus("https://github.com/o/r", "", ["github.com"]), false);
+assert.equal(speakerPrefix("[Ana]: hello"), "[Ana]: ");
+assert.equal(speakerPrefix("See [ref]: x"), null);
+assert.equal(memoryClaim("Done, I'll remember that."), "I'll remember");
+assert.equal(memoryClaim("I've saved it to the wiki."), null);
+assert.deepEqual(silentSignal("silent: no_signal"), { reason: "no_signal", leaked: false });
+assert.deepEqual(silentSignal("Summary.\nsilent: no_signal"), { reason: "no_signal", leaked: true });
+assert.equal(silentSignal("Hello"), null);
+assert.deepEqual(extract("https://acme.io/q?family=Roboto|Inter -> used", { kinds: ["url"] }).map((e) => e.text), ["https://acme.io/q?family=Roboto|Inter"]);
+assert.equal(builtFromCorpus("https://www.facebook.com/ads/library/?view_all_page_id=%31%32", "page 12"), true);
+assert.deepEqual(unprintedIds("utm_campaign_BlackFriday2024 and sk_live_51HxQz9KdLmN2pQr", ""), ["sk_live_51HxQz9KdLmN2pQr"]);
 console.log("ok");

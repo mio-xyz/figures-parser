@@ -77,6 +77,7 @@ what a text states, with byte spans.
 | [Pages](#pages) | `ungrounded_on_page`, `PageHolds` | | the corpus carries its figures, ratios and ids |
 
 | [Memory](#memory) | `memory_grounding` | `grounding_tokens` | (counts the dossier lines it draws on: two of a line's words and half of them, or three in a row) |
+| [A reply's form](#a-replys-form) | `speaker_prefix`, `memory_claim`, `silent_signal` | | (reads a speaker prefix, a claim to have saved to memory, and the marker that delivers nothing) |
 
 ### Numbers
 
@@ -443,7 +444,7 @@ assert_eq!(
 
 `unprinted_ids(reply, corpus)` is the stricter check for opaque ids, which
 no reasoning yields: every typed id (`prod_VU49BpM22sWxIM`, `cs_test_…`: a
-prefix of one to three lowercase words and a mixed body), UUID and hex digest the reply states outside its
+lowercase prefix, a mode word such as `test` or `live` allowed after it, and a mixed body), UUID and hex digest the reply states outside its
 links is held to the corpus, whatever its prefix and inside code too. A run
 right after `@` or `#` is a chat mention and is left alone.
 
@@ -474,6 +475,23 @@ use figures_parser::memory_grounding;
 
 let dossier = "# Ana\nPrefers async standups at 10:00";
 assert!(memory_grounding("Standup at 10:00, async as Ana prefers.", &[dossier]).grounded);
+```
+
+### A reply's form
+
+`speaker_prefix(reply)` gives the `[Name]: ` prefix a reply's first line
+opens with, the history's speaker format echoed. `memory_claim(reply)` gives
+a claim to have saved something to memory ("I'll remember", "saved that to
+your preferences"), for the caller to hold to the memory writes the turn
+made. `silent_signal(raw)` reads the `silent: <reason>` marker a run writes
+to deliver nothing, and whether it leaked into a longer body.
+
+```rust
+use figures_parser::{memory_claim, silent_signal, speaker_prefix};
+
+assert_eq!(speaker_prefix("[Ana]: hello"), Some("[Ana]: "));
+assert_eq!(memory_claim("I've saved it to the wiki."), None);
+assert!(silent_signal("Summary.\nsilent: no_signal").is_some_and(|s| s.leaked));
 ```
 
 ### Durations

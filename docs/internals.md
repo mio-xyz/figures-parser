@@ -414,7 +414,10 @@ linkify-it opens one only after a space, punctuation other than `_`, a
 control character or a separator; so a link in code, in emphasis or after a
 script written without spaces is read. A backtick, a `|` or `\|` that opens
 a chat link's `label>` on the same line, and a `[label](` that opens a
-markdown link end a link, where linkify-it reads on. The scan follows where
+markdown link end a link, where linkify-it reads on. The `>` must close a
+label rather than be prose: not after a space, `-` or `=` (`filter > 5`,
+`->`, `=>`), not before `=` or `>`, and with no `)` or `]` in the label that
+it did not open (`(draft|v2)>`). The scan follows where
 linkify-it would look next (past the last scheme it tried, or the last
 character of the link it read, read without those cuts), so a link read where
 linkify-it reads none, or read with a user name, ends before any link
@@ -451,7 +454,11 @@ A shape's host passes unprinted at its root only, and no built link carries
 a fragment. A link's path is read as a browser resolves it: `.` and `..`
 segments (plain or escaped) read and `\` taken as `/`, so `facebook.com/.`
 is the root. A segment's characters are compared as written, where Node
-percent-encodes them, so a page name outside ASCII holds no digit.
+percent-encodes them, so a page name outside ASCII holds no digit. A
+query's keys and values are decoded as a browser decodes them (`%31` is
+`1`, `+` a space) before they are looked for. Only an http(s) link is taken,
+its slashes after the scheme read as a browser reads them (none, one, three
+or `\`, so `https:/acme.io` is `https://acme.io`).
 `built_from_corpus(url, corpus, hosts)` is this test alone.
 
 `ungrounded_urls(reply, corpus, prompt, hosts)` adds four checks for a reply
@@ -462,7 +469,8 @@ about to be sent:
 - a link target that is not a URL, such as `[PR 512](url)`;
 - an item's label on a link that stands in for it: `[#87]` on the
   repository's root, or on another number's page (`/pull/418`, `/418/files`),
-  read off the URL's last path segment (no digit, or all digits); a number
+  read off the URL's last path segment (no digit, or all digits), or on a
+  link that does not parse (a port past 65535, a host a browser rejects); a number
   on a chat message link is that message's own; a key (`CORE-1710`) on any
   link that does not hold it;
 - an item named in prose without the link a source gave for it, as "#87
@@ -718,10 +726,12 @@ and model names, so they are never held; `unseen_tokens` returns them apart.
 `unprinted_ids(reply, corpus)` reads its own three shapes, each a whole run
 of ASCII letters, digits, `_` and `-` (no outer `_` or `-` dropped):
 
-- a typed id: one to three words of two to eight lowercase letters, each
-  closed by `_` (`prod_`, `cs_test_`), then ten or more letters and digits
+- a typed id: a word of two to eight lowercase letters, then up to two
+  words that name a key's mode (`test`, `live`, `sandbox`), each closed by
+  `_` (`prod_`, `cs_test_`), then ten or more letters and digits
   mixing both, in mixed case unless sixteen or more long, so a snake-case
-  name (`df_sales2024q1`) is not one;
+  name (`df_sales2024q1`) is not one, nor one of several words
+  (`utm_campaign_BlackFriday2024`, `user_id_v2Final2024`);
 - a UUID;
 - a hex digest of 8 to 64 digits mixing digits and letters.
 
@@ -744,6 +754,27 @@ rest lowercased and cut at every character that is no letter, number or
 units or among the stopwords dropped. A line of two or more distinct tokens
 is drawn on when the reply shares two or more of them and at least half, or
 repeats three of the line's tokens in a row.
+
+## A reply's form
+
+Whitespace here is JavaScript's `\s`: Unicode's `White_Space` without
+U+0085, with U+FEFF.
+
+- `speaker_prefix` reads, after leading whitespace, a `[`, a name of 1 to 80
+  UTF-16 units holding no `]` and no `\n`, then `]:` and one whitespace
+  character. Only the reply's start is read.
+- `memory_claim` reads, from a word boundary, "I'll remember" or "I will
+  remember", "I've" or "I have" then "noted" or "remembered", "committed
+  this/that/it to memory", or "noted/saved/added/stored/updated this/that/it
+  to/in" before an optional "my/your/the" and "memory", "preference(s)",
+  "note(s)", "dossier" or "profile". Case is folded in ASCII only, and the
+  apostrophe is straight or curly.
+- `silent_signal` reads past a `[CURRENT MESSAGE]` framing echoed at the
+  start (whitespace before it, one space after). The whole text, trimmed, is
+  the marker when it is `silent:`, optional whitespace and one run without
+  whitespace; otherwise the first line that opens with such a marker, its
+  run followed by whitespace up to a line end (`\n`, `\r`, U+2028, U+2029)
+  or the end, is the marker leaked.
 
 ## Durations
 

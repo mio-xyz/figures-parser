@@ -5,7 +5,7 @@
 //! printed.
 
 use super::ground::occurrences;
-use super::{is_double_dot, is_single_dot, scheme_len};
+use super::{is_double_dot, is_single_dot};
 use crate::text::contains_ignoring_case;
 
 /// The parts of an http(s) link.
@@ -21,9 +21,18 @@ pub(super) struct Parts<'a> {
 }
 
 impl<'a> Parts<'a> {
-    /// The parts of `url`; None when it is no http(s) link with a host.
+    /// The parts of `url`; None when it is no http(s) link with a host. The
+    /// slashes after the scheme are read as a browser reads them: any number,
+    /// `\\` among them, none included (`https:/acme.io` is `https://acme.io`).
     pub(super) fn of(url: &'a str) -> Option<Self> {
-        let rest = url.get(scheme_len(url, true)?..)?;
+        let colon = url.bytes().take(6).position(|b| b == b':')?;
+        let scheme = url.get(..colon)?;
+        if !(scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https")) {
+            return None;
+        }
+        let rest = url
+            .get(colon.saturating_add(1)..)?
+            .trim_start_matches(['/', '\\']);
         let host_len = rest.find(['/', '\\', '?', '#']).unwrap_or(rest.len());
         let authority = rest.get(..host_len)?;
         let host = authority.rsplit('@').next().unwrap_or(authority);
@@ -69,13 +78,10 @@ impl<'a> Parts<'a> {
         Segments::Resolved(resolved.into_iter())
     }
 
-    /// The query's pairs, each a key and a value (empty without an `=`).
-    fn pairs(&self) -> impl Iterator<Item = (&'a str, &'a str)> {
-        self.query
-            .unwrap_or_default()
-            .split('&')
-            .filter(|pair| !pair.is_empty())
-            .map(|pair| pair.split_once('=').unwrap_or((pair, "")))
+    /// The query's pairs, each a key and a value (empty without an `=`),
+    /// decoded as a browser decodes them: `%31` is `1`, `+` a space.
+    fn pairs(&self) -> url::form_urlencoded::Parse<'a> {
+        url::form_urlencoded::parse(self.query.unwrap_or_default().as_bytes())
     }
 
     /// Whether the host is `name`, or a host under it, case aside.
@@ -163,7 +169,7 @@ fn slack_message(parts: &Parts<'_>, corpus: &str) -> bool {
     };
     let query_printed = parts
         .pairs()
-        .all(|(key, value)| matches!(key, "thread_ts" | "cid") && prints_id(corpus, value));
+        .all(|(key, value)| matches!(&*key, "thread_ts" | "cid") && prints_id(corpus, &value));
     query_printed && prints_id(corpus, channel) && prints_id(corpus, &format!("{seconds}.{micros}"))
 }
 
@@ -231,8 +237,8 @@ fn ad_library(parts: &Parts<'_>, corpus: &str) -> bool {
     library
         && parts
             .pairs()
-            .find(|&(key, _)| key == "view_all_page_id")
-            .is_some_and(|(_, page)| is_number(page) && prints_id(corpus, page))
+            .find(|(key, _)| key == "view_all_page_id")
+            .is_some_and(|(_, page)| is_number(&page) && prints_id(corpus, &page))
 }
 
 /// Whether `url` names no item: a host root, or on a trusted host (one in

@@ -99,8 +99,6 @@ it stands; a contribution that closes one should remove it here.
 
 - A link without a scheme ("acme.io/x") is not read in a reply; a tool
   returns full links. In a corpus one grounds the reply's schemed link.
-- A link's query is read as written: an encoded value in a thread link is
-  not decoded before it is looked for in the corpus.
 - A built link's host list is the caller's: with none given, only a known
   shape's own host passes unprinted, and only at its root.
 - `url_printed_in` grounds an address by its path alone wherever the text
@@ -164,7 +162,11 @@ it stands; a contribution that closes one should remove it here.
   chat user ids ("U01ABCDEF2") land among them.
 - `unprinted_ids` reads no tracker key (`ungrounded_identifiers` holds one
   to the corpus's other keys of its prefix), and no typed id whose prefix
-  holds a digit (`s3_…`) or four words or more.
+  holds a digit (`s3_…`), or a second word that names no key's mode
+  (`test`, `live`, `sandbox`).
+- A one-word prefix before a mixed body is read as a typed id, so a name a
+  reply coins in that shape (`campaign_BlackFriday2024`) is held to the
+  corpus, as the TypeScript check holds it.
 
 ## Durations
 

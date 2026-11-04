@@ -156,7 +156,9 @@ impl Reader<'_> {
 
     /// Whether the `|` or `\|` at byte `at` opens the label of a chat link
     /// whose `<` is not there: a `>` closes it on the same line, with no `<`
-    /// or `|` before it.
+    /// or `|` before it. A `>` that is prose rather than a label's close (an
+    /// arrow, `->` or `=>`, a comparison written with a space before it, or
+    /// `>=`) closes none, so a `|` in a query reads on.
     fn opens_label(&self, at: usize, c: char) -> bool {
         let label = match c {
             '|' => at.saturating_add(1),
@@ -165,14 +167,25 @@ impl Reader<'_> {
             }
             _ => return false,
         };
-        self.text
-            .as_bytes()
+        let bytes = self.text.as_bytes();
+        let Some(close) = bytes
             .get(label..)
             .unwrap_or_default()
             .iter()
             .take(LABEL_BYTES)
-            .find(|&&b| matches!(b, b'>' | b'<' | b'|' | b'\n'))
-            == Some(&b'>')
+            .position(|&b| matches!(b, b'>' | b'<' | b'|' | b'\n'))
+            .map(|found| label.saturating_add(found))
+            .filter(|&close| bytes.get(close) == Some(&b'>'))
+        else {
+            return false;
+        };
+        let before = close
+            .checked_sub(1)
+            .filter(|&i| i >= label)
+            .and_then(|i| bytes.get(i));
+        !before.is_some_and(|b| b.is_ascii_whitespace() || matches!(b, b'-' | b'='))
+            && !matches!(bytes.get(close.saturating_add(1)), Some(b'=' | b'>'))
+            && closes_nothing_open(bytes.get(label..close).unwrap_or_default())
     }
 
     /// Whether byte `at` is past the end, or reads as a space.
@@ -593,6 +606,29 @@ fn scheme_before(bytes: &[u8], anchor: usize) -> Option<(usize, Scheme, usize)> 
             .filter(|head| head.eq_ignore_ascii_case(name))
             .map(|_| (start, scheme, name.len().saturating_add(1)))
     })
+}
+
+/// Whether `label` closes no bracket it did not open: a `)` or `]` with
+/// nothing open before it closes a group the link opened (`(draft|v2)`), so
+/// the `|` sits inside the link rather than before a label.
+fn closes_nothing_open(label: &[u8]) -> bool {
+    let mut round = 0_usize;
+    let mut square = 0_usize;
+    for &b in label {
+        let depth = match b {
+            b'(' | b')' => &mut round,
+            b'[' | b']' => &mut square,
+            _ => continue,
+        };
+        if matches!(b, b'(' | b'[') {
+            *depth = depth.saturating_add(1);
+        } else if let Some(less) = depth.checked_sub(1) {
+            *depth = less;
+        } else {
+            return false;
+        }
+    }
+    true
 }
 
 /// Whether linkify-it opens a link after `before`: at the start, or after a

@@ -188,9 +188,25 @@ pub fn fabricated_urls<'r>(reply: &'r str, corpus: &str, hosts: &[&str]) -> Vec<
 /// Whether `url` stands in for a number rather than linking a thing of
 /// its own: its last path segment names no item (a repo: no digit in it) or
 /// another number ("/pull/418"). A link to a thing of another kind, such as
-/// a Slack message, is that thing's own.
+/// a Slack message, is that thing's own. A link a browser cannot open (a
+/// port past 65535, a host it rejects) links nothing, so it stands in too.
 fn stands_in_for_number(url: &str) -> bool {
-    let last = Parts::of(url)
+    let parts = Parts::of(url);
+    // A host of plain ASCII labels whose punycode does not decode is one
+    // Node's parser takes, so it parses here too.
+    let plain_host = || {
+        parts.as_ref().is_some_and(|parts| {
+            parts
+                .host
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.'))
+        })
+    };
+    if url::Url::parse(url).is_err_and(|error| error != url::ParseError::IdnaError || !plain_host())
+    {
+        return true;
+    }
+    let last = parts
         .and_then(|parts| parts.segments().last())
         .unwrap_or_default();
     let digits = last.bytes().filter(u8::is_ascii_digit).count();

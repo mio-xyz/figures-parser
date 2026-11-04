@@ -232,10 +232,11 @@ fn an_opaque_id_is_grounded_by_a_corpus_that_lowercases_to_it() {
 }
 
 // The TypeScript check reads a typed id's prefix as one word, so an id under
-// a prefix of two or three (a checkout session's `cs_test_`, a key's
-// `sk_live_`) goes unread; such an id is as opaque as one under one word.
+// a prefix that names a key's mode (a checkout session's `cs_test_`, a key's
+// `sk_live_`) goes unread; such an id is as opaque as one under one word. A
+// prefix of several words that names no mode is a snake-case name.
 #[test]
-fn holds_a_typed_id_whose_prefix_is_two_or_three_words() {
+fn holds_a_typed_id_whose_prefix_names_a_mode() {
     use figures_parser::unprinted_ids;
     assert_eq!(
         unprinted_ids(
@@ -255,5 +256,20 @@ fn holds_a_typed_id_whose_prefix_is_two_or_three_words() {
     assert_eq!(
         unprinted_ids("ab_cd_ef_gh_a1B2c3D4e5F6 and df_sales_2024q1", ""),
         Vec::<&str>::new()
+    );
+    assert_eq!(
+        unprinted_ids(
+            "tag it utm_campaign_BlackFriday2024 | use `fb_ads_Q4Retarget2024` | call it \
+             test_user_Admin2026x | env var stripe_key_Live2026Prod | the column user_id_v2Final2024",
+            ""
+        ),
+        Vec::<&str>::new()
+    );
+    assert_eq!(
+        unprinted_ids(
+            "acct_sandbox_Q4x9Lm2Pz8Tw and pk_test_live_9xQz2LmN4pQr",
+            ""
+        ),
+        ["acct_sandbox_Q4x9Lm2Pz8Tw", "pk_test_live_9xQz2LmN4pQr"]
     );
 }

@@ -173,7 +173,11 @@ where the TypeScript reads the text wrongly:
 - a backtick, a chat link's `|label>` without its `<`, and a markdown
   link's `[label](` end a link that linkify-it reads on through, so
   `https://acme.io/88a|the doc>` is `https://acme.io/88a` and
-  `https://acme.io/x[docs](https://b.io/y)` is two links;
+  `https://acme.io/x[docs](https://b.io/y)` is two links. A `>` that is
+  prose closes no label: an arrow (`->`, `=>`), a comparison with a space
+  before it (`filter > 5`), `>=`, or one after a `)` or `]` the label never
+  opened (`(draft|v2)>`), so `?family=Roboto|Inter -> used` stays one link,
+  as linkify-it reads it;
 - a link glued to a letter of another script, an emoji or `_`, or after a
   scheme that opens no link (`http:https://b.io`), is read, and ends before
   any link linkify-it reads on its own;
@@ -185,5 +189,17 @@ where the TypeScript reads the text wrongly:
   port or an address included (`acme.app/x`, `acme.io:8080/x`,
   `127.0.0.1/x`), where the TypeScript check finds one only under the
   top-level domains linkify-it lists;
-- an opaque id under a prefix of two or three words (`cs_test_…`,
-  `sk_live_…`) is held to the corpus, where the TypeScript reads none.
+- an opaque id whose prefix names a key's mode after its first word
+  (`cs_test_…`, `sk_live_…`, `…_sandbox_…`) is held to the corpus, where the
+  TypeScript reads none; a prefix of several words that names no mode
+  (`utm_campaign_…`, `user_id_…`) is a name the reply coins and is not read,
+  as the TypeScript reads none;
+- `built_from_corpus` takes an http(s) link only, its slashes read as a
+  browser reads them (`https:/acme.io`, `https:///acme.io`), where the
+  TypeScript check also takes `ftp:`, `ws:`, `file:` or a defanged `hxxp:`
+  link on a service's host as one the reply may build: the service serves
+  no page there, so such a link is no page of its, and no reader opens a
+  defanged one;
+- `memory_claim` reads a claim written with a curly apostrophe ("I’ll
+  remember"), where the TypeScript check reads a straight one only; the
+  claim is the same.

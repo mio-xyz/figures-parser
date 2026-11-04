@@ -18,6 +18,7 @@
 //! | Identifiers | [`identifiers`] | [`ungrounded_identifiers`], [`unprinted_ids`], [`unseen_tokens`] |
 //! | Durations | [`durations`] | [`ungrounded_durations`] |
 //! | Memory | [`grounding_tokens`] | [`memory_grounding`] |
+//! | A reply's form | | [`speaker_prefix`], [`memory_claim`], [`silent_signal`] |
 //!
 //! # Example
 //!
@@ -56,6 +57,8 @@ mod kind;
 mod memory;
 pub mod number;
 mod page;
+
+mod reply;
 mod text;
 mod url;
 pub mod utf16;
@@ -72,6 +75,8 @@ pub use number::{
     numbers, prose_arithmetic, shares_amount, states_figure, ungrounded_figures, ungrounded_ratios,
 };
 pub use page::{HOLDS_PER_PAGE, PageHolds, ungrounded_on_page};
+
+pub use reply::{SilentSignal, memory_claim, silent_signal, speaker_prefix};
 pub use url::{
     LinkFindings, Mended, Url, built_from_corpus, fabricated_urls, link_findings, mended_links,
     placeholder_targets, undotted_slack_link, ungrounded_urls, unopened_links, url_printed_in,

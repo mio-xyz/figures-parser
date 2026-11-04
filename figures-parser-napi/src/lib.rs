@@ -690,3 +690,41 @@ pub fn grounding_tokens(text: String) -> Vec<String> {
 pub fn built_from_corpus(url: String, corpus: String, hosts: Option<Vec<String>>) -> bool {
     figures_parser::built_from_corpus(&url, &corpus, &host_list(hosts.as_deref()))
 }
+
+/// The `[Name]: ` speaker prefix that opens `reply`'s first line, as
+/// written; null when it opens with none.
+#[napi(catch_unwind)]
+#[must_use]
+pub fn speaker_prefix(reply: String) -> Option<String> {
+    figures_parser::speaker_prefix(&reply).map(str::to_owned)
+}
+
+/// The claim `reply` makes to have saved something to memory ("I'll
+/// remember", "saved that to your preferences"), as written; null when it
+/// makes none.
+#[napi(catch_unwind)]
+#[must_use]
+pub fn memory_claim(reply: String) -> Option<String> {
+    figures_parser::memory_claim(&reply).map(str::to_owned)
+}
+
+/// A `silent: <reason>` marker a run's text carries.
+#[napi(object)]
+pub struct SilentSignal {
+    /// The reason, a single run without whitespace.
+    pub reason: String,
+    /// Whether the marker sat inside a longer body rather than being the
+    /// whole of it.
+    pub leaked: bool,
+}
+
+/// The silent marker `raw` carries: the whole text, or a line of it read as
+/// leaked; null when it carries none.
+#[napi(catch_unwind)]
+#[must_use]
+pub fn silent_signal(raw: String) -> Option<SilentSignal> {
+    figures_parser::silent_signal(&raw).map(|signal| SilentSignal {
+        reason: signal.reason.to_owned(),
+        leaked: signal.leaked,
+    })
+}

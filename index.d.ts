@@ -176,6 +176,13 @@ export interface LooseReading {
   /** The step it is written to. */
   place: LengthValue
 
+ * The claim `reply` makes to have saved something to memory ("I'll
+ * remember", "saved that to your preferences"), as written; null when it
+ * makes none.
+ */
+export declare function memoryClaim(reply: string): string | null
+
+/**
  * Which lines of `dossiers` (each a preloaded dossier's text) `response`
  * visibly draws on: two or more of a line's distinctive words and half of
  * them, or three of its words in a row.
@@ -315,6 +322,29 @@ export declare function rowsOutsideWindow(reply: string, today: string): Array<s
  * holds, or a bare digit run from 10,000 up; never a ratio's figure.
  */
 export declare function sharesAmount(reply: string, text: string): boolean
+
+/**
+ * The silent marker `raw` carries: the whole text, or a line of it read as
+ * leaked; null when it carries none.
+ */
+export declare function silentSignal(raw: string): SilentSignal | null
+
+/** A `silent: <reason>` marker a run's text carries. */
+export interface SilentSignal {
+  /** The reason, a single run without whitespace. */
+  reason: string
+  /**
+   * Whether the marker sat inside a longer body rather than being the
+   * whole of it.
+   */
+  leaked: boolean
+}
+
+/**
+ * The `[Name]: ` speaker prefix that opens `reply`'s first line, as
+ * written; null when it opens with none.
+ */
+export declare function speakerPrefix(reply: string): string | null
 
 /**
  * Whether `text` states `figure` ("19,851", "1,234.50"), however it groups

@@ -10,11 +10,12 @@ use figures_parser::number::scan::{Scratch, tokens};
 use figures_parser::utf16::{Utf16Cursor, units};
 use figures_parser::{
     Date, PageHolds, built_from_corpus, durations, emails, extract_numbers, fabricated_urls,
-    grounding_tokens, identifiers, link_findings, memory_grounding, mended_links,
+    grounding_tokens, identifiers, link_findings, memory_claim, memory_grounding, mended_links,
     misdated_weekdays, mispaired_per_unit, numbers, placeholder_targets, prose_arithmetic,
-    rows_outside_window, undotted_slack_link, ungrounded_durations, ungrounded_emails,
-    ungrounded_figures, ungrounded_identifiers, ungrounded_on_page, ungrounded_ratios,
-    ungrounded_urls, unopened_links, unprinted_ids, unseen_tokens, url_printed_in, urls,
+    rows_outside_window, silent_signal, speaker_prefix, undotted_slack_link, ungrounded_durations,
+    ungrounded_emails, ungrounded_figures, ungrounded_identifiers, ungrounded_on_page,
+    ungrounded_ratios, ungrounded_urls, unopened_links, unprinted_ids, unseen_tokens,
+    url_printed_in, urls,
 };
 
 /// Calls every entry point on the three texts, and returns a sum the
@@ -41,7 +42,10 @@ fn exercise(reply: &str, corpus: &str, prompt: &str) -> usize {
             + extract_numbers(text).len()
             + emails(text).len()
             + identifiers(text).len()
-            + durations(text).len();
+            + durations(text).len()
+            + speaker_prefix(text).map_or(0, str::len)
+            + memory_claim(text).map_or(0, str::len)
+            + silent_signal(text).map_or(0, |signal| signal.reason.len());
         let found = urls(text);
         let mut cursor = Utf16Cursor::new(text);
         for url in &found {
@@ -357,6 +361,15 @@ const POOL: &[&str] = &[
     "\\..",
     "%2e",
     "|x>",
+    " -> ",
+    "(a|b)>",
+    "silent: ",
+    "\n[CURRENT MESSAGE] ",
+    "[Mio]: ",
+    "I’ll remember",
+    "saved it to my notes",
+    "%31",
+    "https:/",
     "cs_test_",
     "a1B2c3D4e5F6",
     "[derived ",

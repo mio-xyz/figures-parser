@@ -425,6 +425,47 @@ fn ends_a_link_where_chat_or_markdown_syntax_opens() {
     );
 }
 
+// A `>` later in the sentence that is an arrow, a comparison or `>=` closes
+// no chat label, so the pipe before it stays in the link, as linkify-it
+// reads it, and an invented link is not cut down to one the corpus holds.
+#[test]
+fn reads_on_through_a_pipe_when_the_later_angle_bracket_is_prose() {
+    let reply = "Fonts: https://fonts.example.org/css?family=Roboto|Inter -> used on the site";
+    assert_eq!(
+        texts(reply),
+        ["https://fonts.example.org/css?family=Roboto|Inter"]
+    );
+    assert_eq!(
+        fabricated_urls(reply, "https://fonts.example.org/css?family=Roboto"),
+        ["https://fonts.example.org/css?family=Roboto|Inter"]
+    );
+    assert_eq!(
+        texts("https://acme.io/blog/(draft|v2) -> published"),
+        ["https://acme.io/blog/(draft|v2)"]
+    );
+    assert_eq!(
+        texts("https://grafana.acme.io/d/abc?var-env=prod|staging (filter > 5)"),
+        ["https://grafana.acme.io/d/abc?var-env=prod|staging"]
+    );
+    assert_eq!(
+        texts("https://acme.io/q?a=1|2 => b and x|y>=3"),
+        ["https://acme.io/q?a=1|2"]
+    );
+    assert_eq!(
+        texts("https://acme.io/q?a=1|b>=3"),
+        ["https://acme.io/q?a=1|b"]
+    );
+    assert_eq!(
+        texts("https://acme.io/88a|the doc>."),
+        ["https://acme.io/88a"]
+    );
+    // A `)` the label never opened closes a group the link opened.
+    assert_eq!(
+        texts("https://acme.io/blog/(draft|v2)>."),
+        ["https://acme.io/blog/(draft|v2)"]
+    );
+}
+
 // A link read where linkify-it reads none (glued to a letter, or after a
 // scheme that opens no link, which linkify-it then skips past) never takes
 // in one linkify-it reads on its own.
@@ -698,6 +739,31 @@ const PR: &str = "https://github.com/mio-xyz/coworker/pull/3647";
 const DOTTED: &str = "https://mioxyz.slack.com/archives/C09R2NX3D1R/p1791180327.741099";
 const UNDOTTED: &str = "https://mioxyz.slack.com/archives/C09R2NX3D1R/p1791180327741099";
 
+// A link no browser opens (a port past 65535, a host it rejects, an
+// unclosed address) links no item, so a number's label on it is misdirected.
+#[test]
+fn takes_a_number_on_a_link_that_does_not_parse_as_misdirected() {
+    let reply = "[#12](https://acme.io:65536/org/prod_VU49Bp) ; [#12](https://%zz.io/org/a1b) ; [#12](https://[::1/x1y)";
+    assert_eq!(
+        figures_parser::link_findings(reply, "", "", &[]).misdirected,
+        [
+            "[#12](https://acme.io:65536/org/prod_VU49Bp)",
+            "[#12](https://%zz.io/org/a1b)",
+            "[#12](https://[::1/x1y)"
+        ]
+    );
+    assert_eq!(
+        figures_parser::link_findings("[#12](https://acme.io:8080/org/prod_VU49Bp)", "", "", &[])
+            .misdirected,
+        Vec::<&str>::new()
+    );
+    // A host of ASCII labels whose punycode does not decode still parses.
+    assert_eq!(
+        figures_parser::link_findings("[#12](https://xn--zz.io/org/a1b)", "", "", &[]).misdirected,
+        Vec::<&str>::new()
+    );
+}
+
 #[test]
 fn keeps_the_findings_apart_by_kind_and_lists_them_as_the_flat_check_does() {
     let reply =
@@ -911,6 +977,51 @@ fn lists_the_pages_a_message_links_once_each_less_slack_and_the_opened() {
         ),
         ["https://a.example.org/faq"]
     );
+}
+
+// A query's values are read decoded, as a browser reads them, and the
+// slashes after an http(s) scheme as a browser reads them; another scheme's
+// link on a service's host is no page the service serves.
+#[test]
+fn reads_a_built_link_s_query_decoded_and_its_scheme_as_a_browser_does() {
+    use figures_parser::built_from_corpus;
+    assert!(built_from_corpus(
+        "https://www.facebook.com/ads/library/?view_all_page_id=%31%32",
+        "page 12",
+        &[]
+    ));
+    assert!(built_from_corpus(
+        "https://www.facebook.com/ads/library/?view%5Fall_page_id=12",
+        "page 12",
+        &[]
+    ));
+    assert!(built_from_corpus(
+        "https://a.slack.com/archives/C1/p1791180327741099?cid=C%31",
+        "a.slack.com C1 1791180327.741099",
+        &[]
+    ));
+    assert!(!built_from_corpus(
+        "https://a.slack.com/archives/C1/p1791180327741099?cid=C%32",
+        "a.slack.com C1 1791180327.741099",
+        &[]
+    ));
+    for link in [
+        "https:/notion.so/library",
+        "https:///notion.so",
+        "https:notion.so",
+        "HTTPS:\\\\notion.so\\library",
+    ] {
+        assert!(built_from_corpus(link, "", &["notion.so"]), "{link}");
+    }
+    for link in [
+        "ftp://notion.so/library",
+        "ws://notion.so",
+        "file://app.pipedrive.com",
+        "hxxp://facebook.com#",
+        "https:",
+    ] {
+        assert!(!built_from_corpus(link, "", &["notion.so"]), "{link}");
+    }
 }
 
 // A browser resolves `.` and `..` and reads `\` as `/`, so a link that
