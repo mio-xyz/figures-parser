@@ -78,6 +78,7 @@ what a text states, with byte spans.
 | [Memory](#memory) | `memory_grounding` | `grounding_tokens` | (counts the dossier lines it draws on: two of a line's words and half of them, or three in a row) |
 | [A reply's form](#a-replys-form) | `speaker_prefix`, `memory_claim`, `silent_signal` | | (reads a speaker prefix, a claim to have saved to memory, and the marker that delivers nothing) |
 | [A turn's checks](#a-turns-checks) | `ground_reply`, `ground_message`, `ground_page`, `internal_names`, `scrub_memory_layout`, `sheet_findings` | | every check the text is held to passes |
+| [A turn's invariants](#a-turns-invariants) | `evaluate_invariants`, `claims_unbacked_action`, `claims_unwritten_memory`, `claims_refusal` | `speaker_prefix`, `silent_signal` | the reply claims nothing no call made, shows no speaker label, and abstains whole |
 
 ### Numbers
 
@@ -296,8 +297,7 @@ What to expect:
 `stated_figures(clause)` gives the figures a reply's clause states, with
 their values, places and currency marks; `printed_figures(line)` every value
 a printed line holds, and apart its amounts; `numeric_tokens(text, loose)`
-each numeric token of a result with its values; `without_links(text)` the
-text with its links blanked. `sheet_findings(reply, runs)` walks a turn's
+each numeric token of a result with its values. `sheet_findings(reply, runs)` walks a turn's
 script runs for the worksheet checks: the rows a run listed beside a total
 that the reply leaves unstated, and the amounts it took from a worksheet no
 check listed.
@@ -362,9 +362,10 @@ assert!(fabricated_urls("Open https://acme.io/new.", "", &["acme.io"]).is_empty(
 included, without the markup around them. `placeholder_targets(text)` lists
 the link targets that are no URL (a template word, a file's name), and
 `unopened_links(text, opened)` the pages a message links, once each, less the
-chat's own links and those already opened. `built_from_corpus(url, corpus,
+chat's own links and those already opened; `without_links(text)` the text
+with every link put out as a space, wherever it recurs. `built_from_corpus(url, corpus,
 hosts)` is the test for a link a reply may build, and
-`undotted_slack_link(url)` the repair `mended_links` makes to a message link.
+`undotted_message_link(url)` the repair `mended_links` makes to a message link.
 
 ### Addresses read
 
@@ -640,6 +641,24 @@ assert_eq!(
 );
 ```
 
+### A turn's invariants
+
+`evaluate_invariants(turn, invariants)` gives each invariant a turn is held
+to a verdict: no action claimed that no write call or pending action stands
+behind, no link no tool result printed, no `[Name]:` speaker label on the
+first line, an abstention marker (`silent: <reason>`) that is the whole
+reply, the step budget kept, and no memory save claimed that no memory write
+made. An invariant whose input the turn lacks is not evaluable. Each check
+runs alone too, and reads a reply's form with the readers of
+[A reply's form](#a-replys-form).
+
+```rust
+use figures_parser::{claims_unbacked_action, claims_unwritten_memory};
+
+assert!(claims_unbacked_action("I've created the ticket.", 0, &["web_search"]));
+assert!(claims_unwritten_memory("Noted, I’ll remember that.", &[]));
+```
+
 ## From Node
 
 `@mio-xyz/figures-parser` is a Node binding (Node-API 9, Node 22 or later)
@@ -673,7 +692,7 @@ fp.mispairedPerUnit(reply, corpus);              // [{ perUnit, stated, printed 
 fp.sheetFindings(reply, runs);                   // { listed, unstated, unchecked }
 fp.statedFigures(clause);                        // also printedFigures, numericTokens, withoutLinks
 fp.ungroundedUrls(reply, corpus, prompt, hosts); // also fabricatedUrls, linkFindings
-fp.mendedLinks(reply, corpus); // { text, mends }; also undottedSlackLink, builtFromCorpus
+fp.mendedLinks(reply, corpus); // { text, mends }; also undottedMessageLink, builtFromCorpus
 fp.unopenedLinks(message, opened);               // also placeholderTargets, urlPrintedIn
 fp.memoryGrounding(reply, notes);                // { preloadedLines, groundedLines, grounded }
 fp.misdatedWeekdays(reply, "2026-10-09");

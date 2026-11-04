@@ -44,6 +44,28 @@ export declare function amountsSharedWith(reply: string): (text: string) => Arra
  */
 export declare function builtFromCorpus(url: string, corpus: string, hosts?: Array<string> | undefined | null): boolean
 
+/**
+ * Whether `url` is a link a reply may build from what `corpus` printed: a
+ * page naming no item on one of `hosts`, or an item's link in a shape a
+ * service writes, from ids the corpus prints.
+ */
+export declare function builtFromCorpus(url: string, corpus: string, hosts?: Array<string> | undefined | null): boolean
+
+/** Whether `response` claims a refusal or a capability it lacks. */
+export declare function claimsRefusal(response: string): boolean
+
+/**
+ * Whether `response` claims an action done that no pending action and no
+ * write tool among `tools_called` stands behind.
+ */
+export declare function claimsUnbackedAction(response: string, pendingActionCount: number, toolsCalled: Array<string>): boolean
+
+/**
+ * Whether `response` claims a memory save that no memory write among
+ * `tools_called` attempted.
+ */
+export declare function claimsUnwrittenMemory(response: string, toolsCalled: Array<string>): boolean
+
 /** One duration, with where it sits in the input. */
 export interface DurationEntity {
   /** The kind of figure. */
@@ -101,6 +123,12 @@ export interface EmailEntity {
 }
 
 /**
+ * The verdicts of the invariants named in `names` (all of them when
+ * absent, in order) on `input`; an unknown name is skipped.
+ */
+export declare function evaluateInvariants(input: InvariantInput, names?: Array<string> | undefined | null): Array<InvariantVerdict>
+
+/**
  * Every reading of every figure in `text`, kind by kind.
  *
  * # Errors
@@ -140,6 +168,23 @@ export interface Finding {
   kind: string
   /** What was found. */
   value: string
+  /**
+   * For a `per-unit` finding, the clause's total over its count, worked
+   * out ("$74.74 / 2 = $37.37").
+   */
+  stated?: string
+  /**
+   * For a `per-unit` finding, the printed amount the per-unit one is that
+   * count's quotient of ("$91.65 / 2").
+   */
+  printed?: string
+  /** For an `unstated` finding, the helper's line for the row. */
+  name?: string
+  /**
+   * For an `unchecked` finding, whether a run that gave such an amount
+   * took a frame of rows and summed it by hand.
+   */
+  framed?: boolean
 }
 
 /** A text with its mendable defects put right, and what it still fails on. */
@@ -191,6 +236,9 @@ export declare function groundPage(text: string, corpus: string, said?: string |
  */
 export declare function groundReply(text: string, turn: Turn, attached?: ((arg: string) => boolean) | undefined | null): Grounding
 
+/** Whether `response` opens on a `[Name]:` speaker label. */
+export declare function hasSpeakerPrefix(response: string): boolean
+
 /** One identifier, with where it sits in the input. */
 export interface IdEntity {
   /** The kind of figure. */
@@ -211,6 +259,32 @@ export interface IdEntity {
  * `vouching` holds whole, then roots and fixed names, as given.
  */
 export declare function internalNames(reply: string, said: string, vocabulary: Vocabulary, vouching?: string | undefined | null): Array<string>
+
+/** What a turn's invariants read. */
+export interface InvariantInput {
+  /** The reply as delivered. */
+  response: string
+  /** The loop's output before the presenter; absent when it was not kept. */
+  rawText?: string
+  /** The tools the turn called, by name. */
+  toolsCalled: Array<string>
+  /** The actions the turn queued for a person to approve. */
+  pendingActionCount: number
+  /** The turn's tool results; absent when they were not kept. */
+  toolResultCorpus?: string
+  /** Whether the loop ran out of steps; absent when not recorded. */
+  hitStepLimit?: boolean
+}
+
+/** One invariant's verdict on a turn. */
+export interface InvariantVerdict {
+  /** The invariant's name. */
+  name: "no_hallucinated_action" | "no_fabricated_url" | "no_speaker_prefix" | "silent_marker_is_whole_body" | "step_budget" | "memory_honesty"
+  /** How it came out. */
+  status: "pass" | "fail" | "not_evaluable"
+  /** Why it failed; absent when it did not. */
+  reason?: string
+}
 
 /** A length of time, in the two parts that do not convert into each other. */
 export interface LengthValue {
@@ -406,6 +480,11 @@ export interface NumberValue {
   currency: boolean
   /** A neighbour reading of a thousands run: grounds, never stated. */
   derived: boolean
+  /**
+   * The decimal reading of a token that also reads as thousands ("1,250"
+   * as 1.25), stated only with its fraction.
+   */
+  ambiguous: boolean
   /**
    * The sign written before it; parentheses are accounting's negative or
    * an aside.
@@ -604,6 +683,20 @@ export interface SheetRun {
 }
 
 /**
+ * The abstention marker (`silent: <reason>`) `raw_text` holds, whole or
+ * leaked inside a longer body; absent when it holds none.
+ */
+export declare function silentMarker(rawText: string): SilentSignal | null
+
+/** An abstention marker a reply holds. */
+export interface SilentSignal {
+  /** The reason, one word. */
+  reason: string
+  /** Whether the marker is a line inside a longer reply. */
+  leaked: boolean
+}
+
+/**
  * Whether `text` states `figure` ("19,851", "1,234.50"), however it groups
  * it: the figure's whole part is matched.
  */
@@ -662,6 +755,12 @@ export interface UncheckedFigures {
 }
 
 /**
+ * `url`, a chat message link whose timestamp kept its dot, with the dot
+ * dropped; absent for any other link.
+ */
+export declare function undottedMessageLink(url: string): string | null
+
+/**
  * The durations in `reply`, once each, whose length neither `corpus` nor
  * `prompt` carries, written out or as an API gives it, rounded at the place
  * the reply writes it to.
@@ -718,6 +817,9 @@ export declare function ungroundedRatios(reply: string, corpus: string, said?: s
  * the link a result carried.
  */
 export declare function ungroundedUrls(reply: string, corpus: string, prompt?: string | undefined | null, hosts?: Array<string> | undefined | null): Array<string>
+
+/** The non-chat pages `text` links that are not in `opened`, once each. */
+export declare function unopenedLinks(text: string, opened?: Array<string> | undefined | null): Array<string>
 
 /**
  * The links in `text`, once each, that name a page to open: not a Slack
@@ -779,3 +881,9 @@ export interface Vocabulary {
   /** Other names (programs, environment variables), counted anywhere. */
   fixed: Array<string>
 }
+
+/**
+ * `text` with every http(s) link it holds put out as a space, wherever the
+ * link's text recurs.
+ */
+export declare function withoutLinks(text: string): string

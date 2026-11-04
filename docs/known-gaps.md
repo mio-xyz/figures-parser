@@ -92,6 +92,10 @@ it stands; a contribution that closes one should remove it here.
 
 - A link without a scheme ("acme.io/x") is not read in a reply; a tool
   returns full links. In a corpus one grounds the reply's schemed link.
+- A host written as an IPv6 literal (`http://[::1]/x`) is not read, nor is
+  a link glued to the word before it ("rememberhttps://a.io") read where the
+  host's TypeScript reads it; both reach `without_links`, `unopened_links`
+  and the link invariant.
 - A built link's host list is the caller's: with none given, only a known
   shape's own host passes unprinted, and only at its root.
 - `url_printed_in` grounds an address by its path alone wherever the text

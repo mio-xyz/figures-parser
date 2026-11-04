@@ -3,6 +3,7 @@
 
 mod ground;
 mod items;
+mod linked;
 mod opened;
 mod printed;
 mod scan;
@@ -12,10 +13,11 @@ pub use ground::{
     LinkFindings, Mended, fabricated_urls, link_findings, mended_links, ungrounded_urls,
 };
 pub use items::placeholder_targets;
+pub use linked::without_links;
 pub use opened::unopened_links;
 pub use printed::url_printed_in;
 pub use scan::{Url, urls};
-pub use shapes::{built_from_corpus, undotted_slack_link};
+pub use shapes::{built_from_corpus, undotted_message_link};
 
 /// The length of the `http://` or `https://` that opens `text`, compared in
 /// any case when `any_case`, else exactly.

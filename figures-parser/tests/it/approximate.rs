@@ -30,17 +30,41 @@ fn reads_an_approximation_mark_before_the_figure_its_sign_and_its_currency() {
 }
 
 #[test]
-fn reads_no_mark_in_a_range_or_a_wave_dash() {
+fn reads_a_tilde_before_a_figure_as_a_mark_wherever_it_stands() {
     for text in [
         "10~20,000",
         "10 ~ 20,000",
-        "x~12,500",
-        "〜12,500",
-        "～12,500",
-        "~  12,500",
-        "~\n12,500",
-        "12,500",
+        "Total 5 ~20,000",
+        "Total 19,851\n~20,000",
+        "Mon 2026-10-19 ~20,000",
+        "x~20,000",
     ] {
+        let marked = extract_numbers(text)
+            .iter()
+            .find(|n| n.text == "20,000")
+            .map(|n| n.approximate);
+        assert_eq!(marked, Some(true), "{text}");
+    }
+}
+
+#[test]
+fn grounds_a_marked_figure_after_another_figure_as_any_marked_figure() {
+    for reply in [
+        "Total 19,851\n~3,440 sessions",
+        "Total 5 ~3,440 sessions",
+        "Mon 2026-10-19 ~3,440 sessions",
+    ] {
+        assert_eq!(
+            ungrounded_figures(reply, "total 19851, sessions 3442"),
+            Vec::<String>::new(),
+            "{reply}"
+        );
+    }
+}
+
+#[test]
+fn reads_no_mark_in_a_wave_dash_or_apart_from_the_figure() {
+    for text in ["〜12,500", "～12,500", "~  12,500", "~\n12,500", "12,500"] {
         let marked: Vec<bool> = extract_numbers(text)
             .iter()
             .map(|n| n.approximate)

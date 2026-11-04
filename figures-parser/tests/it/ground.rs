@@ -317,9 +317,9 @@ fn reads_a_locales_decimal_a_comma_after_a_dot_grouped_whole_or_alone() {
     );
 }
 
-// "1.250" is 1,250 in Berlin and 1.25 in Boston: both sides read it both
-// ways, so a German amount is checked as the integer it states and a
-// printed value grounds it under either convention.
+// "1.250" is 1,250 in Berlin and 1.25 in Boston: a corpus reads it both
+// ways, while a reply is held to the integer, since "$1,250" never stands
+// for 1.25 and "$194,718" never for 194.
 #[test]
 fn reads_a_single_dot_or_comma_before_three_digits_both_ways() {
     assert_eq!(
@@ -368,9 +368,26 @@ fn holds_a_figure_that_also_groups_to_its_thousands_reading() {
             "{corpus}"
         );
     }
-    for corpus in ["amount 123", "amount 123.457", "amount 124"] {
+    for corpus in [
+        "amount 123",
+        "amount 123.457",
+        "amount 123.46",
+        "amount 124",
+    ] {
         assert_eq!(ungrounded_figures(reply, corpus), ["123.456"], "{corpus}");
     }
+    assert_eq!(
+        ungrounded_figures(
+            "Revenue was $250,000 and costs $120,000.",
+            "rows 250, 120 kept"
+        ),
+        ["250,000", "120,000"]
+    );
+    assert_eq!(ungrounded_figures("Revenue $194,718", "194"), ["194,718"]);
+    assert_eq!(
+        ungrounded_figures("Paid $250,000", "250 seats"),
+        ["250,000"]
+    );
 }
 
 #[test]

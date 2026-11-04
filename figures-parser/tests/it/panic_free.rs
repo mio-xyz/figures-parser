@@ -9,13 +9,14 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use figures_parser::number::scan::{Scratch, tokens};
 use figures_parser::utf16::{Utf16Cursor, units};
 use figures_parser::{
-    Amounts, Date, InternalsCheck, ListedFigure, MemoryLayout, PageHolds, SheetRun, Turn,
-    Vocabulary, built_from_corpus, durations, emails, extract_numbers, fabricated_urls,
-    ground_message, ground_page, ground_reply, grounding_tokens, identifiers, internal_names,
-    link_findings, memory_claim, memory_grounding, mended_links, misdated_weekdays,
+    Amounts, Date, InternalsCheck, Invariant, ListedFigure, MemoryLayout, PageHolds, SheetRun,
+    Turn, TurnRecord, Vocabulary, built_from_corpus, claims_refusal, claims_unbacked_action,
+    claims_unwritten_memory, durations, emails, evaluate_invariants, extract_numbers,
+    fabricated_urls, ground_message, ground_page, ground_reply, grounding_tokens, identifiers,
+    internal_names, link_findings, memory_claim, memory_grounding, mended_links, misdated_weekdays,
     mispaired_per_unit, mispaired_per_unit_with, numbers, numeric_tokens, placeholder_targets,
     printed_figures, prose_arithmetic, rows_outside_window, scrub_memory_layout, sheet_findings,
-    silent_signal, speaker_prefix, stated_figures, states_figure, undotted_slack_link,
+    silent_signal, speaker_prefix, stated_figures, states_figure, undotted_message_link,
     ungrounded_durations, ungrounded_emails, ungrounded_figures, ungrounded_identifiers,
     ungrounded_on_page, ungrounded_ratios, ungrounded_ratios_with, ungrounded_urls, unopened_links,
     unprinted_ids, unseen_tokens, url_printed_in, urls, without_links,
@@ -39,7 +40,7 @@ fn exercise(reply: &str, corpus: &str, prompt: &str) -> usize {
         n += numbers(text).count()
             + placeholder_targets(text).len()
             + unopened_links(text, &[reply]).len()
-            + undotted_slack_link(text).map_or(0, |link| link.len())
+            + undotted_message_link(text).map_or(0, |link| link.len())
             + usize::from(built_from_corpus(text, reply, &["github.com"]))
             + grounding_tokens(text).len()
             + extract_numbers(text).len()
@@ -180,6 +181,35 @@ fn turn_checks(reply: &str, corpus: &str, prompt: &str) -> usize {
         + ground_message(reply, &turn).findings.len()
         + ground_reply(corpus, &turn).findings.len()
         + ground_page(reply, corpus, prompt, false).len()
+        + invariant_checks(reply, corpus, prompt)
+}
+
+/// The invariants and the link text functions, on the three texts.
+fn invariant_checks(reply: &str, corpus: &str, prompt: &str) -> usize {
+    let tools: Vec<&str> = prompt.split_whitespace().take(4).collect();
+    let record = TurnRecord {
+        response: reply,
+        raw_text: Some(corpus),
+        tools_called: &tools,
+        pending_action_count: 0,
+        tool_result_corpus: Some(prompt),
+        hit_step_limit: Some(false),
+    };
+    evaluate_invariants(&record, &Invariant::ALL).len()
+        + usize::from(claims_refusal(reply))
+        + usize::from(claims_unbacked_action(corpus, 0, &tools))
+        + usize::from(claims_unwritten_memory(reply, &tools))
+        + usize::from(speaker_prefix(corpus).is_some())
+        + silent_signal(reply).map_or(0, |m| m.reason.len())
+        + without_links(reply).len()
+        + unopened_links(reply, &[corpus]).len()
+        + urls(reply)
+            .iter()
+            .map(|u| {
+                usize::from(built_from_corpus(u.text, corpus, &["github.com"]))
+                    + undotted_message_link(u.text).map_or(0, |l| l.len())
+            })
+            .sum::<usize>()
 }
 
 /// How many of `text`'s links `read` printed, so a parseable address is
@@ -198,7 +228,7 @@ fn found_urls_built(text: &str, corpus: &str) -> usize {
         .iter()
         .filter(|url| {
             built_from_corpus(url.text, corpus, &["github.com"])
-                || undotted_slack_link(url.text).is_some()
+                || undotted_message_link(url.text).is_some()
         })
         .count()
 }
@@ -618,6 +648,18 @@ const POOL: &[&str] = &[
     "?, ",
     ". ",
     ".)",
+    "silent: ",
+    "silent:",
+    "[CURRENT MESSAGE]",
+    "[Ana]: ",
+    "\u{2028}",
+    "I've created the ticket",
+    "done! I",
+    "I'll remember",
+    "saved it to my notes",
+    "sorry, I can't",
+    "ไทย_tool",
+    "ค้นหา(",
 ];
 
 /// A xorshift generator, seeded so a failure reproduces.

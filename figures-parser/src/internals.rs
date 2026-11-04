@@ -10,6 +10,8 @@ use unicode_general_category::{GeneralCategory, get_general_category};
 use unicode_script::{Script, UnicodeScript};
 use unicode_segmentation::{UWordBounds, UnicodeSegmentation};
 
+use crate::text::is_unspaced_script;
+
 /// The names a reply must not show unless a person wrote them; the caller
 /// gives its own, as [`internal_names`] reads them.
 #[derive(Debug, Clone, Copy, Default)]
@@ -214,6 +216,54 @@ impl<'t> Iterator for WordSegments<'t> {
     }
 }
 
+/// Whether `c` belongs to a script the Unicode word rules leave to a
+/// dictionary (Thai, Lao, Khmer, Myanmar and the Tai scripts), whose letters
+/// they part one from the next.
+fn is_dictionary_script(c: char) -> bool {
+    matches!(
+        c.script(),
+        Script::Thai
+            | Script::Lao
+            | Script::Khmer
+            | Script::Myanmar
+            | Script::Tai_Tham
+            | Script::Tai_Viet
+            | Script::New_Tai_Lue
+            | Script::Tai_Le
+    )
+}
+
+/// Whether `c` is a combining mark, which belongs to the letter before it.
+fn is_mark(c: char) -> bool {
+    matches!(
+        get_general_category(c),
+        GeneralCategory::NonspacingMark
+            | GeneralCategory::SpacingMark
+            | GeneralCategory::EnclosingMark
+    )
+}
+
+/// Whether `c`, standing beside a name, continues the word the name is in:
+/// a digit, an underscore or a letter of a script that spaces its words. A
+/// letter of a script written without spaces sets a name apart, as a word
+/// of its own would.
+fn continues_word(c: char) -> bool {
+    c == '_' || (c.is_alphanumeric() && !is_unspaced_script(c))
+}
+
+/// Whether `name` stands whole in `text` (both lowercased) at byte `at`:
+/// nothing before it continues its word, once the marks of the letter
+/// before are passed, and nothing after it does, a mark included.
+fn whole_at(text: &str, at: usize, name: &str) -> bool {
+    let head = text.get(..at).unwrap_or_default();
+    let before = head.chars().rev().find(|&c| !is_mark(c));
+    let after = text
+        .get(at.saturating_add(name.len())..)
+        .and_then(|rest| rest.chars().next());
+    before.is_none_or(|c| !continues_word(c))
+        && after.is_none_or(|c| !is_mark(c) && !continues_word(c))
+}
+
 /// The names of a list that a text spells, lowercased, each once; built
 /// once per list.
 struct Spelled {
@@ -221,6 +271,9 @@ struct Spelled {
     index: FxHashMap<String, usize>,
     /// The names in order, lowercased.
     names: Vec<String>,
+    /// The names that hold a letter of a dictionary script, which the word
+    /// rules never keep in one segment, so they are looked for as written.
+    dictionary: Vec<usize>,
 }
 
 /// Which names of a [`Spelled`] list one text spells.
@@ -236,14 +289,22 @@ impl Spelled {
     fn new<'n>(names: impl Iterator<Item = &'n str>) -> Self {
         let mut index = FxHashMap::default();
         let mut list = Vec::new();
+        let mut dictionary = Vec::new();
         for name in names {
             let lower = name.to_lowercase();
             if !index.contains_key(&lower) {
+                if lower.chars().any(is_dictionary_script) {
+                    dictionary.push(list.len());
+                }
                 index.insert(lower.clone(), list.len());
                 list.push(lower);
             }
         }
-        Self { index, names: list }
+        Self {
+            index,
+            names: list,
+            dictionary,
+        }
     }
 
     /// Which of the names `text` spells, reading its word segments as the
@@ -275,7 +336,34 @@ impl Spelled {
                 }
             }
         }
+        if !self.dictionary.is_empty() {
+            self.find_written(&lowered(text), &mut found);
+        }
         found
+    }
+
+    /// Marks the dictionary-script names that `text` (lowercased) holds
+    /// whole, as a word, and as a call where `(` follows.
+    fn find_written(&self, text: &str, found: &mut Found) {
+        for &i in &self.dictionary {
+            let Some(name) = self.names.get(i) else {
+                continue;
+            };
+            for at in occurrences(text, name) {
+                if !whole_at(text, at, name) {
+                    continue;
+                }
+                if let Some(slot) = found.word.get_mut(i) {
+                    *slot = true;
+                }
+                let after = text.get(at.saturating_add(name.len())..);
+                if after.is_some_and(|rest| rest.starts_with('('))
+                    && let Some(slot) = found.call.get_mut(i)
+                {
+                    *slot = true;
+                }
+            }
+        }
     }
 }
 

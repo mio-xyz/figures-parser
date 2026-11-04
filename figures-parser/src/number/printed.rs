@@ -1,9 +1,8 @@
 //! What a text prints, read as values: the figures of a printed line, the
-//! numeric tokens of a result, and a text with its links taken out.
+//! numeric tokens of a result.
 
 use std::ops::Range;
 
-use super::ground::link_spans;
 use super::per_unit::value_of;
 use super::scan::{Scratch, tokens};
 
@@ -106,36 +105,5 @@ pub fn numeric_tokens(text: &str, loose: bool) -> Vec<NumericToken> {
             });
         }
     }
-    out
-}
-
-/// `text` with each link it holds replaced by a space: a link's digits (a
-/// timestamp, an id) are the link check's to judge, never a figure.
-///
-/// # Examples
-///
-/// ```
-/// assert_eq!(
-///     figures_parser::without_links("See https://x.io/a/206788 for $1,250."),
-///     "See   for $1,250."
-/// );
-/// ```
-#[must_use]
-pub fn without_links(text: &str) -> String {
-    let spans = link_spans(text);
-    if spans.is_empty() {
-        return text.to_owned();
-    }
-    let mut out = String::with_capacity(text.len());
-    let mut at = 0;
-    for span in spans {
-        if span.start < at {
-            continue;
-        }
-        out.push_str(text.get(at..span.start).unwrap_or_default());
-        out.push(' ');
-        at = span.end;
-    }
-    out.push_str(text.get(at..).unwrap_or_default());
     out
 }

@@ -185,6 +185,22 @@ fn reads_a_scaled_run_that_groups_as_a_decimal_where_the_word_writes_that_mark()
 }
 
 #[test]
+fn holds_a_scaled_figure_whose_digits_group_to_the_grouped_reading() {
+    let reply = "Debt of €12,500 million.";
+    assert_eq!(
+        ungrounded_figures(reply, "12500000000"),
+        Vec::<String>::new()
+    );
+    for corpus in ["12500000", "12600000"] {
+        assert_eq!(
+            ungrounded_figures(reply, corpus),
+            ["12,500 million"],
+            "{corpus}"
+        );
+    }
+}
+
+#[test]
 fn holds_a_scaled_figure_to_the_floors() {
     assert_eq!(ungrounded_figures("5k users", "nothing"), ["5k"]);
     assert_eq!(

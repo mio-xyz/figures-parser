@@ -225,6 +225,24 @@ fn parts_a_name_from_the_thai_beside_it() {
     );
 }
 
+// The Unicode word rules part Thai, Lao, Khmer and Myanmar letters one from
+// the next, so a name written in them is looked for as written, whole.
+#[test]
+fn reads_a_name_written_in_a_dictionary_script() {
+    let names = &["ไทย_tool", "ຊອກ_tool", "ค้นหา"];
+    let found = |reply: &str, said: &str| internal_names(reply, said, &vocabulary(names), "");
+    assert_eq!(found("ไทย_tool（", ""), ["ไทย_tool"]);
+    assert_eq!(found("ใช้ ไทย_tool ค้นหา", ""), ["ไทย_tool"]);
+    assert_eq!(found("ใช้ไทย_toolค้นหา", ""), ["ไทย_tool"]);
+    assert_eq!(found("ຊອກ_tool", ""), ["ຊອກ_tool"]);
+    assert_eq!(found("ค้นหา(x)", ""), ["ค้นหา"]);
+    for reply in ["xไทย_tool", "ไทย_toolx", "ไทย_tool1", "_ไทย_tool", "ค้นหา x"]
+    {
+        assert_eq!(found(reply, ""), NONE, "{reply}");
+    }
+    assert_eq!(found("ไทย_tool", "what does ไทย_tool do?"), NONE);
+}
+
 #[test]
 fn scrubs_a_path_dump_keeping_the_facts() {
     let leak = "Two memory files exist:\n`/memory/workspace.md`\n```\n- Standup is Tuesday\n```\n`/memory/company.md` and no `/memory/user.md`.";

@@ -9,7 +9,7 @@ use super::items::{
 };
 use super::scan::urls;
 use super::scheme_len;
-use super::shapes::{Parts, built_from_corpus, undotted_slack_link};
+use super::shapes::{Parts, built_from_corpus, undotted_message_link};
 use crate::text::{char_at, char_before, is_ascii_word, is_example_domain};
 
 /// Whether `segment` names one item rather than a page: eight or more word
@@ -409,7 +409,7 @@ pub fn mended_links(reply: &str, corpus: &str) -> Mended {
             continue;
         }
         seen.push(url.text);
-        if let Some(undotted) = undotted_slack_link(url.text) {
+        if let Some(undotted) = undotted_message_link(url.text) {
             mends.push(format!("{} → {undotted}", url.text));
             text = Cow::Owned(text.replace(url.text, &undotted));
         }

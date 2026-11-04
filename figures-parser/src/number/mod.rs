@@ -18,7 +18,7 @@ pub use ground::{Amounts, shares_amount, states_figure, ungrounded_figures};
 pub use per_unit::{
     MispairedFigure, StatedFigure, mispaired_per_unit, mispaired_per_unit_with, stated_figures,
 };
-pub use printed::{NumericToken, PrintedFigures, numeric_tokens, printed_figures, without_links};
+pub use printed::{NumericToken, PrintedFigures, numeric_tokens, printed_figures};
 pub use ratio::{ungrounded_ratios, ungrounded_ratios_with};
 
 use std::borrow::Cow;
@@ -565,7 +565,8 @@ pub(super) fn scaled(integer: &str, fraction: Option<&str>, scale: u32) -> Optio
 
 impl Reading<'_, '_> {
     /// The key a reply states with this reading, or None when it is not held
-    /// to it: a derived reading, a figure under the floor its notation sets,
+    /// to it: a derived reading, the decimal reading of a token that also
+    /// reads as thousands, a figure under the floor its notation sets,
     /// or a bare digit run, which is a code, a zip or an order number as
     /// often as an amount ("541611", "40017731") and is never held to the
     /// whole turn. A figure with a scale word is a count or an amount, held

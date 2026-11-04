@@ -1,4 +1,4 @@
-use figures_parser::urls;
+use figures_parser::{unopened_links, urls, without_links};
 
 /// The link check with no integration hosts declared.
 fn fabricated_urls<'r>(reply: &'r str, corpus: &str) -> Vec<&'r str> {
@@ -925,9 +925,9 @@ fn names_each_link_target_that_is_no_url() {
 
 #[test]
 fn drops_the_dot_a_slack_message_link_kept_and_leaves_any_other() {
-    use figures_parser::undotted_slack_link;
+    use figures_parser::undotted_message_link;
     assert_eq!(
-        undotted_slack_link(
+        undotted_message_link(
             "https://acme.slack.com/archives/C1/p1791180327.741099?thread_ts=1791180327.741099"
         )
         .as_deref(),
@@ -938,7 +938,7 @@ fn drops_the_dot_a_slack_message_link_kept_and_leaves_any_other() {
         "https://acme.slack.com/archives/C1/p179118032.741099",
         "https://acme.io/archives/C1/p1791180327.741099",
     ] {
-        assert_eq!(undotted_slack_link(left), None, "{left}");
+        assert_eq!(undotted_message_link(left), None, "{left}");
     }
 }
 
@@ -1086,4 +1086,37 @@ fn grounds_a_link_printed_without_its_scheme_under_any_host() {
     ] {
         assert_eq!(fabricated_urls(link, printed), Vec::<&str>::new(), "{link}");
     }
+}
+
+#[test]
+fn takes_links_out_wherever_their_text_recurs() {
+    assert_eq!(
+        without_links("a.com/ https://a.com/206788 and https://a.com/ x"),
+        "a.com/   and   x"
+    );
+    assert_eq!(
+        without_links("<https://acme.io/p/1|label> 1,250"),
+        "< |label> 1,250"
+    );
+    assert_eq!(
+        without_links("12:30 at ftp://x.io/9"),
+        "12:30 at ftp://x.io/9"
+    );
+}
+
+#[test]
+fn lists_the_pages_a_message_links_that_no_turn_opened() {
+    let text = "Like https://acme.io/brand and https://acme.io/brand, not https://ACME.Slack.com/archives/C1/p1 or https://slack.com/x";
+    assert_eq!(unopened_links(text, &[]), ["https://acme.io/brand"]);
+    assert_eq!(
+        unopened_links(
+            "see <https://acme.io/a|a> and https://b.io",
+            &["https://b.io"]
+        ),
+        ["https://acme.io/a"]
+    );
+    assert_eq!(
+        unopened_links("https://notslack.com.evil.io/x", &[]),
+        ["https://notslack.com.evil.io/x"]
+    );
 }

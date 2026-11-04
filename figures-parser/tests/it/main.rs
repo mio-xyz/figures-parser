@@ -19,6 +19,7 @@ mod ground;
 mod host;
 mod ids;
 mod internals;
+mod invariants;
 mod locales;
 mod pages;
 

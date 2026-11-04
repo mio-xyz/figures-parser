@@ -2,8 +2,9 @@
 //! on a reply, a sent message and a page.
 
 use figures_parser::{
-    Date, InternalsCheck, ListedFigure, MemoryLayout, SheetRun, Turn, Vocabulary, ground_message,
-    ground_page, ground_reply, grounding_tokens, memory_grounding, sheet_findings,
+    Date, Detail, Finding, FindingKind, InternalsCheck, ListedFigure, MemoryLayout, SheetRun, Turn,
+    Vocabulary, ground_message, ground_page, ground_reply, grounding_tokens, memory_grounding,
+    sheet_findings,
 };
 
 /// What a check that finds nothing returns.
@@ -84,6 +85,41 @@ fn holds_amounts_from_a_frame_summed_by_hand() {
     );
     let one = sheet_findings("September Direct: $10,140.", &[hand_sum(true, false, true)]);
     assert_eq!(one.unchecked, ["10,140"]);
+}
+
+// Where an amount came from is asked of its digits: a refund printed
+// unsigned is where the reply's "−1,040" came from.
+#[test]
+fn holds_a_signed_amount_to_the_run_that_printed_it_unsigned() {
+    let run = SheetRun {
+        stdout: "Sept net 18,811\nrefund 1,040\nfees 2,100",
+        grid_read: true,
+        ..SheetRun::default()
+    };
+    let found = sheet_findings("Net −1,040 and −2,100.", &[run]);
+    assert_eq!(found.unchecked, ["1,040", "2,100"]);
+}
+
+// "$250,000" never stands for 250, so a run that printed 250 is not where it
+// came from.
+#[test]
+fn shares_no_amount_through_its_decimal_reading() {
+    let run = SheetRun {
+        stdout: "rows 250, 120 kept",
+        grid_read: true,
+        ..SheetRun::default()
+    };
+    let found = sheet_findings("Revenue was $250,000 and costs $120,000.", &[run]);
+    assert_eq!(found.unchecked, NONE);
+    let other = SheetRun {
+        stdout: "3,100",
+        grid_read: true,
+        ..SheetRun::default()
+    };
+    assert_eq!(
+        sheet_findings("We have 100,000 $1.2k", &[other]).unchecked,
+        NONE
+    );
 }
 
 #[test]
@@ -308,6 +344,61 @@ fn checks_a_per_unit_amount_and_a_window() {
     assert_eq!(
         keys(posts, &turn("", None)),
         [r#"window:"Oct 12" under "Oct 14-20""#]
+    );
+}
+
+#[test]
+fn carries_what_a_correction_names_beside_each_finding() {
+    let ads = "Rework | LT: $91.65 / 2 leads / CPL $45.83 | Y: $74.74 / 2 leads";
+    let per_unit = ground_message(
+        "Rework: $74.74 spend, 2 leads, $45.83 CPL.",
+        &turn(ads, None),
+    );
+    assert_eq!(
+        per_unit.findings,
+        [Finding {
+            kind: FindingKind::PerUnit,
+            value: "$45.83".to_owned(),
+            detail: Detail::PerUnit {
+                stated: "$74.74 / 2 = $37.37".to_owned(),
+                printed: "$91.65 / 2".to_owned(),
+            },
+        }]
+    );
+    let total = [ListedFigure {
+        figure: "19,851",
+        name: "row 6 TOTAL",
+    }];
+    let runs = [
+        SheetRun {
+            stdout: "Total 19,850",
+            listed: &total,
+            ..SheetRun::default()
+        },
+        hand_sum(true, false, true),
+    ];
+    let mut sheets = turn(
+        "Total 19,850\n2026-09 Airbnb 15977.0\n2026-09 Direct 10140.0",
+        None,
+    );
+    sheets.runs = &runs;
+    let found = ground_reply("2027: $19,850. September: Direct $10,140.", &sheets).findings;
+    assert_eq!(
+        found,
+        [
+            Finding {
+                kind: FindingKind::Unstated,
+                value: "19,851".to_owned(),
+                detail: Detail::Row {
+                    name: "row 6 TOTAL".to_owned(),
+                },
+            },
+            Finding {
+                kind: FindingKind::Unchecked,
+                value: "10,140".to_owned(),
+                detail: Detail::Unchecked { framed: true },
+            },
+        ]
     );
 }
 

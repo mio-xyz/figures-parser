@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
-const { extract, ungroundedFigures, ungroundedRatios, mispairedPerUnit, amountsSharedWith, sharesAmount, statesFigure, proseArithmetic, ungroundedUrls, linkFindings, mendedLinks, fabricatedUrls, ungroundedEmails, misdatedWeekdays, rowsOutsideWindow, ungroundedIdentifiers, unseenTokens, ungroundedDurations, unprintedIds, urlPrintedIn, ungroundedOnPage, PageHolds, undottedSlackLink, placeholderTargets, unopenedLinks, memoryGrounding, groundingTokens, builtFromCorpus, speakerPrefix, memoryClaim, silentSignal, statedFigures, printedFigures, numericTokens, withoutLinks, sheetFindings } = createRequire(import.meta.url)("./index.js");
+const { extract, ungroundedFigures, ungroundedRatios, mispairedPerUnit, amountsSharedWith, sharesAmount, statesFigure, proseArithmetic, ungroundedUrls, linkFindings, mendedLinks, fabricatedUrls, ungroundedEmails, misdatedWeekdays, rowsOutsideWindow, ungroundedIdentifiers, unseenTokens, ungroundedDurations, unprintedIds, urlPrintedIn, ungroundedOnPage, PageHolds, undottedMessageLink, placeholderTargets, unopenedLinks, memoryGrounding, groundingTokens, builtFromCorpus, speakerPrefix, memoryClaim, silentSignal, statedFigures, printedFigures, numericTokens, withoutLinks, sheetFindings } = createRequire(import.meta.url)("./index.js");
 
 const entities = extract("Total $1,250 and ١٢", { kinds: ["number"] });
 const has = (text, integer) => entities.some((e) => e.text === text && e.value.integer === integer);
@@ -71,8 +71,8 @@ assert.deepEqual(ungroundedDurations("took ३ घंटे, then 2 minutes and 
 
 assert.equal(urlPrintedIn("file:////x", "//x"), true);
 assert.deepEqual(extract("see https://a.b/c|label> and `https://acme.io/x`", { kinds: ["url"] }).map((e) => e.text), ["https://a.b/c", "https://acme.io/x"]);
-assert.equal(undottedSlackLink("https://acme.slack.com/archives/C1/p1791180327.741099"), "https://acme.slack.com/archives/C1/p1791180327741099");
-assert.equal(undottedSlackLink("https://acme.io/x"), null);
+assert.equal(undottedMessageLink("https://acme.slack.com/archives/C1/p1791180327.741099"), "https://acme.slack.com/archives/C1/p1791180327741099");
+assert.equal(undottedMessageLink("https://acme.io/x"), null);
 assert.deepEqual(placeholderTargets("[PR 512](url) ![c](chart.png) [d](https://acme.io)"), ["url", "chart.png"]);
 assert.deepEqual(unopenedLinks("https://acme.io/a https://x.slack.com/archives/C1/p1 https://acme.io/b", ["https://acme.io/b"]), ["https://acme.io/a"]);
 assert.deepEqual(memoryGrounding("Standup moves to 10:00, async as Ana prefers.", ["# Ana\nPrefers async standups at 10:00"]), { preloadedLines: 1, groundedLines: 1, grounded: true });
@@ -121,4 +121,21 @@ assert.deepEqual(sheetFindings("2027 holds $19,850.", [{ stdout: "total | 19,850
   assert.deepEqual(groundReply("Here: ![chart](chart.png)", turn, (target) => target === "chart.png").findings, [{ kind: "attached", value: "chart.png" }]);
   assert.throws(() => groundMessage("x", { ...turn, today: "nope" }), /YYYY-MM-DD/);
   assert.deepEqual(groundPage("Revenue $1,240,000, 14% up", "revenue: 1240000"), ["14%"]);
+  const ads = { corpus: "Rework | LT: $91.65 / 2 leads / CPL $45.83 | Y: $74.74 / 2 leads", today: "2026-10-20" };
+  assert.deepEqual(groundMessage("Rework: $74.74 spend, 2 leads, $45.83 CPL.", ads).findings, [{ kind: "per-unit", value: "$45.83", stated: "$74.74 / 2 = $37.37", printed: "$91.65 / 2" }]);
+}
+
+{
+  const { evaluateInvariants, claimsRefusal, claimsUnbackedAction, claimsUnwrittenMemory, speakerPrefix, silentSignal, withoutLinks, unopenedLinks, builtFromCorpus, undottedMessageLink } = createRequire(import.meta.url)("./index.js");
+  assert.equal(builtFromCorpus("https://acme.slack.com/archives/C0A1B2C3D/p1791180327741099", "https://acme.slack.com/archives/C0A1B2C3D/p1791443682601779 | thread_ts: 1791180327.741099 in C0A1B2C3D"), true);
+  assert.equal(undottedMessageLink("https://acme.slack.com/archives/C1/p1791180327.741099"), "https://acme.slack.com/archives/C1/p1791180327741099");
+  assert.deepEqual(evaluateInvariants({ response: "I've sent the email.", toolsCalled: [], pendingActionCount: 0 }, ["no_hallucinated_action", "step_budget"]), [{ name: "no_hallucinated_action", status: "fail", reason: "response claims a completed action with no write tool call or pending action" }, { name: "step_budget", status: "not_evaluable" }]);
+  assert.equal(claimsRefusal("Sorry, I can't open that."), true);
+  assert.equal(claimsUnbackedAction("I've created the ticket.", 0, ["linear_create_issue"]), false);
+  assert.equal(claimsUnwrittenMemory("I'll remember that.", []), true);
+  assert.equal(speakerPrefix("[Mio]: hi"), "[Mio]: ");
+  assert.deepEqual(silentSignal("Done.\nsilent: no_change"), { reason: "no_change", leaked: true });
+  assert.equal(silentSignal("all good"), null);
+  assert.equal(withoutLinks("See https://acme.io/p/206788 and 4,812."), "See   and 4,812.");
+  assert.deepEqual(unopenedLinks("https://acme.io/a and https://x.slack.com/archives/C1/p1", []), ["https://acme.io/a"]);
 }

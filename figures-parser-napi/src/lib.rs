@@ -10,6 +10,7 @@
 
 use std::borrow::Cow;
 
+pub mod quality;
 pub mod turn;
 
 use figures_parser::utf16::{Utf16Cursor, units};
@@ -517,11 +518,12 @@ pub fn numeric_tokens(text: String, loose: Option<bool>) -> Vec<NumericToken> {
         .collect()
 }
 
-/// `text` with each link it holds replaced by a space.
+/// `text` with every http(s) link it holds put out as a space, wherever the
+/// link's text recurs.
 #[napi(catch_unwind)]
 #[must_use]
 pub fn without_links(text: String) -> String {
-    figures_parser::without_links(&text)
+    figures_parser::without_links(&text).into_owned()
 }
 
 /// A list the caller passed (hosts, links), as `&str`s; empty when absent.
@@ -774,8 +776,8 @@ impl PageHolds {
 /// (`…/p1791180327.741099` to `…/p1791180327741099`); null for any other link.
 #[napi(catch_unwind)]
 #[must_use]
-pub fn undotted_slack_link(url: String) -> Option<String> {
-    figures_parser::undotted_slack_link(&url)
+pub fn undotted_message_link(url: String) -> Option<String> {
+    figures_parser::undotted_message_link(&url)
 }
 
 /// The target of every markdown link in `text` that is not a URL, a mail

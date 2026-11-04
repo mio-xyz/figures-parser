@@ -1,6 +1,7 @@
 //! The figure gate's comparison: what a reply states that the turn's corpus
 //! does not carry, and the amounts a reply shares with one print.
 
+use std::cell::RefCell;
 use std::hash::BuildHasher;
 use std::ops::Range;
 
@@ -298,12 +299,14 @@ fn digits_and_symbol(text: &str) -> (usize, bool) {
 impl Needles {
     /// The figures `reply` states outside `skip`, each held to the key
     /// `stated` gives its readings, sealed for the corpus walk, with their
-    /// claims all open.
+    /// claims all open. A claim is named by its full text, sign and mark
+    /// included, or by its digits alone when `bare`.
     fn read<'r>(
         reply: &'r str,
         read: Tokens<'r>,
         skip: &[Range<usize>],
         scratch: &mut Scratch,
+        bare: bool,
         stated: impl Fn(&Reading<'_, '_>) -> Option<Key>,
     ) -> (Self, Claims<'r>) {
         let mut needles = Self {
@@ -316,7 +319,9 @@ impl Needles {
             if !skipped(skip, r.span.start)
                 && let Some(key) = stated(&r)
             {
-                let text = if r.scaled {
+                let text = if bare {
+                    r.text
+                } else if r.scaled {
                     with_mark_after(reply, &r)
                 } else {
                     r.full_text
@@ -740,7 +745,9 @@ pub fn ungrounded_figures(reply: &str, corpus: &str) -> Vec<String> {
     let skip = link_spans(reply);
     let mut scratch = Scratch::default();
     let (needles, mut claims) =
-        Needles::read(reply, tokens(reply), &skip, &mut scratch, |r| r.stated());
+        Needles::read(reply, tokens(reply), &skip, &mut scratch, false, |r| {
+            r.stated()
+        });
     // Most replies state no large figure at all, and the corpus is the whole
     // turn: it is read only once there is something to look for, and only
     // until everything is found.
@@ -767,7 +774,8 @@ pub(super) fn ungrounded_by(
     grounds: impl Fn(&Reading<'_, '_>) -> bool,
 ) -> Vec<String> {
     let mut scratch = Scratch::default();
-    let (needles, mut claims) = Needles::read(reply, tokens(reply), &[], &mut scratch, stated);
+    let (needles, mut claims) =
+        Needles::read(reply, tokens(reply), &[], &mut scratch, false, stated);
     if claims.open == 0 {
         return Vec::new();
     }
@@ -780,7 +788,10 @@ pub(super) fn ungrounded_by(
 ///
 /// An amount is a figure [`ungrounded_figures`] holds, or a bare digit run
 /// from 10,000 up, which one print vouches for as an amount. A ratio's figure
-/// ("7,789%", "1,250x") is no amount, nor is anything inside a link.
+/// ("7,789%", "1,250x") is no amount, nor is anything inside a link. A print
+/// carries an amount when it prints its exact digits, whatever the sign
+/// either writes; the amount is named by its digits as the reply first
+/// writes them.
 ///
 /// # Examples
 ///
@@ -790,6 +801,8 @@ pub(super) fn ungrounded_by(
 /// let amounts = Amounts::of("2027 holds $19,850 and Airbnb $729, up 7,789%.");
 /// assert_eq!(amounts.shared_with("Total 19850 | Airbnb 729"), ["19,850", "729"]);
 /// assert!(amounts.shared_with("Total 175,800").is_empty());
+///
+/// assert_eq!(Amounts::of("Net −1,040").shared_with("refund 1,040"), ["1,040"]);
 /// ```
 #[derive(Clone)]
 pub struct Amounts<'r> {
@@ -808,12 +821,31 @@ impl<'r> Amounts<'r> {
         let mut scratch = Scratch::default();
         // A print that carries a scaled figure's digits ("9,162 jt" against
         // 9,162) vouches for the amount as much as one that carries its value.
+        // Where an amount came from is asked of its exact digits: a refund
+        // printed unsigned is still where a reply's "-1,040" came from, and
+        // a print near "~3,440" is not where it was read.
+        // An amount written twice ("10,140" and "10140.0") is one amount,
+        // named as first written.
+        let seen: RefCell<Vec<Key>> = RefCell::new(Vec::new());
         let (needles, claims) = Needles::read(
             reply,
             tokens(reply).keep_digits(),
             &skip,
             &mut scratch,
-            |r| r.stated_amount(true),
+            true,
+            |r| {
+                let key = r.stated_amount(true).map(|key| Key {
+                    sign: Sign::Unsigned,
+                    around: None,
+                    ..key
+                })?;
+                let mut seen = seen.borrow_mut();
+                if seen.contains(&key) {
+                    return None;
+                }
+                seen.push(key.clone());
+                Some(key)
+            },
         );
         Self { needles, claims }
     }

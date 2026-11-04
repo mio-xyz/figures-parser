@@ -182,17 +182,17 @@ fn slack_message(parts: &Parts<'_>, corpus: &str) -> bool {
 /// # Examples
 ///
 /// ```
-/// use figures_parser::undotted_slack_link;
+/// use figures_parser::undotted_message_link;
 ///
 /// let dotted = "https://acme.slack.com/archives/C09R2NX3D1R/p1791180327.741099";
 /// assert_eq!(
-///     undotted_slack_link(dotted).as_deref(),
+///     undotted_message_link(dotted).as_deref(),
 ///     Some("https://acme.slack.com/archives/C09R2NX3D1R/p1791180327741099")
 /// );
-/// assert_eq!(undotted_slack_link("https://acme.io/p1791180327.741099"), None);
+/// assert_eq!(undotted_message_link("https://acme.io/p1791180327.741099"), None);
 /// ```
 #[must_use]
-pub fn undotted_slack_link(url: &str) -> Option<String> {
+pub fn undotted_message_link(url: &str) -> Option<String> {
     let parts = Parts::of(url)?;
     let host = parts.host.to_ascii_lowercase();
     if !host.ends_with(".slack.com") {

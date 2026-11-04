@@ -70,6 +70,36 @@ impl FindingKind {
     }
 }
 
+/// What a finding carries beside its value, for a caller to say what is
+/// wrong in its own words.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum Detail {
+    /// Nothing more than the value.
+    #[default]
+    None,
+    /// A per-unit amount's pairing, as [`MispairedFigure`](crate::MispairedFigure)
+    /// names it.
+    PerUnit {
+        /// The clause's total over its count, worked out ("$74.74 / 2 =
+        /// $37.37").
+        stated: String,
+        /// The printed amount the per-unit one is that count's quotient of
+        /// ("$91.65 / 2").
+        printed: String,
+    },
+    /// A listed sheet row left unstated.
+    Row {
+        /// The helper's line for the row, which says what the amount is.
+        name: String,
+    },
+    /// An amount read off a sheet without the helpers that list its rows.
+    Unchecked {
+        /// Whether a run that gave such an amount took a frame of rows and
+        /// summed it by hand, rather than reading the cells with no helper.
+        framed: bool,
+    },
+}
+
 /// One thing a check found, as the text wrote it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Finding {
@@ -77,6 +107,8 @@ pub struct Finding {
     pub kind: FindingKind,
     /// What was found, as the check names it.
     pub value: String,
+    /// What the check knows of it beyond its value.
+    pub detail: Detail,
 }
 
 impl Finding {
@@ -161,6 +193,7 @@ fn push<S: Into<String>>(
     out.extend(values.into_iter().map(|value| Finding {
         kind,
         value: value.into(),
+        detail: Detail::None,
     }));
 }
 
@@ -201,23 +234,35 @@ fn findings(text: &str, turn: &Turn<'_>, surface: Surface) -> Vec<Finding> {
             FindingKind::Ratio,
             ungrounded_ratios(text, turn.corpus, turn.said),
         );
-        push(
-            &mut out,
-            FindingKind::PerUnit,
+        out.extend(
             mispaired_per_unit(text, turn.corpus)
                 .into_iter()
-                .map(|m| m.per_unit),
+                .map(|m| Finding {
+                    kind: FindingKind::PerUnit,
+                    value: m.per_unit,
+                    detail: Detail::PerUnit {
+                        stated: m.stated,
+                        printed: m.printed,
+                    },
+                }),
         );
     }
     let sheets = sheet_findings(text, turn.runs);
     if surface == Surface::Reply {
-        push(
-            &mut out,
-            FindingKind::Unstated,
-            sheets.unstated.iter().map(|row| row.figure),
-        );
+        out.extend(sheets.unstated.iter().map(|row| Finding {
+            kind: FindingKind::Unstated,
+            value: row.figure.to_owned(),
+            detail: Detail::Row {
+                name: row.name.to_owned(),
+            },
+        }));
     }
-    push(&mut out, FindingKind::Unchecked, sheets.unchecked);
+    let framed = sheets.framed;
+    out.extend(sheets.unchecked.into_iter().map(|figure| Finding {
+        kind: FindingKind::Unchecked,
+        value: figure.to_owned(),
+        detail: Detail::Unchecked { framed },
+    }));
     push(
         &mut out,
         FindingKind::Weekday,

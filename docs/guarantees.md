@@ -138,8 +138,13 @@ flagged:
 - a weekday pair is reported once, as written;
 - a name of the agent's internals written against Thai, Lao, Khmer or
   Myanmar text is still a word, in the reply and in the person's words
-  alike: "ใช้web_searchค้นหา" names `web_search`, where the original's
-  segmenter reads it as one Thai word.
+  alike: "ใช้web_searchค้นหา" names `web_search`, and "ใช้ไทย_toolค้นหา"
+  names `ไทย_tool`, where the original's segmenter reads each run as one
+  Thai word;
+- a figure written exactly is not grounded by the same figure marked
+  approximate elsewhere in the reply: "3,440 sessions, ~3,440 visits" holds
+  the first 3,440 to a print of its own, where the original grounds both by
+  a printed 3,442.
 
 ### Dates read more accurately than the TypeScript check
 
@@ -272,6 +277,10 @@ where the TypeScript reads the text wrongly:
 
 The internals check, the memory layout scrub, the memory-use count and the
 sheet checks were run beside their TypeScript originals on 20,000 generated
-inputs each (the sheet checks on the 16,500 whose amounts both read alike),
-and agree on all of them except the Thai cases above. Korean is parted from a
-name as the original's segmenter parts it ("workspace.md에").
+inputs each, and agree on all of them but the Thai cases above and, for the
+sheets, prints whose figures a plain space sets side by side, which this
+library reads as two figures; on 40,000 sheet inputs without such prints
+they agree on all. Korean is parted from a name as the original's segmenter
+parts it ("workspace.md에"). The invariants, `without_links` and
+`unopened_links` agree with theirs on 20,000 generated turns whose links the
+two read alike (see [Known gaps](known-gaps.md#links)).

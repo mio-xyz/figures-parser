@@ -300,9 +300,9 @@ pub(super) const fn is_inline_space(c: char) -> bool {
 }
 
 /// Where an approximation mark right before byte `at` starts, with at most
-/// one space of the same line between ("~12", "≈ 12"), standing after no
-/// digit or word letter: after a digit, with or without a space, a tilde is
-/// a range ("10~20", "10 ~ 20").
+/// one space of the same line between ("~12", "≈ 12"). A tilde between two
+/// figures ("10~20") marks the second too: whether it reads as a range or
+/// as "about", the figure after it is stated loosely.
 pub(crate) fn approximation_at(text: &str, at: usize) -> Option<usize> {
     let before = text.get(..at)?;
     let mark_end = before_marks(
@@ -310,13 +310,7 @@ pub(crate) fn approximation_at(text: &str, at: usize) -> Option<usize> {
         before.strip_suffix(is_inline_space).unwrap_or(before).len(),
     );
     let c = char_before(text, mark_end).filter(|&c| is_approximation_mark(c))?;
-    let start = mark_end.saturating_sub(c.len_utf8());
-    let edge = before_marks(text, start);
-    let head = text.get(..edge)?;
-    let spaced = head.strip_suffix(char::is_whitespace);
-    let joined = char_before(head, edge).is_some_and(is_boundary)
-        || spaced.is_some_and(|h| char_before(h, h.len()).is_some_and(is_digit));
-    (!joined).then_some(start)
+    Some(mark_end.saturating_sub(c.len_utf8()))
 }
 
 /// Whether the text before `start` may hold a sign, an approximation mark, a
@@ -399,10 +393,11 @@ pub(super) fn mark_after_end(text: &str, end: usize) -> Option<usize> {
 }
 
 /// Whether a currency sign or code opens the text after byte `end`, with at
-/// most one space between ("99 USD", "12 €"), and marks no figure after it.
+/// most one space of the same line between ("99 USD", "12 €"), and marks no
+/// figure after it: a mark on the next line opens the figure there.
 pub(super) fn marked_after(text: &str, end: usize) -> bool {
     let after = text.get(end..).unwrap_or_default();
-    let after = after.strip_prefix(char::is_whitespace).unwrap_or(after);
+    let after = after.strip_prefix(is_inline_space).unwrap_or(after);
     let rest = match char_at(after, 0) {
         Some(c) if c.is_ascii_uppercase() => {
             let rest = after.trim_start_matches(|w: char| w.is_ascii_alphanumeric());

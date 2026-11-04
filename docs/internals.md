@@ -63,17 +63,19 @@ make the digits after it part of a word.
 
 A token records what stands around it:
 
-- a currency sign (`\p{Sc}`) or an ISO 4217 code before or after it, with at
-  most one space between. A mark before another figure is that figure's
-  ("12 $750"), and a code set apart between two figures marks neither
-  ("2,685 USD 2026");
+- a currency sign (`\p{Sc}`) or an ISO 4217 code before it, with at most one
+  space between, or after it, with at most one space of the same line. A
+  mark before another figure is that figure's ("12 $750"), and a code set
+  apart between two figures marks neither ("2,685 USD 2026");
 - a sign before it, read by a fast one-byte check, then a full look-back
   that crosses a currency mark and the bidi marks Arabic and Persian print
   ("-€1,234.50", "€ -1.234,50", "EUR-1'234.50"). A dash after a digit or a
   word letter joins instead ("CORE-1710", "10-12");
 - an approximation mark (`~`, `∼`, `≈`) before the figure, its sign or its
-  currency, on the same line. A tilde after a digit is a range ("10~20"),
-  and the CJK wave dashes (`〜`, `～`) mean a range or "up to";
+  currency, with at most one space of the same line between. A tilde
+  between two figures ("10~20") marks the second too, read as a range or as
+  "about"; the CJK wave dashes (`〜`, `～`) mean a range or "up to" and mark
+  nothing;
 - a scale word after the digits (see [Scale words](#scale-words)).
 
 The digit table holds the 77 runs of ten decimal digits Unicode encodes,
@@ -117,8 +119,8 @@ grouping writes a zero lead, so "0,850" is a decimal only.
 - a decimal with four fractional digits or more is always held, and is
   grounded by any corpus value that starts with the same digits ("1.1785" is
   carried by "1.17853");
-- a derived reading, or a number in words opened by an article, is never
-  held.
+- a derived reading, the decimal reading of a token that also reads as
+  thousands, or a number in words opened by an article, is never held.
 
 A reply's figure with several whole readings is one claim, grounded by any
 of them and reported once.
@@ -328,7 +330,10 @@ ts, an id) are the link check's. A bare digit run is never a claim
 (`Reading::stated`), since a code or an order number is one as often as an
 amount; `Reading::stated_amount(true)` holds such a run from 10,000 up, for
 `Amounts`, which reads the reply once and grounds a clone of its claims, one
-vector, against each print (`shared_with`), ratios skipped as well. The keys
+vector, against each print (`shared_with`), ratios skipped as well. An amount
+is matched by its exact digits, whatever its sign or approximation mark (a
+refund printed unsigned is where a reply's "-1,040" came from), named as the
+reply writes its digits, and once however often the reply writes it. The keys
 stay apart from the claims for that: `Needles` holds what a walk reads,
 `Claims` what it closes. `Amounts` also reads a scaled figure's digits as
 printed (`Tokens::keep_digits`), since a print that carries "9.162" vouches
@@ -463,7 +468,7 @@ the per-unit check reads the corpus: every reading of every figure, a
 letter allowed after one, and apart the amounts (behind a currency mark, or
 with a decimal part). `numeric_tokens` gives each token of a result with its
 span and values, the decimal reading of a run that also groups only when
-read loosely. `without_links` blanks a text's links.
+read loosely.
 
 `sheet_findings` walks a turn's script runs for the worksheet checks. The
 caller says what each run did (it listed its rows, took a ledger frame, read
@@ -577,7 +582,7 @@ about to be sent:
 target is kept as written there and parenthesised only in the list.
 
 `mended_links(reply, corpus)` repairs what a rule can: each link of the reply
-that `shapes::undotted_slack_link` reads as a message link in the first
+that `shapes::undotted_message_link` reads as a message link in the first
 shape above with its timestamp's dot kept (`/archives/<channel>/p<10 digits>.<6 digits>`, the query
 and fragment as written) is replaced throughout, then the items the prose
 names without a link (the same walk as the unlinked check, over the corpus
@@ -1007,6 +1012,11 @@ people in the thread wrote passes, read by the same rules as the reply.
   writes a particle onto a name ("workspace.md에"), and Thai, Lao, Khmer and
   Myanmar, which the rules keep apart from Latin, stay apart, so a name
   written against Thai text is still a word.
+- The rules part the letters of those four scripts, and of the Tai scripts,
+  one from the next, so a name holding one ("ไทย_tool") is looked for as
+  written instead, lowercased: it counts where no digit, underscore or letter
+  of a spaced script stands right before it (a combining mark there belongs
+  to the letter before) and none, nor a mark, right after it.
 - A memory file counts as a word too, and passes when the vouching text
   (the tool results other than the memory tools', which list the files
   themselves) holds it whole, lowercased: no file-name character (a-z,
@@ -1058,6 +1068,35 @@ line (trimmed, not empty, not a `#` heading) and counts a line the response
 draws on: at least two of its distinct tokens shared and at least half of
 them, or three of its tokens in a row repeated.
 
+## A turn's invariants
+
+`evaluate_invariants` gives each invariant a turn is held to a verdict:
+pass, fail with its reason, or not evaluable when the input it reads (the
+raw text, the tool results, the step count) was not given.
+
+- `claims_unbacked_action`: an English past-tense action claim ("I've
+  created", "sent the email", "done! I") with no pending action and no
+  write tool called: an integration's create, update, comment, assign,
+  merge, send, draft, reply or delete tool, or the message post.
+- `claims_unwritten_memory`: a claim `memory_claim` reads ("I'll
+  remember", "saved it to my notes", the apostrophe straight or curly) with
+  no `memory_write`, `memory_edit` or `memory_delete` call.
+- the speaker label: `speaker_prefix` finds one.
+- the abstention marker: `silent_signal` reads it, and the invariant fails
+  when it leaked.
+- `fabricated_urls` for the links, with no host trusted.
+
+The phrases compare letters in ASCII case and find word edges by ASCII word
+characters, and whitespace is what JavaScript's `\s` reads, so a verdict is
+the same as the host's patterns give. `claims_refusal` reads the refusal
+phrases a turn's score counts.
+
+## A text with its links taken out
+
+`without_links` puts every link a text holds out as a space, wherever the
+link's text recurs, the longer first, for a reader whose items a link's
+digits would be misread as.
+
 ## A turn's checks in one call
 
 `ground_message` runs on a message a run sends itself what the correction
@@ -1071,6 +1110,11 @@ asked for a rewrite, and the delivered text is scrubbed after), a link to a
 file the run made reported as `attached`, and listed sheet rows left
 unstated reported as `unstated`. `ground_page` holds a page to its figures,
 ratios and ids only.
+
+A finding carries what a correction names beside its value (`Detail`): a
+per-unit amount its stated and printed quotients, an unstated row the
+helper's line for it, an unchecked amount whether a frame was summed by
+hand.
 
 ## The Node binding
 

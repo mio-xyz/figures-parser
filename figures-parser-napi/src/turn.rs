@@ -4,7 +4,7 @@
 //! the memory a reply draws on, and the checks a turn runs on a reply, a sent
 //! message and a page in one call.
 
-use figures_parser::{InternalsCheck, ListedFigure, SheetRun};
+use figures_parser::{Detail, InternalsCheck, ListedFigure, SheetRun};
 use napi::bindgen_prelude::Function;
 use napi_derive::napi;
 
@@ -147,6 +147,39 @@ pub struct Finding {
     pub kind: String,
     /// What was found.
     pub value: String,
+    /// For a `per-unit` finding, the clause's total over its count, worked
+    /// out ("$74.74 / 2 = $37.37").
+    pub stated: Option<String>,
+    /// For a `per-unit` finding, the printed amount the per-unit one is that
+    /// count's quotient of ("$91.65 / 2").
+    pub printed: Option<String>,
+    /// For an `unstated` finding, the helper's line for the row.
+    pub name: Option<String>,
+    /// For an `unchecked` finding, whether a run that gave such an amount
+    /// took a frame of rows and summed it by hand.
+    pub framed: Option<bool>,
+}
+
+/// A finding of the library, for JavaScript.
+fn finding_output(f: figures_parser::Finding) -> Finding {
+    let mut out = Finding {
+        kind: f.kind.name().to_owned(),
+        value: f.value,
+        stated: None,
+        printed: None,
+        name: None,
+        framed: None,
+    };
+    match f.detail {
+        Detail::None => {}
+        Detail::PerUnit { stated, printed } => {
+            out.stated = Some(stated);
+            out.printed = Some(printed);
+        }
+        Detail::Row { name } => out.name = Some(name),
+        Detail::Unchecked { framed } => out.framed = Some(framed),
+    }
+    out
 }
 
 /// A text with its mendable defects put right, and what it still fails on.
@@ -377,14 +410,7 @@ fn ground(
         ok: found.is_clean(),
         text: found.text,
         mends: found.mends,
-        findings: found
-            .findings
-            .into_iter()
-            .map(|f| Finding {
-                kind: f.kind.name().to_owned(),
-                value: f.value,
-            })
-            .collect(),
+        findings: found.findings.into_iter().map(finding_output).collect(),
     })
 }
 
