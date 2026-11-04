@@ -20,10 +20,13 @@ it stands; a contribution that closes one should remove it here.
   follows the scale, so a French "1 billion" with neither is read at 10⁹.
 - A scale word after more than one space is not read.
 - An abbreviation that is also a unit is told from a scale by a short list
-  of words around the figure ("took", "ago", "tall", "truck", "files"), in
-  English and French, so a unit with none of them is read as a scale, as the
-  host reads it: "5m of cable" and "a 5m wall" are millions, and so is "spent
-  5m", which is as often money.
+  of words around the figure ("took", "ago", "tall", "truck", "files",
+  "screens"), in English and French and a few time verbs of German, Spanish,
+  Portuguese and Russian, so a unit with none of them is read as a scale, as
+  the host reads it: "5m of cable" and "a 5m wall" are millions, and so is
+  "spent 5m", which is as often money.
+- Three-digit values a thin, figure or ideographic space or an underscore
+  lists read as one thousands figure, as with a plain space.
 - A sign written in words ("minus 12,500"), with an en dash ("–12,500"), after
   the figure ("12,500-") or as an accounting suffix ("12,500 CR") is not
   read, so such a figure holds the corpus to no sign.
@@ -101,9 +104,12 @@ it stands; a contribution that closes one should remove it here.
   holds it, and a root address with a query by its query alone (`?page=2`),
   as a page's relative link gives them, so a page on another host that links
   the same path grounds it.
-- A link printed without its scheme grounds every link it starts, as one
-  printed with it does: "github.com/org/repository" grounds
-  "https://github.com/org/repo".
+- A link printed without its scheme grounds every link it starts below its
+  host, as one printed with it does: "github.com/org/repository" grounds
+  "https://github.com/org/repo", and "acme.io/p/9f8e7d6c5bdocs" grounds
+  "https://acme.io/p/9f8e7d6c5b".
+- A doubled scheme's inner link ("`https://https://acme.io`") is read where
+  the host's TypeScript reads none.
 
 ## Memory
 
@@ -133,8 +139,9 @@ it stands; a contribution that closes one should remove it here.
   line opens on a time of day. Of chrono's readings there, a date with a
   length added ("Nov 6 - 14h", chrono's relative-after-date merge) is not
   read, nor is a weekday joined with a time into a range of times ("thứ ba -
-  13giờ tối - 16:00"). An Arabic weekday beside a bare day number is not
-  checked.
+  13giờ tối - 16:00"), nor a range of times a joiner and another time
+  follow ("Tue 4 at 3-5pm - 17:00"). An Arabic weekday beside a bare day
+  number is not checked.
 - A bare day number is read against a window from three weeks back to five
   weeks ahead, so a plan more than five weeks out ("Tuesday 4" for a meeting
   two months away) is read against the wrong month.
@@ -273,6 +280,9 @@ is pinned in `tests/it/durations.rs`.
   rest are the readings [Guarantees](guarantees.md) lists as deliberate.
 - A date with a length added ("Nov 6, 2026 - 14h", chrono's
   relative-after-date merge) is not read as one date.
+- A range whose first day writes no month before a range word ("22 até 23
+  de dezembro", "February 13 through 19") opens no window; it ends the one
+  before it.
 - Arabic is not read, nor a window or a row in a language whose date words
   the weekday check does not read.
 

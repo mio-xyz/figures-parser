@@ -1120,3 +1120,127 @@ fn lists_the_pages_a_message_links_that_no_turn_opened() {
         ["https://notslack.com.evil.io/x"]
     );
 }
+
+// A `>` closes a chat label only where it ends one: not inside a later
+// link's query, after a comparison glued to what follows or spaced by any
+// space, nor as the `">` that ends an attribute.
+#[test]
+fn reads_on_past_a_prose_or_markup_angle_bracket() {
+    let read =
+        |text: &str| -> Vec<String> { urls(text).iter().map(|u| u.text.to_owned()).collect() };
+    assert_eq!(
+        read("see https://acme.io/a|b and https://b.io/?q=a>b end"),
+        ["https://acme.io/a|b", "https://b.io/?q=a"]
+    );
+    assert_eq!(
+        read("filter https://grafana.acme.io/d/abc?var=prod|staging (x>5)"),
+        ["https://grafana.acme.io/d/abc?var=prod|staging"]
+    );
+    assert_eq!(
+        read("see https://acme.io/a|b, then x>y"),
+        ["https://acme.io/a|b"]
+    );
+    assert_eq!(
+        read("<a href=\"https://acme.io/x|y/blob?x=1\">doc</a>"),
+        ["https://acme.io/x|y/blob?x=1"]
+    );
+    for space in [' ', '\u{a0}', '\u{2009}', '\u{202f}', '\u{3000}'] {
+        assert_eq!(
+            read(&format!("see https://acme.io/a|b/c x{space}> 5 more")),
+            ["https://acme.io/a|b/c"],
+            "{space:?}"
+        );
+    }
+    assert_eq!(read("see https://acme.io/a|doc>."), ["https://acme.io/a"]);
+}
+
+// A doubled scheme cut short leaves no link of its own: the bare scheme
+// names no host.
+#[test]
+fn a_bare_scheme_is_no_link() {
+    for text in [
+        "_https://https://acme.io",
+        "`https://https://acme.io/x`",
+        "éhttps://https://acme.io",
+        "`https://http://acme.io`",
+    ] {
+        assert!(
+            urls(text).iter().all(|u| u.text.len() > "https://".len()),
+            "{text}"
+        );
+        assert!(!fabricated_urls(text, "").contains(&"https://"), "{text}");
+        assert!(
+            without_links(&format!("{text} https://")).ends_with("https://"),
+            "{text}"
+        );
+    }
+}
+
+// A schemeless print grounds only the same host: a letter of a spaced
+// script before it, or more of a host after a root, make another one.
+#[test]
+fn a_schemeless_print_grounds_only_its_own_host() {
+    for corpus in [
+        "ëacme.io/x",
+        "éacme.io/x",
+        "ßacme.io/x",
+        "ſacme.io/x",
+        "пacme.io/x",
+    ] {
+        assert_eq!(
+            fabricated_urls("see https://acme.io/x", corpus),
+            ["https://acme.io/x"],
+            "{corpus}"
+        );
+    }
+    assert_eq!(
+        fabricated_urls("see https://acme.io/x", "see acme.io/x here"),
+        none()
+    );
+    assert_eq!(
+        fabricated_urls("see https://acme.io/x", "日本acme.io/x"),
+        none()
+    );
+    for corpus in [
+        "acme.iox",
+        "acme.ioé",
+        "acme.io-x",
+        "acme.io_x",
+        "acme.io.evil",
+    ] {
+        assert_eq!(
+            fabricated_urls("see https://acme.io", corpus),
+            ["https://acme.io"],
+            "{corpus}"
+        );
+    }
+    assert_eq!(
+        fabricated_urls("see https://acme.io", "visit acme.io."),
+        none()
+    );
+    assert_eq!(
+        fabricated_urls("see https://acme.io", "visit acme.io/pricing"),
+        none()
+    );
+}
+
+// A template's unfilled placeholder is no page name a reply may build.
+#[test]
+fn an_unfilled_placeholder_names_no_page() {
+    let hosts = ["github.com", "linear.app"];
+    for link in [
+        "https://github.com/{owner}",
+        "https://github.com/settings/{tab}",
+        "https://linear.app/{x}/",
+    ] {
+        assert!(
+            !figures_parser::built_from_corpus(link, "x", &hosts),
+            "{link}"
+        );
+    }
+    assert!(figures_parser::built_from_corpus(
+        "https://github.com/new",
+        "x",
+        &hosts
+    ));
+}

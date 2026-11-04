@@ -4,6 +4,7 @@
 //! fortnight"). Arabic has a pattern of its own ("ساعتين و30 دقيقة", "ربع
 //! ساعة"), run only over a text that holds Arabic letters.
 
+use std::borrow::Cow;
 use std::cmp::Reverse;
 use std::ops::Range;
 use std::sync::LazyLock;
@@ -123,20 +124,23 @@ impl Unit {
     }
 
     /// `amount` of the unit, rounded down to the millisecond and the
-    /// hundredth of a month.
+    /// hundredth of a month. The product is taken wide, so a float a tool
+    /// prints to 17 digits ("237.39999999999998") reads, and a length past
+    /// what a `u64` of milliseconds holds is held at its largest value
+    /// rather than dropped.
     #[must_use]
     pub(crate) fn times(self, amount: Amount) -> Option<Length> {
         let one = self.one();
-        let divisor = 10u64.checked_pow(amount.scale)?;
+        let divisor = 10u128.checked_pow(amount.scale)?;
+        let scaled = |of: u64| {
+            u128::from(of)
+                .checked_mul(u128::from(amount.mantissa))
+                .and_then(|n| n.checked_div(divisor))
+                .map(|n| u64::try_from(n).unwrap_or(u64::MAX))
+        };
         Some(Length {
-            milliseconds: one
-                .milliseconds
-                .checked_mul(amount.mantissa)?
-                .checked_div(divisor)?,
-            centimonths: one
-                .centimonths
-                .checked_mul(amount.mantissa)?
-                .checked_div(divisor)?,
+            milliseconds: scaled(one.milliseconds)?,
+            centimonths: scaled(one.centimonths)?,
         })
     }
 }
@@ -981,18 +985,38 @@ fn collect(re: &Regex, text: &str, read: Reader, out: &mut Vec<Part>) {
     });
 }
 
+/// `text` with each underscore that marks emphasis read as a space
+/// ("_2 hours_", "__94 seconds__"), so a length in italics is read; one
+/// between two letters or digits joins a name (`run_2h`) and stays. The
+/// text keeps its length, so a part's span is the same in both.
+fn without_emphasis(text: &str) -> Cow<'_, str> {
+    if !text.contains('_') {
+        return Cow::Borrowed(text);
+    }
+    let mut out = String::with_capacity(text.len());
+    for (at, c) in text.char_indices() {
+        let joins = c == '_'
+            && char_before(text, at).is_some_and(char::is_alphanumeric)
+            && char_at(text, at.saturating_add(1)).is_some_and(char::is_alphanumeric);
+        out.push(if c == '_' && !joins { ' ' } else { c });
+    }
+    Cow::Owned(out)
+}
+
 /// Every part in `text`, in order, a longer one winning an overlap.
 pub fn parts(text: &str) -> Vec<Part> {
+    let unemphasised = without_emphasis(text);
+    let scanned: &str = &unemphasised;
     let mut found = Vec::new();
     let readers: [(&Option<Regex>, Reader, bool); 4] = [
         (&PART, read_part, true),
         (&PHRASE, read_phrase, true),
-        (&ARABIC, read_arabic, has_arabic(text)),
-        (&NAMED_PART, read_named, !text.is_ascii()),
+        (&ARABIC, read_arabic, has_arabic(scanned)),
+        (&NAMED_PART, read_named, !scanned.is_ascii()),
     ];
     for (re, read, wanted) in readers {
         if wanted && let Some(re) = re {
-            collect(re, text, read, &mut found);
+            collect(re, scanned, read, &mut found);
         }
     }
     found.sort_by_key(|p| (p.span.start, Reverse(p.span.end)));

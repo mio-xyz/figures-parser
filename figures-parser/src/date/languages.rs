@@ -1147,11 +1147,17 @@ impl Language {
         let Some(mut prev) = iter.next() else {
             return kept;
         };
+        // chrono measures a result in UTF-16 units: "6 Jan" outgrows the
+        // "Jan\u{202f}" a month-only parser reads, though it has fewer bytes.
+        let width = |f: &Found| {
+            text.get(f.start..f.end)
+                .map_or(0, |t| t.chars().map(char::len_utf16).sum::<usize>())
+        };
         for found in iter {
             if found.start >= prev.end {
                 kept.push(prev);
                 prev = found;
-            } else if found.end - found.start > prev.end - prev.start {
+            } else if width(&found) > width(&prev) {
                 prev = found;
             }
         }
@@ -1342,6 +1348,7 @@ fn read_month_name(
     let year = match m.group("y") {
         Some(y) if !year_follows_well(year_check, y.trim(), m.after("y")) => return None,
         Some(y) if counted(m, y) => return None,
+        Some(y) if names_hour(y.trim(), m.after("y")) => None,
         Some(y) => Some(parse_year(y)?),
         None => None,
     };
@@ -1360,6 +1367,27 @@ fn read_month_name(
         month,
         year: written_or_nearest(year),
     })
+}
+
+/// Whether the two-digit number `year`, followed by `after`, is an hour a
+/// word or a letter of the hour names ("17 de noviembre 16 h", "16 horas",
+/// "16 Uhr"), not the date's year.
+fn names_hour(year: &str, after: &str) -> bool {
+    const HOURS: [&str; 12] = [
+        "h", "hs", "hrs", "hr", "hora", "horas", "heure", "heures", "ore", "uhr", "uur", "giờ",
+    ];
+    if !(year.len() == 2 && year.bytes().all(|b| b.is_ascii_digit())) {
+        return false;
+    }
+    let rest = after.trim_start_matches([' ', '\u{a0}', '\u{202f}']);
+    let word = rest
+        .get(
+            ..rest
+                .find(|c: char| !c.is_alphabetic())
+                .unwrap_or(rest.len()),
+        )
+        .unwrap_or_default();
+    HOURS.iter().any(|hour| crate::text::same_word(hour, word))
 }
 
 /// A month and a day that may have been written the other way round: a

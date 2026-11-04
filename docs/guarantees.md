@@ -223,10 +223,13 @@ this library reads it as written. Each case is pinned by a test in
   checks March 5, and reads "31/10-11月7日" as a window from January 10. A
   number that cannot be a month is the day; this library reads May 13 and
   October 31.
-- **A two-digit year that no hour can be is a year.** chrono reads the "24"
-  of "samedi 13 juillet 24" as 24:00 and drops the date, so the TypeScript
-  check passes "dimanche 13 juillet 24"; 13 July 2024 was a Saturday, and
-  this library flags it.
+- **A two-digit year that no hour can be is a year, where nothing else
+  makes the pair right.** chrono reads the "24" of "samedi 13 juillet 24" as
+  24:00 and drops the date, so the TypeScript check passes every such pair.
+  Read on 2025-06-17, "lundi 13 juillet 24" is wrong for 13 July 2024 and
+  for 13 July 2025, and this library flags it; "dimanche 13 juillet 24" is
+  right for the coming 13 July, so the "24" is a count to a reader and the
+  pair passes, as it does after a numeric date ("Freitag 25/02 24").
 - **A count after a range is no year.** chrono reads "Aug 4 - Aug 5, 12
   posts" as running to August 5, 2012, so the TypeScript check flags a row
   dated August 5 under that very window. A one- or two-digit number after
@@ -240,7 +243,29 @@ this library reads it as written. Each case is pinned by a test in
   reads each language apart, so a heading one language cannot read keeps
   that language's earlier window open over the rows under it, and flags a
   row against a window its heading does not name. Here a line that any
-  language reads as a window ends the window every other language had open.
+  language reads as a window ends the window every other language had open,
+  and so does a heading any language reads a date or a range in
+  ("### Résumé February 13 through 19").
+- **A heading's numeric dates set the order of its slash dates.** A date
+  that can only be day first ("15/12", "30/1/2026") or is dotted
+  ("9.2.2028") makes the heading's slash dates, and its rows', day first in
+  every language, English and Japanese too; one that can only be month first
+  ("12/25") makes them month first. The TypeScript check reads "2/12-15/12"
+  as no window in English and flags no row a day-first reader would, but
+  "03/02/2028 to 9.2.2028" as 2 March to 2 September; this library reads 3
+  to 9 February. Where nothing says ("6/12-4/1", "28 Nov-04 December" over a
+  row "03/12"), a row either order puts inside the window is let be.
+- **A two-digit number before an hour word is the hour.** chrono reads the
+  "16" of "17 de noviembre 16 h" as the year 2016; "16 h", "16 horas" and
+  "16 Uhr" are hours here.
+- **A result's width is counted in UTF-16 units, as chrono counts it.** "Tue
+  6 Jan" followed by a narrow no-break space is a date and a weekday, not
+  the "Jan" a month-only parser reads with the space, which has more bytes.
+- **A bare day ends at its line.** A word on the next line makes no count of
+  "Tue 4", and a line that opens with a weekday, a date and a time ("Sun,
+  2026-11-01 15:00") opens on that time, as chrono reads it.
+- **A month number glued to its mark is no bare day.** "土曜日 11月3日" is a
+  weekday and a date, not the bare day 11; "土曜日 11日" is one.
 - **A two-digit year before a Chinese date is this century's.** chrono keeps
   "03 11月5日" in the year 3; this library reads 2003, as chrono reads a
   two-digit year everywhere else.
@@ -255,6 +280,9 @@ words, phrases, fractions and glued runs are read too; a decimal is held to
 its place; "and" joins parts, in a reply and in a corpus; a full stop after
 a full unit name, a line break and a Latin letter after a unit end what the
 original reads on through; a range written high to low is read as a span.
+A length in underscore emphasis ("_2 hours_") is read, as the original
+reads it, and so is one printed to a float's 17 digits; a length past what
+milliseconds hold is held, never dropped.
 Like the original, a reply is held to no time of day ("15h30"), to no length
 in days or longer units alone, and to the grouped reading of its digits.
 
@@ -275,8 +303,10 @@ where the TypeScript reads the text wrongly:
   link's `[label](` end a link that linkify-it reads on through, so
   `https://acme.io/88a|the doc>` is `https://acme.io/88a` and
   `https://acme.io/x[docs](https://b.io/y)` is two links. A `>` that is
-  prose closes no label: an arrow (`->`, `=>`), a comparison with a space
-  before it (`filter > 5`), `>=`, or one after a `)` or `]` the label never
+  prose or markup closes no label: an arrow (`->`, `=>`), a comparison with
+  any space before it (`filter > 5`, a no-break or thin space too) or glued
+  to what follows (`x>5`, `a>b`), `>=`, the `">` that ends an attribute, one
+  past another link's scheme, or one after a `)` or `]` the label never
   opened (`(draft|v2)>`), so `?family=Roboto|Inter -> used` stays one link,
   as linkify-it reads it;
 - a link glued to a letter of another script, an emoji or `_`, or after a
@@ -289,7 +319,17 @@ where the TypeScript reads the text wrongly:
 - a link printed without its scheme grounds the same link under any host, a
   port or an address included (`acme.app/x`, `acme.io:8080/x`,
   `127.0.0.1/x`), where the TypeScript check finds one only under the
-  top-level domains linkify-it lists;
+  top-level domains linkify-it lists. The same host means no letter of a
+  script written with spaces glued before it (`ëacme.io/x` is another
+  host) and, for a host's root, no more host after it (`acme.iox`,
+  `acme.io.evil`); a letter of a script written without spaces sets a host
+  apart (`日本acme.io/x` grounds `https://acme.io/x`), where linkify-it
+  reads the ideographs into the host;
+- a page name is letters and the marks a slug joins them with: an
+  unfilled placeholder (`github.com/{owner}`) names no page a reply may
+  build, as the TypeScript check finds through Node's `%7B`;
+- a doubled scheme cut short (`` `https://https://acme.io` ``) is no link
+  of its own: the bare `https://` names no host;
 - an opaque id whose prefix names a key's mode after its first word
   (`cs_test_…`, `sk_live_…`, `…_sandbox_…`) is held to the corpus, where the
   TypeScript reads none; a prefix of several words that names no mode

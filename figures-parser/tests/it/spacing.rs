@@ -160,7 +160,10 @@ fn a_no_break_space_after_a_grouped_figure_opens_the_next() {
         let fee = format!("Fee 1,458{space}5k");
         assert_eq!(Amounts::of(&fee).shared_with("1,458"), ["1,458"]);
     }
-    assert_eq!(ungrounded_figures("Prix 1\u{a0}250\u{a0}000 €", "1250000"), none());
+    assert_eq!(
+        ungrounded_figures("Prix 1\u{a0}250\u{a0}000 €", "1250000"),
+        none()
+    );
 }
 
 // A times sign measures only between two measures; glued to a figure, after
@@ -204,8 +207,14 @@ fn a_line_break_ends_a_round_range() {
 // A scaled figure is named from the currency mark glued before it.
 #[test]
 fn names_a_scaled_figure_with_its_currency_mark() {
-    assert_eq!(ungrounded_figures("Created it for €34,0M.", "x"), ["€34,0M"]);
-    assert_eq!(ungrounded_figures("Created it for $34.0M.", "x"), ["$34.0M"]);
+    assert_eq!(
+        ungrounded_figures("Created it for €34,0M.", "x"),
+        ["€34,0M"]
+    );
+    assert_eq!(
+        ungrounded_figures("Created it for $34.0M.", "x"),
+        ["$34.0M"]
+    );
     assert_eq!(ungrounded_figures("Created it for €3,4 M", "x"), ["€3,4 M"]);
     assert_eq!(ungrounded_figures("about ~$1.2M", "x"), ["~$1.2M"]);
     assert_eq!(ungrounded_figures("USD 34M budget", "x"), ["34M"]);

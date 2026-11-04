@@ -103,11 +103,17 @@ pub fn bare_day_at(
         return None;
     }
     let after = segments.get(2).map(|&(_, s)| s);
-    if after.is_some_and(|a| NOT_A_DAY_AFTER.contains(&a.to_lowercase().as_str())) {
+    // A word glued to the number makes it a month or a unit ("11月3日"),
+    // but the day's own mark ("11日") keeps it a day.
+    let glued_word = |a: &str| word_like(a) && !a.starts_with(['日', '号', '號', '일']);
+    if after.is_some_and(|a| glued_word(a) || NOT_A_DAY_AFTER.contains(&a.to_lowercase().as_str()))
+    {
         return None;
     }
+    // A word on the next line leaves the number ending its own.
     if let (Some(a), Some(&(next_at, next))) = (after, segments.get(3))
         && a.trim().is_empty()
+        && !a.contains('\n')
         && word_like(next)
     {
         if clock::hour_at_start(code, &format!("{number} {next}")) {

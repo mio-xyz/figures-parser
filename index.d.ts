@@ -204,12 +204,6 @@ export declare function groundingTokens(text: string): Array<string>
 export declare function groundMessage(text: string, turn: Turn, attached?: ((arg: string) => boolean) | undefined | null): Grounding
 
 /**
- * The figures, ratios and ids of a page made for a person that `corpus`
- * does not carry; none when the turn read pixels only.
- */
-export declare function groundPage(text: string, corpus: string, said?: string | undefined | null, pixelOnly?: boolean | undefined | null): Array<string>
-
-/**
  * A reply before it is delivered, checked as the correction round checks
  * it: its links mended, then held to the turn so far, a link to a file the
  * run made and a listed sheet row left unstated included.
@@ -255,6 +249,11 @@ export interface InvariantInput {
   toolResultCorpus?: string
   /** Whether the loop ran out of steps; absent when not recorded. */
   hitStepLimit?: boolean
+  /**
+   * The hosts of the integrations the turn reaches, on which a link the
+   * reply builds from what it read passes unprinted.
+   */
+  hosts?: Array<string>
 }
 
 /** One invariant's verdict on a turn. */
@@ -691,10 +690,12 @@ export declare function ungroundedIdentifiers(reply: string, corpus: string, pro
 
 /**
  * The figures, ratios and opaque ids of a page's `text` that `corpus`, what
- * the run read, does not carry; `said`, what people wrote, grounds a ratio
- * between their own numbers.
+ * the run read, does not carry.
+ *
+ * `said`, what people wrote, grounds a ratio between their own numbers.
+ * Nothing is checked when the turn read pixels only (`pixel_only`).
  */
-export declare function ungroundedOnPage(text: string, corpus: string, said?: string | undefined | null): Array<string>
+export declare function ungroundedOnPage(text: string, corpus: string, said?: string | undefined | null, pixelOnly?: boolean | undefined | null): Array<string>
 
 /**
  * Ratios in `reply` (percentages and multiples) that neither `corpus` nor

@@ -339,7 +339,22 @@ fn check_dated<'r>(
         // chrono reads a number after a date as its hour and drops the pair
         // when that hour is past the clock; a two-digit number no hour can be
         // ("samedi 13 juillet 24") is the year to a reader.
-        (YearOf::Nearest | YearOf::Current, Some(PastClock::Year(y, end))) => {
+        // A trailing count reads as no year where the weekday is right for
+        // the date in the year it would have without one ("dimanche 13
+        // juillet 24" on 2025-06-17).
+        (unwritten @ (YearOf::Nearest | YearOf::Current), Some(PastClock::Year(y, end))) => {
+            let without = match unwritten {
+                YearOf::Nearest => calendar::nearest_year(today, month, day),
+                YearOf::Written(_) | YearOf::Current => Some(today.year()),
+            };
+            let right_without = without
+                .and_then(|nearest| {
+                    Date::new(nearest, i8::try_from(month).ok()?, i8::try_from(day).ok()?).ok()
+                })
+                .is_some_and(|on| calendar::from_sunday(on) == weekday);
+            if right_without {
+                return None;
+            }
             name_end = Some(end);
             YearOf::Written(y)
         }

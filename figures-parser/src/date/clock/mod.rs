@@ -1327,7 +1327,38 @@ fn longer(text: &str, kept: Time, next: Time) -> Time {
 /// `text` that survives on its own.
 #[must_use]
 pub fn hour_at_start(code: &str, text: &str) -> bool {
-    time_at_start(code, text).is_some_and(|t| t.hour && t.valid && !t.unlikely)
+    let survives = |t: Time| t.hour && t.valid && !t.unlikely;
+    time_at_start(code, text).is_some_and(survives)
+        || after_weekday(code, text)
+            .and_then(|rest| time_at_start(code, rest))
+            .is_some_and(|t| t.dated && survives(t))
+}
+
+/// The text after the weekday name that opens `text` in the language
+/// `code`, its abbreviation's dot, a comma and the spaces after it ("Sun,
+/// 2026-11-01 15:00" gives "2026-11-01 15:00"): chrono merges such a weekday
+/// into the date and time after it, so the line opens on that time.
+fn after_weekday<'t>(code: &str, text: &'t str) -> Option<&'t str> {
+    let entry = super::languages::LANGUAGES
+        .iter()
+        .find(|e| e.code == code)?;
+    let name_len = entry
+        .names
+        .iter()
+        .filter(|name| {
+            text.get(..name.len())
+                .is_some_and(|head| crate::text::same_word(head, name))
+        })
+        .map(|name| name.len())
+        .max()?;
+    let rest = text.get(name_len..)?;
+    if rest.chars().next().is_some_and(char::is_alphanumeric) {
+        return None;
+    }
+    let rest = rest.strip_prefix('.').unwrap_or(rest);
+    let rest = rest.strip_prefix(',').unwrap_or(rest);
+    let trimmed = rest.trim_start();
+    (trimmed.len() < rest.len()).then_some(trimmed)
 }
 
 impl Time {

@@ -896,3 +896,38 @@ fn holds_a_reply_to_no_length_in_days_or_longer_units_alone() {
         ["2 days and 3 hours"]
     );
 }
+
+// An underscore that marks emphasis is read as a space; one inside a name
+// joins it.
+#[test]
+fn reads_a_length_in_underscore_emphasis() {
+    for (reply, read) in [
+        ("the call lasted _2 hours_.", "2 hours"),
+        ("a _6-minute_ walkthrough", "6-minute"),
+        ("took __94 seconds__", "94 seconds"),
+    ] {
+        assert_eq!(ungrounded_durations(reply, "", ""), [read], "{reply}");
+    }
+    assert_eq!(
+        ungrounded_durations("a 6-minute walkthrough", "_350 seconds_", ""),
+        Vec::<String>::new()
+    );
+    assert_eq!(durations("job run_2h done").len(), 0);
+}
+
+// A float printed to 17 digits reads, and a length past what milliseconds
+// hold is held at the largest rather than dropped.
+#[test]
+fn reads_long_floats_and_huge_lengths() {
+    assert_eq!(
+        ungrounded_durations("took 4 minutes", "237.39999999999998 seconds", ""),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        ungrounded_durations("took 0.30000000000000004 seconds", "", ""),
+        ["0.30000000000000004 seconds"]
+    );
+    for reply in ["took 9007199254740 hours", "took 1000000000000000 min"] {
+        assert_eq!(ungrounded_durations(reply, "", "").len(), 1, "{reply}");
+    }
+}

@@ -689,7 +689,9 @@ fn checks_a_bare_day_number_a_signed_length_follows() {
 }
 
 // chrono reads "24" after a date as 24:00 and drops the date, so the
-// TypeScript check passes both; a reader takes 24 as the year.
+// TypeScript check passes every pair; a reader takes 24 as the year where
+// no other reading makes the weekday right, and as a count where the
+// weekday is right for the date in the year nearest today.
 #[test]
 fn reads_a_two_digit_number_ending_a_month_name_date_as_its_year() {
     let june = "2025-06-17";
@@ -703,9 +705,20 @@ fn reads_a_two_digit_number_ending_a_month_name_date_as_its_year() {
         assert_eq!(check(reply, june), Vec::<String>::new(), "{reply}");
     }
     assert_eq!(
-        check("dimanche 13 juillet 24", june),
-        [r#""dimanche 13 juillet 24" (2024-07-13 is a Saturday)"#]
+        check("lundi 13 juillet 24", june),
+        [r#""lundi 13 juillet 24" (2024-07-13 is a Saturday)"#]
     );
+    for (reply, today) in [
+        ("dimanche 13 juillet 24", june),
+        ("Mercredi, 7 mars 24", "2029-02-28"),
+        ("jeudi 20 août 24", "2026-08-26"),
+        ("неділя,23 грудня 24", "2029-12-22"),
+        ("Afspraak Freitag 25/02 24", "2028-02-25"),
+        ("Miércoles 03/11 24", "2027-09-10"),
+        ("нд,2 січня 24", "2027-12-25"),
+    ] {
+        assert_eq!(check(reply, today), Vec::<String>::new(), "{reply}");
+    }
     // A word after it makes it a count, and the pair goes unread as chrono
     // leaves it.
     assert_eq!(
@@ -914,5 +927,166 @@ fn reads_iberian_range_words_and_lets_a_heading_any_language_reads_end_a_window(
             day("2026-09-13")
         ),
         [r#""15/09/2026" under "13-14 settembre""#]
+    );
+}
+
+// chrono keeps the longer of two overlapping results by UTF-16 width: "6
+// Jan" outgrows the "Jan" and the space a month-only parser takes, whatever
+// space follows.
+#[test]
+fn reads_a_one_digit_day_before_any_space_after_its_month() {
+    for space in ['\u{202f}', '\u{2009}', '\u{3000}', '\u{2007}', '\u{2002}'] {
+        for tail in ["", " ", "@ 10am", "(10am)"] {
+            assert_eq!(
+                check(&format!("Tue 6 Jan{space}{tail}"), "2027-06-15"),
+                [r#""Tue 6 Jan" (2027-01-06 is a Wednesday)"#],
+                "{space:?} {tail}"
+            );
+        }
+        assert_eq!(
+            check(&format!("пятница 7 сентября{space}в 9 утра"), "2030-01-10"),
+            Vec::<String>::new(),
+            "{space:?}"
+        );
+    }
+    assert_eq!(
+        check("Tue 6 Jan\u{a0}- ok", "2027-06-15"),
+        [r#""Tue 6 Jan" (2027-01-06 is a Wednesday)"#]
+    );
+}
+
+// A word on the next line leaves a bare day ending its own, and a line that
+// opens with a weekday, a date and a time opens on that time.
+#[test]
+fn reads_a_bare_day_before_a_line_that_opens_on_a_dated_time() {
+    assert_eq!(
+        check("Call: Tue 4\nSun, 2026-11-01 15:00 kickoff", "2026-10-30"),
+        [r#""Tue 4" (2026-11-04 is a Wednesday)"#]
+    );
+    assert_eq!(
+        check("Tue 4 Sunday Nov 1, 3pm", "2026-10-30"),
+        [r#""Tue 4" (2026-11-04 is a Wednesday)"#]
+    );
+    assert_eq!(
+        check(
+            "Fecha: zondag 31\nzo, 2028-04-09 15 attendees",
+            "2028-05-18"
+        ),
+        [r#""zondag 31" (2028-05-31 is a Wednesday)"#]
+    );
+}
+
+// A month number glued to its mark is no bare day; the day's own mark
+// keeps one.
+#[test]
+fn a_japanese_month_after_a_weekday_is_no_bare_day() {
+    assert_eq!(
+        check("Spotkanie __土曜日 11月3日__.", "2029-12-23"),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        check("Spotkanie 土曜日 11月3日.", "2029-12-23"),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        check("Spotkanie 土曜日 11日.", "2029-12-23"),
+        [r#""土曜日 11" (2029-12-11 is a Tuesday)"#]
+    );
+}
+
+// A two-digit number before an hour word is the hour, not the year.
+#[test]
+fn a_two_digit_number_before_an_hour_word_is_no_year() {
+    for row in ["16 h", "16 horas", "24 h"] {
+        let reply = format!("Actividad: 17 nov 2025 al 16 dic 2025\n- 17 de noviembre {row}: x");
+        assert_eq!(
+            rows_outside_window(&reply, day("2026-01-03")),
+            Vec::<String>::new(),
+            "{row}"
+        );
+    }
+}
+
+// A heading's numeric dates say the order its slash dates are written in,
+// and its rows' are read in that order; where none says, a date either
+// order puts inside the window is let be.
+#[test]
+fn reads_a_window_and_its_rows_in_the_order_the_heading_writes() {
+    let rows = |reply: &str, today: &str| rows_outside_window(reply, day(today));
+    assert_eq!(
+        rows(
+            "## 2/12-15/12\n- 2027-12-02: x\n- 2027-12-20: y",
+            "2028-01-02"
+        ),
+        [r#""2027-12-20" under "2/12-15/12""#]
+    );
+    for (reply, today) in [
+        ("## 02/11-04/11\n- 2026-11-03: x", "2026-11-20"),
+        ("Aktivität (6/12-4/1)\n- 2028-12-16: x", "2028-12-20"),
+        (
+            "**Résumé (7/1/2027-9/1/2027)**\n- 2027-01-07: x",
+            "2027-01-20",
+        ),
+        ("## Week 4/2-11/2\n- 2027-02-04: x", "2027-02-20"),
+        (
+            "Posts: 30/1/2026-12/2/2026\n- 12/2: x\n- 1/2: y",
+            "2026-02-13",
+        ),
+        ("Активность: 25/8-7/9\n- 07/09: x", "2028-09-10"),
+        (
+            "Résumé: 28 Nov-04 December\n- 03/12 9am PT: x",
+            "2027-12-23",
+        ),
+    ] {
+        assert_eq!(rows(reply, today), Vec::<String>::new(), "{reply}");
+    }
+    assert_eq!(
+        rows(
+            "## 03/02/2028 to 9.2.2028\n- 10 February: x\n- 2028-02-05: y",
+            "2028-02-29"
+        ),
+        [r#""10 February" under "03/02/2028 to 9.2.2028""#]
+    );
+    assert_eq!(
+        rows(
+            "### Aktivitet 5.2.2027 until 07/02/2027\n- 2027-02-10: x",
+            "2027-02-26"
+        ),
+        [r#""2027-02-10" under "5.2.2027 until 07/02/2027""#]
+    );
+    assert_eq!(
+        rows(
+            "Résumé: 28 Nov-04 December\n- 03/15 9am PT: x",
+            "2027-12-23"
+        ),
+        [r#""03/15 9am PT" under "28 Nov-04 December""#]
+    );
+}
+
+// A heading that dates what follows it, read as no window, ends the window
+// before it.
+#[test]
+fn a_dated_heading_ends_the_window_before_it() {
+    for heading in [
+        "### Résumé February 13 through 19",
+        "### 22 até 23 de dezembro",
+        "### 5. mars 2028–11 mars 2028",
+        "### 3 t/m 10 juli 2029",
+        "### 14. Feb–16. Februar",
+        "### 21 грудня–2028-12-23",
+    ] {
+        let reply = format!("## Oct 1 - Oct 3\n- Oct 2: a\n{heading}\n- 2028-02-19: x");
+        assert_eq!(
+            rows_outside_window(&reply, day("2028-02-28")),
+            Vec::<String>::new(),
+            "{heading}"
+        );
+    }
+    assert_eq!(
+        rows_outside_window(
+            "## Oct 1 - Oct 3\n### Details\n- Oct 7: a",
+            day("2028-02-28")
+        ),
+        [r#""Oct 7" under "Oct 1 - Oct 3""#]
     );
 }

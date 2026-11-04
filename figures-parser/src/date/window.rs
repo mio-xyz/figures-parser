@@ -601,7 +601,8 @@ fn ranges(code: &str, text: &str, reads: Vec<Read>) -> Vec<Read> {
     out
 }
 
-/// A window a line names: its first and last date, and the range as written.
+/// A window a line names: its first and last date, the range as written,
+/// and the order its slash dates are written in.
 struct Window<'l> {
     /// Its first date.
     first: Date,
@@ -609,26 +610,168 @@ struct Window<'l> {
     last: Date,
     /// The range as the line writes it.
     written: &'l str,
+    /// Whether the line's numeric dates are written day first (true) or
+    /// month first (false); None when none of them says.
+    order: Option<bool>,
+    /// The first and last date read in the other order, when none says and
+    /// the line writes a slash date: either may be the window.
+    other: Option<(Date, Date)>,
 }
 
-/// The first range of dates in `line` that runs forward.
+/// The first range of dates in `line` that runs forward, its slash dates
+/// read in the order the line's own numeric dates write them.
 fn window_in<'l>(
     code: &str,
     language: &Language,
     line: &'l str,
     today: Date,
 ) -> Option<Window<'l>> {
-    reads(code, language, line, today)
-        .into_iter()
-        .find_map(|r| {
-            let first = r.from?.date()?;
-            let last = r.to?.date()?;
-            (first <= last).then(|| Window {
-                first,
-                last,
-                written: line.get(r.name.0..r.name.1).unwrap_or_default().trim(),
+    let order = numeric_order(line);
+    let swapped = order
+        .filter(|&day_first| swaps(code) && day_first != reads_day_first(code))
+        .and_then(|_| swapped_slashes(line));
+    let read = swapped.as_deref().unwrap_or(line);
+    let range = |text: &str| {
+        reads(code, language, text, today)
+            .into_iter()
+            .find_map(|r| {
+                let first = r.from?.date()?;
+                let last = r.to?.date()?;
+                (first <= last).then_some((first, last, r.name))
             })
-        })
+    };
+    let (first, last, name) = range(read)?;
+    let other = (order.is_none() && swaps(code))
+        .then(|| swapped_slashes(line))
+        .flatten()
+        .and_then(|other_order| range(&other_order))
+        .map(|(from, to, _)| (from, to));
+    Some(Window {
+        first,
+        last,
+        written: line.get(name.0..name.1).unwrap_or_default().trim(),
+        order,
+        other,
+    })
+}
+
+/// Whether the language `code` reads a slash date day first; English and
+/// Japanese read one month first.
+fn reads_day_first(code: &str) -> bool {
+    !matches!(code, "en" | "ja")
+}
+
+/// Whether `code` reads a day and a month joined by a slash, which swapping
+/// the two numbers reads in the other order; Chinese writes none, Arabic its
+/// own.
+fn swaps(code: &str) -> bool {
+    !matches!(code, "zh" | "ar")
+}
+
+/// The numeric dates of `text`: each a day and a month, in the order
+/// written, the byte both start at, and whether a slash joins them. Only a
+/// pair of one- or two-digit numbers no digit, slash or dot runs into; a
+/// dotted pair needs a third part or a closing dot ("9.2.2028", "2.12."),
+/// so a decimal is none.
+fn numeric_pairs(text: &str) -> impl Iterator<Item = (u8, u8, usize, bool)> + '_ {
+    let bytes = text.as_bytes();
+    let digits_from = move |at: usize| {
+        bytes
+            .get(at..)
+            .map_or(0, |b| b.iter().take_while(|d| d.is_ascii_digit()).count())
+    };
+    (0..bytes.len()).filter_map(move |at| {
+        let prev = at.checked_sub(1).and_then(|p| bytes.get(p));
+        if prev.is_some_and(|&p| p.is_ascii_digit() || matches!(p, b'/' | b'.' | b':')) {
+            return None;
+        }
+        let a = digits_from(at);
+        let sep = *bytes.get(at.saturating_add(a))?;
+        let b_at = at.saturating_add(a).saturating_add(1);
+        let b = digits_from(b_at);
+        if !(1..=2).contains(&a) || !(1..=2).contains(&b) || !matches!(sep, b'/' | b'.') {
+            return None;
+        }
+        let after = b_at.saturating_add(b);
+        let next = bytes.get(after);
+        let joined = match sep {
+            b'/' => !next.is_some_and(u8::is_ascii_digit),
+            _ => {
+                next == Some(&b'.') && (2..=4).contains(&digits_from(after.saturating_add(1)))
+                    || next == Some(&b'.')
+                        && !bytes
+                            .get(after.saturating_add(1))
+                            .is_some_and(u8::is_ascii_digit)
+            }
+        };
+        let number =
+            |from: usize, len: usize| text.get(from..from.saturating_add(len))?.parse().ok();
+        joined
+            .then(|| Some((number(at, a)?, number(b_at, b)?, at, sep == b'/')))
+            .flatten()
+    })
+}
+
+/// The order `text`'s numeric dates are written in: day first where one
+/// can only be ("15/12", "30/1/2026") or is dotted ("9.2.2028"), month first
+/// where one can only be ("12/25"); None when none says, or they disagree.
+fn numeric_order(text: &str) -> Option<bool> {
+    let mut order = None;
+    for (first, second, _, slash) in numeric_pairs(text) {
+        let says = if !slash || (first > 12 && second <= 12) {
+            Some(true)
+        } else if second > 12 && first <= 12 {
+            Some(false)
+        } else {
+            None
+        };
+        match (order, says) {
+            (_, None) => {}
+            (None, found) => order = found,
+            (Some(known), Some(found)) if known != found => return None,
+            _ => {}
+        }
+    }
+    order
+}
+
+/// `text` with the two numbers of every slash date swapped ("2/12" reads
+/// "12/2"), so a reader of the other order reads the dates as written; the
+/// text keeps its length, so a reading's offsets name the original. None
+/// when it writes no slash date.
+fn swapped_slashes(text: &str) -> Option<String> {
+    let mut out: Option<Vec<u8>> = None;
+    for (first, second, at, slash) in numeric_pairs(text) {
+        if !slash || first == second {
+            continue;
+        }
+        let digits = |from: usize| {
+            text.get(from..)
+                .map_or(0, |t| t.bytes().take_while(u8::is_ascii_digit).count())
+        };
+        let a_len = digits(at);
+        let b_at = at.saturating_add(a_len).saturating_add(1);
+        let end = b_at.saturating_add(digits(b_at));
+        let (Some(head), Some(tail)) =
+            (text.get(at..at.saturating_add(a_len)), text.get(b_at..end))
+        else {
+            continue;
+        };
+        let buffer = out.get_or_insert_with(|| text.as_bytes().to_vec());
+        let swapped = tail
+            .bytes()
+            .chain(std::iter::once(b'/'))
+            .chain(head.bytes());
+        for (slot, byte) in buffer
+            .get_mut(at..end)
+            .unwrap_or_default()
+            .iter_mut()
+            .zip(swapped)
+        {
+            *slot = byte;
+        }
+    }
+    out.and_then(|bytes| String::from_utf8(bytes).ok())
 }
 
 /// `text` without the emphasis marks and spaces around it.
@@ -667,10 +810,21 @@ fn keeps_window(line: &str) -> bool {
         || (!bare.is_empty() && text.starts_with(EMPHASIS) && text.ends_with(EMPHASIS))
 }
 
+/// Whether `line` is a heading: marked as one, or wholly emphasised.
+fn is_heading(line: &str) -> bool {
+    let text = line.trim();
+    text.starts_with('#')
+        || (trim_emphasis(text).len() < text.len()
+            && text.starts_with(EMPHASIS)
+            && text.ends_with(EMPHASIS))
+}
+
 /// One language's findings over the lines, added to `out` once each.
 /// `windows` holds the window this language reads on each line that is no
-/// row, and `named` whether any language reads one there: a heading another
-/// language reads as a window ends the one this language had open.
+/// row, and `named` whether any language reads one there, or a date on a
+/// heading: a heading another language reads as a window ends the one this
+/// language had open, and so does a heading that dates what follows it in
+/// a way no language reads as a window.
 fn outside_for(
     code: &str,
     language: &Language,
@@ -694,20 +848,35 @@ fn outside_for(
         let Some(open) = window else {
             continue;
         };
-        let Some(own) = reads(code, language, lead, today)
-            .into_iter()
-            .find(|r| r.start == 0)
-        else {
+        let lead_date = |read: &str| {
+            reads(code, language, read, today)
+                .into_iter()
+                .find(|r| r.start == 0)
+                .filter(|r| !r.range)
+                .and_then(|r| Some((r.from.and_then(Day::date)?, r.name)))
+        };
+        // A row's slash date is read in the order its heading writes them;
+        // where the heading does not say, a date either order puts inside
+        // the window is let be.
+        let swapped = swaps(code).then(|| swapped_slashes(lead)).flatten();
+        let other_order = || swapped.as_deref().and_then(lead_date).map(|(date, _)| date);
+        let own = match open.order {
+            Some(day_first) if day_first != reads_day_first(code) => swapped
+                .as_deref()
+                .map_or_else(|| lead_date(lead), lead_date),
+            _ => lead_date(lead),
+        };
+        let Some((date, name)) = own else {
             continue;
         };
-        if own.range {
-            continue;
-        }
-        let Some(date) = own.from.and_then(Day::date) else {
-            continue;
+        let outside = |day: Date| {
+            (day < open.first || day > open.last)
+                && open
+                    .other
+                    .is_none_or(|(first, last)| day < first || day > last)
         };
-        if date < open.first || date > open.last {
-            let written = lead.get(own.name.0..own.name.1).unwrap_or_default().trim();
+        if outside(date) && (open.order.is_some() || other_order().is_none_or(outside)) {
+            let written = lead.get(name.0..name.1).unwrap_or_default().trim();
             let finding = format!("\"{written}\" under \"{}\"", open.written);
             if !out.contains(&finding) {
                 out.push(finding);
@@ -766,11 +935,20 @@ pub fn rows_outside_window(reply: &str, today: Date) -> Vec<String> {
                 .collect()
         })
         .collect();
-    let named: Vec<bool> = (0..lines.len())
-        .map(|i| {
+    let named: Vec<bool> = lines
+        .iter()
+        .enumerate()
+        .map(|(i, line)| {
             windows
                 .iter()
                 .any(|w| w.get(i).is_some_and(Option::is_some))
+                || (row_lead(line).is_none()
+                    && is_heading(line)
+                    && entries.iter().any(|entry| {
+                        reads(entry.code, entry.language(), line, today)
+                            .iter()
+                            .any(|r| r.dated || r.range)
+                    }))
         })
         .collect();
     let mut out = Vec::new();

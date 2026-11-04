@@ -716,15 +716,14 @@ impl Tokens<'_> {
     /// before it, over every symbol that joins its groups, and where the last
     /// such symbol stands.
     fn run_end(&self, start: usize, prev: Option<char>) -> (usize, Option<usize>) {
-    let text = self.text;
-    let mut end = self.digits_end(start);
+        let text = self.text;
+        let mut end = self.digits_end(start);
         let mut next = char_at(text, end);
         // Where the last joining symbol stands, once there is one.
         let mut last_symbol: Option<usize> = None;
         // Up to four code points of a group, enough to tell three.
-        let len = |from: usize, to: usize| {
-            text.get(from..to).map_or(0, |g| g.chars().take(4).count())
-        };
+        let len =
+            |from: usize, to: usize| text.get(from..to).map_or(0, |g| g.chars().take(4).count());
         // Whether a plain space may open thousands grouping: a lead of up
         // to three digits that is no piece of a date or a time.
         let lead_end = end;
@@ -740,9 +739,7 @@ impl Tokens<'_> {
             let plain = is_plain_spacing(s);
             // An underscore after one before the run joins the pieces of
             // a name ("run_123_456"), not the groups of a figure.
-            if plain
-                && (!(spaced_thousands && spaced_lead()) || (s == '_' && prev == Some('_')))
-            {
+            if plain && (!(spaced_thousands && spaced_lead()) || (s == '_' && prev == Some('_'))) {
                 break;
             }
             let group_end = self.digits_end(end + s.len_utf8());
@@ -760,8 +757,7 @@ impl Tokens<'_> {
                 // A mark that only groups joins groups of three, and only
                 // to groups it joined before: "1,458\u{a0}5m" is two
                 // figures.
-                let grouped_by_other =
-                    last_symbol.is_some_and(|at| char_at(text, at) != Some(s));
+                let grouped_by_other = last_symbol.is_some_and(|at| char_at(text, at) != Some(s));
                 if !is_decimal_symbol(s)
                     && (len(end + s.len_utf8(), group_end) != 3 || grouped_by_other)
                 {

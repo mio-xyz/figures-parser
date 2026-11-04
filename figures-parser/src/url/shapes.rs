@@ -242,7 +242,7 @@ fn ad_library(parts: &Parts<'_>, corpus: &str) -> bool {
 }
 
 /// Whether `url` names no item: a host root, or on a trusted host (one in
-/// `hosts`) one segment without a digit (`github.com/new`, though a profile's
+/// `hosts`) one segment that [names a page](names_a_page) (`github.com/new`, though a profile's
 /// name passes with it) or one under GitHub's settings, which no account can
 /// be named for. A shape's host gets its root only, whatever `hosts`
 /// declares: one segment there names a page (`facebook.com/<page>`). Any
@@ -270,7 +270,17 @@ fn names_no_item(parts: &Parts<'_>, shape_host: bool, hosts: &[&str]) -> bool {
         }
         _ => return false,
     };
-    !page.bytes().any(|b| b.is_ascii_digit()) && trusted()
+    names_a_page(page) && trusted()
+}
+
+/// Whether `segment` reads as a page's name: letters of any script and the
+/// marks a slug joins them with, no digit (which an item's id carries) and
+/// no bracket or sign a template leaves unfilled (`{owner}`, `<tab>`).
+fn names_a_page(segment: &str) -> bool {
+    !segment.is_empty()
+        && segment
+            .chars()
+            .all(|c| c.is_alphabetic() || matches!(c, '-' | '_' | '.' | '~'))
 }
 
 /// Whether `url` is a link a reply may build rather than copy.

@@ -156,9 +156,11 @@ impl Reader<'_> {
 
     /// Whether the `|` or `\|` at byte `at` opens the label of a chat link
     /// whose `<` is not there: a `>` closes it on the same line, with no `<`
-    /// or `|` before it. A `>` that is prose rather than a label's close (an
-    /// arrow, `->` or `=>`, a comparison written with a space before it, or
-    /// `>=`) closes none, so a `|` in a query reads on.
+    /// or `|` before it. A `>` that is prose or markup rather than a label's
+    /// close closes none, so a `|` in a query reads on: an arrow (`->`,
+    /// `=>`), a comparison written with any space before it or glued to what
+    /// follows (`x > 5`, `x>5`), `>=`, the `">` that ends an attribute, and
+    /// one past another link's scheme.
     fn opens_label(&self, at: usize, c: char) -> bool {
         let label = match c {
             '|' => at.saturating_add(1),
@@ -179,13 +181,16 @@ impl Reader<'_> {
         else {
             return false;
         };
-        let before = close
-            .checked_sub(1)
-            .filter(|&i| i >= label)
-            .and_then(|i| bytes.get(i));
-        !before.is_some_and(|b| b.is_ascii_whitespace() || matches!(b, b'-' | b'='))
-            && !matches!(bytes.get(close.saturating_add(1)), Some(b'=' | b'>'))
-            && closes_nothing_open(bytes.get(label..close).unwrap_or_default())
+        let inside = bytes.get(label..close).unwrap_or_default();
+        let before = self
+            .text
+            .get(label..close)
+            .and_then(|l| l.chars().next_back());
+        let after = self.char_at(close.saturating_add(1));
+        !before.is_some_and(|b| b.is_whitespace() || matches!(b, '-' | '=' | '"' | '\''))
+            && !after.is_some_and(|a| a.is_alphanumeric() || matches!(a, '=' | '>'))
+            && !inside.windows(3).any(|w| w == b"://")
+            && closes_nothing_open(inside)
     }
 
     /// Whether byte `at` is past the end, or reads as a space.
@@ -856,6 +861,11 @@ pub fn urls(text: &str) -> Vec<Url<'_>> {
             .get(start..end)
             .unwrap_or_default()
             .trim_end_matches(is_trailing_markup);
+        // A scheme a doubled one cuts short ("https://" of
+        // "`https://https://acme.io`") names no host.
+        if kept.len() <= len.saturating_add(2) {
+            continue;
+        }
         let span = start..start.saturating_add(kept.len());
         if let Some(text) = text.get(span.clone()) {
             out.push(Url { text, span });

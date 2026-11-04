@@ -789,7 +789,6 @@ module.exports.extract = nativeBinding.extract
 module.exports.fabricatedUrls = nativeBinding.fabricatedUrls
 module.exports.groundingTokens = nativeBinding.groundingTokens
 module.exports.groundMessage = nativeBinding.groundMessage
-module.exports.groundPage = nativeBinding.groundPage
 module.exports.groundReply = nativeBinding.groundReply
 module.exports.internalNames = nativeBinding.internalNames
 module.exports.linkFindings = nativeBinding.linkFindings
