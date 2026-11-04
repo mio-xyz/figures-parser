@@ -4,7 +4,7 @@ const PAGE: &str = "Sprint 42: onboarding shipped, activation up 12% on 1,840 si
 
 #[test]
 fn names_the_figures_and_ratios_of_a_page_nothing_printed_never_its_links() {
-    let mut found = ungrounded_on_page(PAGE, "", "");
+    let mut found = ungrounded_on_page(PAGE, "", "", false);
     found.sort();
     assert_eq!(found, ["1,840", "12%"]);
 }
@@ -12,13 +12,19 @@ fn names_the_figures_and_ratios_of_a_page_nothing_printed_never_its_links() {
 #[test]
 fn passes_what_a_result_printed() {
     let corpus = "signups 1840\nactivation_change 0.12";
-    assert_eq!(ungrounded_on_page(PAGE, corpus, ""), Vec::<String>::new());
+    assert_eq!(
+        ungrounded_on_page(PAGE, corpus, "", false),
+        Vec::<String>::new()
+    );
 }
 
 #[test]
 fn names_an_id_no_result_printed() {
     let page = "Refunded prod_Zq81LmN07tYwPa today.";
-    assert_eq!(ungrounded_on_page(page, "", ""), ["prod_Zq81LmN07tYwPa"]);
+    assert_eq!(
+        ungrounded_on_page(page, "", "", false),
+        ["prod_Zq81LmN07tYwPa"]
+    );
 }
 
 #[test]

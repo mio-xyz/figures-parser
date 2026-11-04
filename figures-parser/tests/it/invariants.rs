@@ -12,6 +12,32 @@ fn statuses(turn: &TurnRecord<'_>) -> Vec<(&'static str, &'static str)> {
         .collect()
 }
 
+// A link the reply builds on an integration's host passes, as the link
+// check lets it; a caller that names no host holds it to the corpus.
+#[test]
+fn passes_a_link_built_on_a_host_the_turn_reaches() {
+    for link in [
+        "https://github.com/new",
+        "https://linear.app/",
+        "https://www.notion.so/",
+        "https://github.com/settings/security",
+        "https://acme.notion.site/",
+    ] {
+        let response = format!("See {link} to start.");
+        let turn = TurnRecord {
+            response: &response,
+            tool_result_corpus: Some("nothing here"),
+            hosts: &["github.com", "linear.app", "notion.so", "notion.site"],
+            ..TurnRecord::default()
+        };
+        let verdicts = evaluate_invariants(&turn, &[Invariant::NoFabricatedUrl]);
+        assert_eq!(verdicts[0].status, Status::Pass, "{link}");
+        let unhosted = TurnRecord { hosts: &[], ..turn };
+        let held = evaluate_invariants(&unhosted, &[Invariant::NoFabricatedUrl]);
+        assert_eq!(held[0].status, Status::Fail, "{link}");
+    }
+}
+
 #[test]
 fn reads_what_it_is_given_and_leaves_the_rest_unread() {
     let turn = TurnRecord {

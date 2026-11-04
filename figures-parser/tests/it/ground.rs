@@ -93,7 +93,7 @@ fn flags_a_bare_figure_written_behind_a_currency_sign_from_100_up() {
     );
     assert_eq!(
         ungrounded_figures("About $12.5K, or $8k a month, $99 fee.", ""),
-        vec!["12.5K", "8k"]
+        vec!["$12.5K", "$8k"]
     );
 }
 

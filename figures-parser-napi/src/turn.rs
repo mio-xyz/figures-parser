@@ -448,21 +448,3 @@ pub fn ground_reply(
 ) -> napi::Result<Grounding> {
     ground(&text, &turn, attached.as_ref(), Surface::Reply)
 }
-
-/// The figures, ratios and ids of a page made for a person that `corpus`
-/// does not carry; none when the turn read pixels only.
-#[napi(catch_unwind)]
-#[must_use]
-pub fn ground_page(
-    text: String,
-    corpus: String,
-    said: Option<String>,
-    pixel_only: Option<bool>,
-) -> Vec<String> {
-    figures_parser::ground_page(
-        &text,
-        &corpus,
-        said.as_deref().unwrap_or_default(),
-        pixel_only.unwrap_or(false),
-    )
-}

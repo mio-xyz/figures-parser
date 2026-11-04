@@ -737,12 +737,24 @@ pub fn fabricated_urls(reply: String, corpus: String, hosts: Option<Vec<String>>
 }
 
 /// The figures, ratios and opaque ids of a page's `text` that `corpus`, what
-/// the run read, does not carry; `said`, what people wrote, grounds a ratio
-/// between their own numbers.
+/// the run read, does not carry.
+///
+/// `said`, what people wrote, grounds a ratio between their own numbers.
+/// Nothing is checked when the turn read pixels only (`pixel_only`).
 #[napi(catch_unwind)]
 #[must_use]
-pub fn ungrounded_on_page(text: String, corpus: String, said: Option<String>) -> Vec<String> {
-    figures_parser::ungrounded_on_page(&text, &corpus, said.as_deref().unwrap_or_default())
+pub fn ungrounded_on_page(
+    text: String,
+    corpus: String,
+    said: Option<String>,
+    pixel_only: Option<bool>,
+) -> Vec<String> {
+    figures_parser::ungrounded_on_page(
+        &text,
+        &corpus,
+        said.as_deref().unwrap_or_default(),
+        pixel_only.unwrap_or(false),
+    )
 }
 
 /// Which of a turn's rendered pages to hold back, file by file: a page is

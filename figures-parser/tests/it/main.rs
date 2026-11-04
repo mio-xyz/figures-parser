@@ -32,6 +32,7 @@ mod reply;
 mod scales;
 mod scan;
 mod signs;
+mod spacing;
 mod spelled;
 mod turn;
 mod urls;

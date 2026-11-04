@@ -116,6 +116,9 @@ pub struct TurnRecord<'a> {
     pub tool_result_corpus: Option<&'a str>,
     /// Whether the loop ran out of steps; None when it was not recorded.
     pub hit_step_limit: Option<bool>,
+    /// The hosts of the integrations the turn reaches, on which a link the
+    /// reply builds from what it read passes unprinted ("github.com").
+    pub hosts: &'a [&'a str],
 }
 
 /// Whitespace as a JavaScript pattern reads `\s`.
@@ -260,7 +263,7 @@ fn evaluate(invariant: Invariant, turn: &TurnRecord<'_>) -> Verdict {
             "response claims a completed action with no write tool call or pending action",
         ),
         Invariant::NoFabricatedUrl => turn.tool_result_corpus.map_or_else(unread, |corpus| {
-            let fabricated = fabricated_urls(turn.response, corpus, &[]);
+            let fabricated = fabricated_urls(turn.response, corpus, turn.hosts);
             verdict(
                 !fabricated.is_empty(),
                 &format!(

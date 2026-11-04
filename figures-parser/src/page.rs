@@ -12,22 +12,26 @@ use crate::{ungrounded_figures, ungrounded_ratios, unprinted_ids};
 /// `said`, what people wrote, grounds a ratio between their own numbers. A
 /// page's links, dates and wording are its design's and are not checked.
 ///
-/// A run whose attachment rides only as pixels has nothing to compare the
-/// page with; its caller skips the check.
+/// A turn whose attachment rides only as pixels (`pixel_only`) has nothing
+/// to compare the page with, and nothing is checked.
 ///
 /// # Examples
 ///
 /// ```
 /// let page = "Sprint 42: activation up 12% on 1,840 sign-ups.";
-/// let mut found = figures_parser::ungrounded_on_page(page, "", "");
+/// let mut found = figures_parser::ungrounded_on_page(page, "", "", false);
 /// found.sort();
 /// assert_eq!(found, ["1,840", "12%"]);
 ///
 /// let corpus = "signups 1840\nactivation_change 0.12";
-/// assert!(figures_parser::ungrounded_on_page(page, corpus, "").is_empty());
+/// assert!(figures_parser::ungrounded_on_page(page, corpus, "", false).is_empty());
+/// assert!(figures_parser::ungrounded_on_page(page, "", "", true).is_empty());
 /// ```
 #[must_use]
-pub fn ungrounded_on_page(text: &str, corpus: &str, said: &str) -> Vec<String> {
+pub fn ungrounded_on_page(text: &str, corpus: &str, said: &str, pixel_only: bool) -> Vec<String> {
+    if pixel_only {
+        return Vec::new();
+    }
     let mut out = ungrounded_figures(text, corpus);
     out.extend(ungrounded_ratios(text, corpus, said));
     out.extend(unprinted_ids(text, corpus).into_iter().map(str::to_owned));

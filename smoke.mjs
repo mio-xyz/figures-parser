@@ -107,7 +107,7 @@ assert.deepEqual(sheetFindings("2027 holds $19,850.", [{ stdout: "total | 19,850
 
 
 {
-  const { internalNames, scrubMemoryLayout, groundingTokens, memoryGrounding, sheetFindings, groundMessage, groundReply, groundPage } = createRequire(import.meta.url)("./index.js");
+  const { internalNames, scrubMemoryLayout, groundingTokens, memoryGrounding, sheetFindings, groundMessage, groundReply } = createRequire(import.meta.url)("./index.js");
   const vocabulary = { names: ["web_search", "learn"], files: ["workspace.md"], roots: ["/memory/"], fixed: ["RUN_TOKEN"] };
   assert.deepEqual(internalNames("I called learn() and web_search; see /memory/workspace.md.", "", vocabulary), ["web_search", "learn", "workspace.md", "/memory/"]);
   assert.deepEqual(internalNames("Steps are in docs/workspace.md.", "", vocabulary, "docs/workspace.md"), []);
@@ -120,7 +120,8 @@ assert.deepEqual(sheetFindings("2027 holds $19,850.", [{ stdout: "total | 19,850
   assert.deepEqual(groundMessage("COS 61,0% on revenue of $188,027, see /memory/workspace.md", turn), { ok: false, text: "COS 61,0% on revenue of $188,027, see the team's shared notes", mends: [], findings: [{ kind: "figure", value: "188,027" }, { kind: "ratio", value: "61,0%" }] });
   assert.deepEqual(groundReply("Here: ![chart](chart.png)", turn, (target) => target === "chart.png").findings, [{ kind: "attached", value: "chart.png" }]);
   assert.throws(() => groundMessage("x", { ...turn, today: "nope" }), /YYYY-MM-DD/);
-  assert.deepEqual(groundPage("Revenue $1,240,000, 14% up", "revenue: 1240000"), ["14%"]);
+  assert.deepEqual(ungroundedOnPage("Revenue $1,240,000, 14% up", "revenue: 1240000"), ["14%"]);
+  assert.deepEqual(ungroundedOnPage("Revenue $1,240,000, 14% up", "", "", true), []);
   const ads = { corpus: "Rework | LT: $91.65 / 2 leads / CPL $45.83 | Y: $74.74 / 2 leads", today: "2026-10-20" };
   assert.deepEqual(groundMessage("Rework: $74.74 spend, 2 leads, $45.83 CPL.", ads).findings, [{ kind: "per-unit", value: "$45.83", stated: "$74.74 / 2 = $37.37", printed: "$91.65 / 2" }]);
 }

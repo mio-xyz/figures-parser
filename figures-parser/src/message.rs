@@ -378,29 +378,3 @@ pub fn ground_reply(text: &str, turn: &Turn<'_>) -> Grounding {
         findings,
     }
 }
-
-/// The figures, ratios and ids of a page made for a person that `corpus`
-/// does not carry.
-///
-/// A page is held to what was read, as a sent message is, while its links, dates and wording are its design's. Nothing is checked
-/// when the turn read pixels only (`pixel_only`).
-///
-/// # Examples
-///
-/// ```
-/// let page = "<h1>Q3</h1><p>Revenue $1,240,000, 14% up, order prod_Zq81LmN07tYwPa</p>";
-/// assert_eq!(
-///     figures_parser::ground_page(page, "revenue: 1240000", "", false),
-///     ["14%", "prod_Zq81LmN07tYwPa"],
-/// );
-/// ```
-#[must_use]
-pub fn ground_page(text: &str, corpus: &str, said: &str, pixel_only: bool) -> Vec<String> {
-    if pixel_only {
-        return Vec::new();
-    }
-    let mut out = ungrounded_figures(text, corpus);
-    out.extend(ungrounded_ratios(text, corpus, said));
-    out.extend(unprinted_ids(text, corpus).into_iter().map(str::to_owned));
-    out
-}

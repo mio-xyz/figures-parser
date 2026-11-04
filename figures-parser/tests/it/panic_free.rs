@@ -12,8 +12,8 @@ use figures_parser::{
     Amounts, Date, InternalsCheck, Invariant, ListedFigure, MemoryLayout, PageHolds, SheetRun,
     Turn, TurnRecord, Vocabulary, built_from_corpus, claims_refusal, claims_unbacked_action,
     claims_unwritten_memory, durations, emails, evaluate_invariants, extract_numbers,
-    fabricated_urls, ground_message, ground_page, ground_reply, grounding_tokens, identifiers,
-    internal_names, link_findings, memory_claim, memory_grounding, mended_links, misdated_weekdays,
+    fabricated_urls, ground_message, ground_reply, grounding_tokens, identifiers, internal_names,
+    link_findings, memory_claim, memory_grounding, mended_links, misdated_weekdays,
     mispaired_per_unit, mispaired_per_unit_with, numbers, numeric_tokens, placeholder_targets,
     printed_figures, prose_arithmetic, rows_outside_window, scrub_memory_layout, sheet_findings,
     silent_signal, speaker_prefix, stated_figures, states_figure, undotted_message_link,
@@ -105,7 +105,7 @@ fn exercise(reply: &str, corpus: &str, prompt: &str) -> usize {
         + unseen_tokens(reply, corpus, prompt).len()
         + ungrounded_durations(reply, corpus, prompt).len()
         + ungrounded_durations(corpus, reply, prompt).len()
-        + ungrounded_on_page(reply, corpus, prompt).len()
+        + ungrounded_on_page(reply, corpus, prompt, false).len()
         + usize::from(PageHolds::default().hold(reply, &[corpus, prompt]))
         + turn_checks(reply, corpus, prompt)
 }
@@ -180,7 +180,7 @@ fn turn_checks(reply: &str, corpus: &str, prompt: &str) -> usize {
         + sheet_findings(reply, &runs).unchecked.len()
         + ground_message(reply, &turn).findings.len()
         + ground_reply(corpus, &turn).findings.len()
-        + ground_page(reply, corpus, prompt, false).len()
+        + ungrounded_on_page(reply, corpus, prompt, true).len()
         + invariant_checks(reply, corpus, prompt)
 }
 
@@ -194,6 +194,7 @@ fn invariant_checks(reply: &str, corpus: &str, prompt: &str) -> usize {
         pending_action_count: 0,
         tool_result_corpus: Some(prompt),
         hit_step_limit: Some(false),
+        hosts: &["github.com"],
     };
     evaluate_invariants(&record, &Invariant::ALL).len()
         + usize::from(claims_refusal(reply))

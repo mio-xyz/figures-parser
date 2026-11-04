@@ -212,8 +212,9 @@ struct Rounded {
 }
 
 /// Whether `token` follows byte `prev_end` of `text` with nothing but a
-/// dash between them, spaces and the token's currency mark aside ("$200-300",
-/// "$200 – $300", "1,500 - 2,000").
+/// dash between them, spaces of the same line and the token's currency mark
+/// aside ("$200-300", "$200 – $300", "1,500 - 2,000"). A dash after a line
+/// break opens a list item.
 fn dashed(text: &str, prev_end: usize, token: &Token<'_>) -> bool {
     // A bound written with its own sign ("$16 - +$200") is a signed figure.
     if token.sign != Sign::Unsigned {
@@ -221,7 +222,11 @@ fn dashed(text: &str, prev_end: usize, token: &Token<'_>) -> bool {
     }
     let full_start = token.end().saturating_sub(token.full.len());
     let lead = currency_start(text, token.start).map_or(full_start, |at| at.min(full_start));
-    let between = text.get(prev_end..lead).unwrap_or_default().trim();
+    let between = text.get(prev_end..lead).unwrap_or_default();
+    if between.contains(['\n', '\r', '\u{2028}', '\u{2029}']) {
+        return false;
+    }
+    let between = between.trim();
     let mut chars = between.chars();
     chars
         .next()
@@ -229,14 +234,21 @@ fn dashed(text: &str, prev_end: usize, token: &Token<'_>) -> bool {
         && chars.next().is_none()
 }
 
-/// The text of `reading`, a scaled figure of `reply`, through the currency
-/// mark written after its scale word ("500 k€", "1,250 M€").
+/// The text of `reading`, a scaled figure of `reply`, from the currency mark
+/// glued before it ("$34.0M", "€3,4 M"; "USD 34M" is named "34M") through the one written after its
+/// scale word ("500 k€", "1,250 M€").
 fn with_mark_after<'r>(reply: &'r str, reading: &Reading<'r, '_>) -> &'r str {
     let end = reading.span.end;
-    let start = end.saturating_sub(reading.full_text.len());
-    mark_after_end(reply, end)
-        .and_then(|mark_end| reply.get(start..mark_end))
-        .unwrap_or(reading.full_text)
+    let full_start = end.saturating_sub(reading.full_text.len());
+    let start = currency_start(reply, full_start)
+        .filter(|&at| {
+            reply
+                .get(at..full_start)
+                .is_some_and(|mark| !mark.contains(char::is_whitespace))
+        })
+        .map_or(full_start, |at| at.min(full_start));
+    let end = mark_after_end(reply, end).unwrap_or(end);
+    reply.get(start..end).unwrap_or(reading.full_text)
 }
 
 /// The byte ranges of the links in `text`: a link's digits (a Slack ts, an

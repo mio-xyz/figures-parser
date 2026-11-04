@@ -27,7 +27,7 @@ The library has one module per kind, each with a reader and a comparison:
 | `memory` | `grounding_tokens` | `memory_grounding` |
 | `page` | | `ungrounded_on_page`, `PageHolds` |
 | `reply` | | `speaker_prefix`, `memory_claim`, `silent_signal` |
-| `message` | | `ground_reply`, `ground_message`, `ground_page` |
+| `message` | | `ground_reply`, `ground_message` |
 
 `text` holds the character lookups and helpers the kinds share, `kind` names
 the kinds a caller selects, and `utf16` converts byte offsets to UTF-16.
@@ -343,8 +343,8 @@ for the reply's "9.162 jt" as much as one that carries 9,162,000,000.
 `states_figure` reads a text's scaled figures both ways too.
 
 Once the walk leaves a claim open, the reply's round ranges are read: two
-tokens with nothing but a dash between them (a currency mark and spaces
-aside), each a whole number of at most two significant digits, low to high,
+tokens with nothing but a dash between them (a currency mark and spaces of
+the same line aside; a dash after a line break opens a list item), each a whole number of at most two significant digits, low to high,
 the second written without a sign of its own. One corpus pass then marks each range a printed value falls inside, and the
 claims stated as exactly its bounds close.
 
@@ -987,8 +987,9 @@ part after the link alone.
 
 ## Pages
 
-`ungrounded_on_page(text, corpus, said)` is the figure, ratio and opaque-id
-checks run over a page's text, their findings in that order: a page made
+`ungrounded_on_page(text, corpus, said, pixel_only)` is the figure, ratio
+and opaque-id checks run over a page's text, their findings in that order,
+and nothing on a turn that read pixels only: a page made
 for a person is held to what was read, its links, dates and wording left to
 its design. `PageHolds` keeps, per file name, the claims a run was told
 about and how many times the file was held back; `hold` holds a page back
@@ -1110,8 +1111,7 @@ windows and internals, in that order, each finding keyed by its kind.
 `ground_reply` is the reply's round: no layout scrub (a reply naming it is
 asked for a rewrite, and the delivered text is scrubbed after), a link to a
 file the run made reported as `attached`, and listed sheet rows left
-unstated reported as `unstated`. `ground_page` holds a page to its figures,
-ratios and ids only.
+unstated reported as `unstated`.
 
 A finding carries what a correction names beside its value (`Detail`): a
 per-unit amount its stated and printed quotients, an unstated row the

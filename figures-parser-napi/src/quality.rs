@@ -18,6 +18,9 @@ pub struct InvariantInput {
     pub tool_result_corpus: Option<String>,
     /// Whether the loop ran out of steps; absent when not recorded.
     pub hit_step_limit: Option<bool>,
+    /// The hosts of the integrations the turn reaches, on which a link the
+    /// reply builds from what it read passes unprinted.
+    pub hosts: Option<Vec<String>>,
 }
 
 /// One invariant's verdict on a turn.
@@ -58,6 +61,7 @@ pub fn evaluate_invariants(
         },
     );
     let tools = strs(&input.tools_called);
+    let hosts = input.hosts.as_deref().map(strs).unwrap_or_default();
     let turn = TurnRecord {
         response: &input.response,
         raw_text: input.raw_text.as_deref(),
@@ -65,6 +69,7 @@ pub fn evaluate_invariants(
         pending_action_count: usize::try_from(input.pending_action_count).unwrap_or(usize::MAX),
         tool_result_corpus: input.tool_result_corpus.as_deref(),
         hit_step_limit: input.hit_step_limit,
+        hosts: &hosts,
     };
     figures_parser::evaluate_invariants(&turn, &invariants)
         .into_iter()

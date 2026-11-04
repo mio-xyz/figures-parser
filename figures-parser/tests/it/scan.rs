@@ -133,14 +133,15 @@ fn reads_an_ascii_currency_sign_as_the_table_does() {
 }
 
 // A code reads as one beside a letter of a script written without spaces,
-// as a figure does; a Latin letter or a digit still continues its word.
+// as a figure does; a Latin letter or a digit still continues its word. A
+// code glued before digits marks them ("USD5").
 #[test]
 fn reads_a_currency_code_beside_a_script_written_without_spaces() {
     assert_eq!(currency("合計は1,250 USDです"), [("1,250", true)]);
     assert_eq!(currency("合計USD 1,250です"), [("1,250", true)]);
     assert_eq!(
         currency("1,250 USDX and 7 USD5"),
-        [("1,250", false), ("7", false)]
+        [("1,250", false), ("7", false), ("5", true)]
     );
 }
 

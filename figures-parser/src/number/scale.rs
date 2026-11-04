@@ -183,7 +183,7 @@ const fn powers(list: &[u32]) -> u16 {
 /// as millions), a longer one case aside.
 fn abbreviation(word: &str) -> Option<(u32, Needs, u16)> {
     let found = match word {
-        "K" | "k" => (3, Needs::CurrencyWhenSpaced, 0),
+        "K" | "k" => (3, Needs::GluedUnless(Unit::Resolution), 0),
         "M" => (6, Needs::CurrencyWhenSpaced, powers(&[9])),
         "m" => (6, Needs::GluedUnless(Unit::TimeOrLength), powers(&[9])),
         "B" | "b" => (9, Needs::CurrencyWhenSpaced, powers(&[3, 12])),
@@ -667,6 +667,15 @@ fn continental(text: &str, end: usize) -> bool {
         .any(|of| starts_with_lowercase(rest, of))
 }
 
+/// Whether the digits `run` end on a comma no grouping writes, a decimal
+/// comma ("7,3", "12,50"): English never writes one, so a scale word after
+/// it is read as the locales that do read it ("7,3 tn" is the Swedish 7,300).
+fn decimal_comma(run: &str) -> bool {
+    run.rsplit_once(',').is_some_and(|(_, tail)| {
+        tail.chars().count() != 3 && tail.chars().all(|c| c.is_ascii_digit())
+    })
+}
+
 /// The decimal mark the language of the scale word `word` writes: a point
 /// after an English word; a comma after any other Latin word; and none after
 /// a letter every locale writes alike ("M", "k", "b"), even with a currency
@@ -743,7 +752,7 @@ pub(super) fn scale_after(
     if char_at(text, word_stop).is_some_and(is_boundary) {
         return None;
     }
-    let continental = loose || continental(text, word_stop);
+    let continental = loose || continental(text, word_stop) || decimal_comma(text.get(start..end)?);
     let others = |also: u16| if continental { also } else { 0 };
     let mark = word_mark(word);
     if let Some((magnitude, also)) = word_magnitude(word) {

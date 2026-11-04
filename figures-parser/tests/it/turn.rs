@@ -3,8 +3,8 @@
 
 use figures_parser::{
     Date, Detail, Finding, FindingKind, InternalsCheck, ListedFigure, MemoryLayout, SheetRun, Turn,
-    Vocabulary, ground_message, ground_page, ground_reply, grounding_tokens, memory_grounding,
-    sheet_findings,
+    Vocabulary, ground_message, ground_reply, grounding_tokens, memory_grounding, sheet_findings,
+    ungrounded_on_page,
 };
 
 /// What a check that finds nothing returns.
@@ -464,7 +464,7 @@ fn leaves_figures_ratios_and_ids_unchecked_on_pixels() {
         .is_clean()
     );
     assert_eq!(
-        ground_page("activation up 12% on 1,840 sign-ups", "", "", true),
+        ungrounded_on_page("activation up 12% on 1,840 sign-ups", "", "", true),
         NONE
     );
 }
@@ -510,11 +510,11 @@ fn holds_a_reply_to_its_attached_files_and_listed_rows() {
 #[test]
 fn holds_a_page_to_its_figures_ratios_and_ids_only() {
     let page = "Sprint 42: onboarding shipped, activation up 12% on 1,840 sign-ups. Unsubscribe at https://quesly.example/u";
-    let mut found = ground_page(page, "", "", false);
+    let mut found = ungrounded_on_page(page, "", "", false);
     found.sort();
     assert_eq!(found, ["1,840", "12%"]);
     assert_eq!(
-        ground_page(page, "signups 1840\nactivation_change 0.12", "", false),
+        ungrounded_on_page(page, "signups 1840\nactivation_change 0.12", "", false),
         NONE
     );
 }

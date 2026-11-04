@@ -62,7 +62,7 @@ fn reads_a_name_at_every_power_where_it_is_written_as_the_locales_that_give_it_o
     // English puts the currency first, and reads its own scale.
     assert_eq!(
         ungrounded_figures("Debt $2 billion.", "debt 2000000000000"),
-        ["2 billion"]
+        ["$2 billion"]
     );
     assert_eq!(ungrounded_figures("Raised 2tn.", "raised 2000"), ["2tn"]);
 }
@@ -115,7 +115,7 @@ fn rounds_a_printed_value_to_an_approximate_figure_as_to_an_exact_one() {
         ["~$1,000.7"]
     );
     // A scaled figure keeps the place it is written to.
-    assert_eq!(ungrounded_figures("CA €34,0M.", "34300000"), ["34,0M"]);
+    assert_eq!(ungrounded_figures("CA €34,0M.", "34300000"), ["€34,0M"]);
 }
 
 #[test]

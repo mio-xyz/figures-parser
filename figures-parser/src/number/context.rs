@@ -28,14 +28,54 @@ pub(super) enum Unit {
     Bin,
     /// A word of its own before a noun ("Bio" is organic).
     Word,
+    /// A display resolution ("4K screens").
+    Resolution,
 }
 
 /// Words before a figure that measure time with it: "took 5m", "every 5
 /// mn", "en 5 mn".
 const TIME_BEFORE: &[&str] = &[
-    "took", "take", "takes", "taking", "lasted", "lasts", "lasting", "waited", "wait", "waits",
-    "waiting", "ran", "run", "runs", "every", "within", "after", "elapsed", "en", "dans",
-    "pendant", "durant", "dure", "après", "toutes", "chaque",
+    "took",
+    "take",
+    "takes",
+    "taking",
+    "lasted",
+    "lasts",
+    "lasting",
+    "waited",
+    "wait",
+    "waits",
+    "waiting",
+    "ran",
+    "run",
+    "runs",
+    "every",
+    "within",
+    "after",
+    "elapsed",
+    "en",
+    "dans",
+    "pendant",
+    "durant",
+    "dure",
+    "après",
+    "toutes",
+    "chaque",
+    "dauert",
+    "dauerte",
+    "nach",
+    "dura",
+    "duró",
+    "tarda",
+    "tardó",
+    "durou",
+    "demorou",
+    "levou",
+    "длилось",
+    "длится",
+    "заняло",
+    "занимает",
+    "через",
 ];
 
 /// Words after a unit of time: "5m ago", "5 mn later".
@@ -94,6 +134,35 @@ const FILE_AFTER: &[&str] = &[
     "pages",
     "note",
     "notes",
+];
+
+/// Words after a display resolution: "4K screens", "8K video".
+const RESOLUTION_AFTER: &[&str] = &[
+    "screen",
+    "screens",
+    "display",
+    "displays",
+    "monitor",
+    "monitors",
+    "tv",
+    "tvs",
+    "video",
+    "videos",
+    "resolution",
+    "footage",
+    "camera",
+    "cameras",
+    "stream",
+    "streams",
+    "streaming",
+    "uhd",
+    "hdr",
+    "panel",
+    "panels",
+    "projector",
+    "projectors",
+    "television",
+    "televisions",
 ];
 
 /// Words before a figure that weigh with it: "weighs 5 tn".
@@ -194,7 +263,9 @@ const CURRENCY_WORDS: &[&str] = &[
 
 /// The local currency symbols written in letters that no ISO code spells:
 /// "Rs 92 cr", "5 bin TL", "Rp 300l".
-const CURRENCY_SYMBOLS: &[&str] = &["Rs", "TL", "Rp", "RM", "kr", "Kr", "zł", "Kč", "Ft"];
+const CURRENCY_SYMBOLS: &[&str] = &[
+    "Rs", "TL", "Rp", "RM", "kr", "Kr", "zł", "Kč", "Ft", "đ", "Đ",
+];
 
 /// The run of letters that ends at byte `end` of `text`, and the byte it
 /// starts at.
@@ -217,13 +288,26 @@ fn is_word_letter(c: char) -> bool {
 }
 
 /// The word before the figure that starts at byte `start`, over its sign,
-/// its approximation mark and a softening word ("took about ~5m").
+/// its approximation mark, a softening word ("took about ~5m") and the low
+/// bound of a range it ends ("takes 40-50m").
 fn word_before(text: &str, start: usize) -> &str {
     let mut at = start;
+    let marks = |c: char| c.is_whitespace() || matches!(c, '~' | '≈' | '∼' | '-' | '\u{2013}');
+    let lead = text.get(..at).unwrap_or_default();
+    let bound = lead.trim_end_matches(marks);
+    if bound.len() < lead.len()
+        && lead
+            .get(bound.len()..)
+            .is_some_and(|between| between.contains(['-', '\u{2013}']))
+    {
+        let low = bound.trim_end_matches(|c: char| c.is_ascii_digit() || matches!(c, '.' | ','));
+        if low.len() < bound.len() && !low.ends_with(|c: char| c.is_alphanumeric()) {
+            at = low.len();
+        }
+    }
     for _ in 0..2 {
         let head = text.get(..at).unwrap_or_default();
-        let trimmed = head
-            .trim_end_matches(|c: char| c.is_whitespace() || matches!(c, '~' | '≈' | '∼' | '-'));
+        let trimmed = head.trim_end_matches(marks);
         if let Some(before_sign) = trimmed.strip_suffix('×') {
             return trimmed.get(before_sign.len()..).unwrap_or_default();
         }
@@ -257,7 +341,10 @@ pub(super) fn names_unit(text: &str, start: usize, end: usize, unit: Unit) -> bo
     let is = |list: &[&str], word: &str| list.iter().any(|w| same_word(w, word));
     let time =
         || is(TIME_BEFORE, before) || is(TIME_AFTER, after) || beside_duration(text, start, end);
-    let length = || is(LENGTH_BEFORE, before) || is(LENGTH_AFTER, after);
+    let length = || {
+        (is(LENGTH_BEFORE, before) && (!is_times(before) || measures_before(text, start)))
+            || is(LENGTH_AFTER, after)
+    };
     match unit {
         Unit::TimeOrLength => time() || length(),
         Unit::Time => time(),
@@ -269,7 +356,31 @@ pub(super) fn names_unit(text: &str, start: usize, end: usize, unit: Unit) -> bo
         Unit::Title => after.chars().next().is_some_and(char::is_uppercase),
         Unit::Bin => is(BIN_AFTER, after),
         Unit::Word => after.chars().next().is_some_and(char::is_alphabetic),
+        Unit::Resolution => is(RESOLUTION_AFTER, after),
     }
+}
+
+/// Whether `word` is the multiplication sign a dimension is written with.
+fn is_times(word: &str) -> bool {
+    matches!(word, "x" | "X" | "×")
+}
+
+/// Whether the multiplication sign before the figure from byte `start`
+/// stands between two measures ("3m x 5m", "3 × 5m"): a word of its own
+/// after a figure. Glued to a figure ("2x"), after a word ("Option x") or
+/// ending a link's path, it multiplies or names nothing to measure.
+fn measures_before(text: &str, start: usize) -> bool {
+    let head = text.get(..start).unwrap_or_default().trim_end();
+    let Some(sign) = head.chars().next_back() else {
+        return false;
+    };
+    let rest = head
+        .get(..head.len().saturating_sub(sign.len_utf8()))
+        .unwrap_or_default();
+    let spaced = rest.ends_with(char::is_whitespace);
+    let rest = rest.trim_end();
+    let rest = rest.strip_suffix('m').unwrap_or(rest).trim_end();
+    (spaced || sign == '×') && rest.ends_with(|c: char| c.is_ascii_digit())
 }
 
 /// Whether hours stand before the figure from `start` ("1h 5m", "2 h 30
@@ -289,6 +400,23 @@ fn beside_duration(text: &str, start: usize, end: usize) -> bool {
         let word = letters_after(unit, 0);
         matches!(word, "s" | "sec" | "secs" | "seconds")
     }
+}
+
+/// Whether the letters glued before byte `start` of `text` are a currency
+/// written in letters: a local symbol ("Rp1.250.000", "Kč915") or an ISO
+/// 4217 code ("USD12,500").
+pub(super) fn currency_letters_before(text: &str, start: usize) -> bool {
+    let (before, _) = letters_before(text, start);
+    CURRENCY_SYMBOLS.contains(&before)
+        || (before.len() == 3
+            && before.bytes().all(|b| b.is_ascii_uppercase())
+            && iso_currency::Currency::from_code(before).is_some())
+}
+
+/// Whether the letters glued after byte `end` of `text` are a currency
+/// symbol written in letters ("12.480.000đ", "915zł").
+pub(super) fn currency_letters_after(text: &str, end: usize) -> bool {
+    CURRENCY_SYMBOLS.contains(&letters_after(text, end))
 }
 
 /// Whether a currency written in letters stands beside the figure from byte

@@ -127,7 +127,7 @@ fn grounds_a_scaled_figure_by_a_value_that_rounds_to_it() {
     );
     assert_eq!(
         ungrounded_figures(reply, "revenue 1260000, signups 12600"),
-        ["1.2 million", "12.5K"]
+        ["$1.2 million", "12.5K"]
     );
 }
 
@@ -194,7 +194,7 @@ fn holds_a_scaled_figure_whose_digits_group_to_the_grouped_reading() {
     for corpus in ["12500000", "12600000"] {
         assert_eq!(
             ungrounded_figures(reply, corpus),
-            ["12,500 million"],
+            ["€12,500 million"],
             "{corpus}"
         );
     }
@@ -207,7 +207,7 @@ fn holds_a_scaled_figure_to_the_floors() {
         ungrounded_figures("2 hundred users", "nothing"),
         Vec::<String>::new()
     );
-    assert_eq!(ungrounded_figures("$5k budget", "nothing"), ["5k"]);
+    assert_eq!(ungrounded_figures("$5k budget", "nothing"), ["$5k"]);
 }
 
 #[test]
@@ -387,7 +387,7 @@ fn checks_a_count_written_with_a_scale_and_no_currency() {
         ["12k", "1.5bn", "3.2 million"]
     );
     assert_eq!(
-        ungrounded_figures("A 16B model at 4K resolution with 3M users.", ""),
+        ungrounded_figures("A 16B model with 4K users and 3M views.", ""),
         ["16B", "4K", "3M"]
     );
     assert_eq!(

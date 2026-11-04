@@ -6,6 +6,7 @@
 use unicode_general_category::{GeneralCategory, get_general_category};
 
 use super::Sign;
+use super::context::{currency_letters_after, currency_letters_before, currency_word_beside};
 use super::digits::digit_value;
 pub use super::readings::Scratch;
 use super::scale::{may_scale, scale_after};
@@ -24,14 +25,31 @@ pub(super) const fn is_decimal_symbol(c: char) -> bool {
 /// and the fullwidth comma and full stop. `tests/it/locales.rs` reads back
 /// the number each locale prints and fails when one prints a symbol missing
 /// here.
+///
+/// Every [plain spacing](is_plain_spacing) is one too.
 #[must_use]
 pub const fn is_symbol(c: char) -> bool {
     if c.is_ascii() {
-        return matches!(c, ',' | '.' | '\'' | ' ');
+        return matches!(c, ',' | '.' | '\'' | ' ' | '_');
     }
     matches!(
         c,
         '\u{2019}' | '\u{a0}' | '\u{202f}' | '\u{66c}' | '\u{66b}' | '\u{ff0c}' | '\u{ff0e}'
+    ) || is_plain_spacing(c)
+}
+
+/// Whether `c` groups digits as the plain space does, only ever into
+/// thousands.
+///
+/// These are the space, the spaces compatibility folds into it (the thin
+/// space SI groups with, the figure space tables align with, the
+/// ideographic space) and the underscore code writes as a digit separator.
+/// The no-break spaces are not: a locale prints them as its own group mark.
+#[must_use]
+pub const fn is_plain_spacing(c: char) -> bool {
+    matches!(
+        c,
+        ' ' | '_' | '\u{2000}'..='\u{200a}' | '\u{205f}' | '\u{3000}'
     )
 }
 
@@ -352,7 +370,11 @@ fn may_have_prefix(text: &str, start: usize, prev: char) -> bool {
                 || is_currency_sign(b)
         })
     } else {
-        prev == '(' || is_approximation_mark(prev) || is_bidi_mark(prev) || is_currency_sign(prev)
+        prev == '('
+            || prev.is_alphabetic()
+            || is_approximation_mark(prev)
+            || is_bidi_mark(prev)
+            || is_currency_sign(prev)
     }
 }
 
@@ -625,6 +647,135 @@ impl Tokens<'_> {
         }
     }
 
+    /// Whether the digits at `start`, glued after the letter `prev`, are an
+    /// amount all the same rather than part of a word: after a currency
+    /// written in letters ("Rp1.250.000", "Kč915", "USD12,500"), or grouped
+    /// into thousands as the digits of no word are ("de3,442,000").
+    fn glued_amount(&self, start: usize, prev: char) -> bool {
+        if !is_letter(prev) {
+            return false;
+        }
+        if currency_letters_before(self.text, start) {
+            return true;
+        }
+        let lead_end = self.digits_end(start);
+        let lead = self
+            .text
+            .get(start..lead_end)
+            .map_or(4, |l| l.chars().count());
+        let Some(symbol) = char_at(self.text, lead_end) else {
+            return false;
+        };
+        let group_start = lead_end.saturating_add(symbol.len_utf8());
+        let group_end = self.digits_end(group_start);
+        lead <= 3
+            && is_symbol(symbol)
+            && !is_plain_spacing(symbol)
+            && self
+                .text
+                .get(group_start..group_end)
+                .is_some_and(|g| g.chars().count() == 3)
+    }
+
+    /// The run of Indian grouping a plain space joins from `start`, two-digit
+    /// groups ending in one of three ("₹1 00 00 000"), where a currency or a
+    /// scale word beside it makes it one amount: the byte of its last space
+    /// and its end. Without one, such a run is a list of small values.
+    fn lakh_run(&self, start: usize) -> Option<(usize, usize)> {
+        let text = self.text;
+        let mut end = self.digits_end(start);
+        if !(1..=2).contains(&text.get(start..end)?.chars().count()) {
+            return None;
+        }
+        let mut twos = 0_usize;
+        loop {
+            let space = char_at(text, end).filter(|&c| is_plain_spacing(c) && c != '_')?;
+            let group_start = end.saturating_add(space.len_utf8());
+            let group_end = self.digits_end(group_start);
+            match text.get(group_start..group_end)?.chars().count() {
+                2 => twos = twos.saturating_add(1),
+                3 if twos > 0 => {
+                    let after = char_at(text, group_end);
+                    let beside = marked_before(text, start)
+                        || marked_after(text, group_end)
+                        || currency_word_beside(text, start, group_end)
+                        || after.is_some_and(|n| {
+                            is_inline_space(n)
+                                && scale_after(text, start, group_end, n, false).is_some()
+                        });
+                    let ends = after.is_none_or(|n| !is_boundary(n));
+                    return (beside && ends).then_some((end, group_end));
+                }
+                _ => return None,
+            }
+            end = group_end;
+        }
+    }
+
+    /// The end of the digit run starting at `start`, `prev` the character
+    /// before it, over every symbol that joins its groups, and where the last
+    /// such symbol stands.
+    fn run_end(&self, start: usize, prev: Option<char>) -> (usize, Option<usize>) {
+    let text = self.text;
+    let mut end = self.digits_end(start);
+        let mut next = char_at(text, end);
+        // Where the last joining symbol stands, once there is one.
+        let mut last_symbol: Option<usize> = None;
+        // Up to four code points of a group, enough to tell three.
+        let len = |from: usize, to: usize| {
+            text.get(from..to).map_or(0, |g| g.chars().take(4).count())
+        };
+        // Whether a plain space may open thousands grouping: a lead of up
+        // to three digits that is no piece of a date or a time.
+        let lead_end = end;
+        let spaced_lead = || len(start, lead_end) <= 3 && !after_piece(text, start);
+        // Whether every symbol so far is a plain space joining groups of
+        // three, so one may still join the next.
+        let mut spaced_thousands = true;
+        // Extend over `symbol digits+` while a single symbol joins two groups.
+        while let Some(s) = next
+            && is_symbol(s)
+            && char_at(text, end + s.len_utf8()).is_some_and(is_digit)
+        {
+            let plain = is_plain_spacing(s);
+            // An underscore after one before the run joins the pieces of
+            // a name ("run_123_456"), not the groups of a figure.
+            if plain
+                && (!(spaced_thousands && spaced_lead()) || (s == '_' && prev == Some('_')))
+            {
+                break;
+            }
+            let group_end = self.digits_end(end + s.len_utf8());
+            if plain {
+                if len(end + s.len_utf8(), group_end) != 3 {
+                    if last_symbol.is_none()
+                        && let Some((symbol, run_end)) = self.lakh_run(start)
+                    {
+                        last_symbol = Some(symbol);
+                        end = run_end;
+                    }
+                    break;
+                }
+            } else {
+                // A mark that only groups joins groups of three, and only
+                // to groups it joined before: "1,458\u{a0}5m" is two
+                // figures.
+                let grouped_by_other =
+                    last_symbol.is_some_and(|at| char_at(text, at) != Some(s));
+                if !is_decimal_symbol(s)
+                    && (len(end + s.len_utf8(), group_end) != 3 || grouped_by_other)
+                {
+                    break;
+                }
+                spaced_thousands = false;
+            }
+            last_symbol = Some(end);
+            end = group_end;
+            next = char_at(text, end);
+        }
+        (end, last_symbol)
+    }
+
     /// The end of the digit run starting at `at`, by byte while it is ASCII.
     fn digits_end(&self, mut at: usize) -> usize {
         let bytes = self.text.as_bytes();
@@ -651,47 +802,15 @@ impl<'a> Iterator for Tokens<'a> {
             let prev = char_before(text, start);
             // Digits that continue a word ("p1789368220119") or a number
             // already read ("v2.5") are not a token.
-            if prev
-                .is_some_and(|p| continues_word(text, start, p) || continues_number(text, start, p))
-            {
+            if prev.is_some_and(|p| {
+                (continues_word(text, start, p) && !self.glued_amount(start, p))
+                    || continues_number(text, start, p)
+            }) {
                 self.pos = self.digits_end(start);
                 continue;
             }
-            let mut end = self.digits_end(start);
-            let mut next = char_at(text, end);
-            // Where the last joining symbol stands, once there is one.
-            let mut last_symbol: Option<usize> = None;
-            // Up to four code points of a group, enough to tell three.
-            let len = |from: usize, to: usize| {
-                text.get(from..to).map_or(0, |g| g.chars().take(4).count())
-            };
-            // Whether a plain space may open thousands grouping: a lead of up
-            // to three digits that is no piece of a date or a time.
-            let lead_end = end;
-            let spaced_lead = || len(start, lead_end) <= 3 && !after_piece(text, start);
-            // Whether every symbol so far is a plain space joining groups of
-            // three, so one may still join the next.
-            let mut spaced_thousands = true;
-            // Extend over `symbol digits+` while a single symbol joins two groups.
-            while let Some(s) = next
-                && is_symbol(s)
-                && char_at(text, end + s.len_utf8()).is_some_and(is_digit)
-            {
-                if s == ' ' && !(spaced_thousands && spaced_lead()) {
-                    break;
-                }
-                let group_end = self.digits_end(end + s.len_utf8());
-                if s == ' ' {
-                    if len(end + 1, group_end) != 3 {
-                        break;
-                    }
-                } else {
-                    spaced_thousands = false;
-                }
-                last_symbol = Some(end);
-                end = group_end;
-                next = char_at(text, end);
-            }
+            let (mut end, last_symbol) = self.run_end(start, prev);
+            let next = char_at(text, end);
             self.pos = end;
             let scale = if self.scales && may_scale(text, end, self.loose) {
                 next.and_then(|n| scale_after(text, start, end, n, self.loose))
@@ -701,7 +820,11 @@ impl<'a> Iterator for Tokens<'a> {
             // A run that ends against a word letter ("12.5kg") gives back its
             // last group; a single group against a letter ("2026h") is part of
             // that word and reads as nothing. A corpus keeps the run.
-            if scale.is_none() && !self.letters && next.is_some_and(|n| ends_word(text, end, n)) {
+            if scale.is_none()
+                && !self.letters
+                && next.is_some_and(|n| ends_word(text, end, n))
+                && !currency_letters_after(text, end)
+            {
                 let Some(at) = last_symbol else {
                     continue;
                 };

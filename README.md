@@ -77,7 +77,7 @@ what a text states, with byte spans.
 | [Pages](#pages) | `ungrounded_on_page`, `PageHolds` | | the corpus carries its figures, ratios and ids |
 | [Memory](#memory) | `memory_grounding` | `grounding_tokens` | (counts the dossier lines it draws on: two of a line's words and half of them, or three in a row) |
 | [A reply's form](#a-replys-form) | `speaker_prefix`, `memory_claim`, `silent_signal` | | (reads a speaker prefix, a claim to have saved to memory, and the marker that delivers nothing) |
-| [A turn's checks](#a-turns-checks) | `ground_reply`, `ground_message`, `ground_page`, `internal_names`, `scrub_memory_layout`, `sheet_findings` | | every check the text is held to passes |
+| [A turn's checks](#a-turns-checks) | `ground_reply`, `ground_message`, `internal_names`, `scrub_memory_layout`, `sheet_findings` | | every check the text is held to passes |
 | [A turn's invariants](#a-turns-invariants) | `evaluate_invariants`, `claims_unbacked_action`, `claims_unwritten_memory`, `claims_refusal` | `speaker_prefix`, `silent_signal` | the reply claims nothing no call made, shows no speaker label, and abstains whole |
 
 ### Numbers
@@ -566,9 +566,10 @@ assert_eq!(
 
 ### Pages
 
-`ungrounded_on_page(text, corpus, said)` returns the figures, ratios and
-opaque ids of a page rendered for a person that the corpus does not carry:
-the page is held to what was read, as a sent message is. `PageHolds` decides
+`ungrounded_on_page(text, corpus, said, pixel_only)` returns the figures,
+ratios and opaque ids of a page rendered for a person that the corpus does
+not carry: the page is held to what was read, as a sent message is, and
+nothing is checked on a turn that read pixels only. `PageHolds` decides
 which renders to hold back for them, file by file: a page is held back for a
 claim the run was not told about for that file, and a file at most
 `HOLDS_PER_PAGE` times, so a page whose figures are placeholders on purpose
@@ -578,7 +579,7 @@ costs one render more, never a loop.
 use figures_parser::{PageHolds, ungrounded_on_page};
 
 let page = "Activation up 12% on 1,840 sign-ups.";
-let claims = ungrounded_on_page(page, "signups 1840", "");
+let claims = ungrounded_on_page(page, "signups 1840", "", false);
 assert_eq!(claims, ["12%"]);
 
 let mut holds = PageHolds::default();
@@ -592,9 +593,8 @@ assert!(!holds.hold("mockup.png", &claims));
 one call: its links mended and its memory layout put in plain words, then
 links, figures, ids, ratios, per-unit amounts, sheet amounts, weekdays, date
 windows and the agent's own internals, each finding keyed by its kind.
-`ground_reply` is the same for a reply before it is delivered, and
-`ground_page(text, corpus, said, pixel_only)` holds a page to its figures,
-ratios and ids.
+`ground_reply` is the same for a reply before it is delivered;
+[`ungrounded_on_page`](#pages) holds a page to its figures, ratios and ids.
 
 ```rust
 use figures_parser::{MemoryLayout, Turn, ground_message};
@@ -645,7 +645,9 @@ assert_eq!(
 
 `evaluate_invariants(turn, invariants)` gives each invariant a turn is held
 to a verdict: no action claimed that no write call or pending action stands
-behind, no link no tool result printed, no `[Name]:` speaker label on the
+behind, no link no tool result printed (a link built on one of the turn's
+`hosts` from what it read passes, as the link check lets it), no `[Name]:`
+speaker label on the
 first line, an abstention marker (`silent: <reason>`) that is the whole
 reply, the step budget kept, and no memory save claimed that no memory write
 made. An invariant whose input the turn lacks is not evaluable. Each check
@@ -699,11 +701,11 @@ fp.misdatedWeekdays(reply, "2026-10-09");
 fp.ungroundedEmails(reply, corpus, prompt);
 fp.ungroundedIdentifiers(reply, corpus, prompt); // also unseenTokens
 fp.ungroundedDurations(reply, corpus, prompt);
-fp.ungroundedOnPage(text, corpus, said);
+fp.ungroundedOnPage(text, corpus, said, pixelOnly);
 new fp.PageHolds().hold("mockup.png", claims); // true: hold the page back
 
 fp.groundMessage(text, { corpus, today: "2026-10-20", layout, vocabulary }, attached); // { ok, text, mends, findings }
-fp.groundReply(text, turn, attached); fp.groundPage(text, corpus, said);
+fp.groundReply(text, turn, attached);
 fp.internalNames(reply, said, vocabulary, vouching); fp.scrubMemoryLayout(reply, said, layout);
 
 // Every item with its place in the input; kinds: number, url, email, id, duration.

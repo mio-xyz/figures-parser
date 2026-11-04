@@ -5,7 +5,9 @@ use std::ops::Range;
 
 use super::digits::digit_value;
 use super::ground::ungrounded_by;
-use super::scan::{digits_start, is_boundary, is_digit, is_symbol, joins_pieces, tokens};
+use super::scan::{
+    digits_start, is_boundary, is_digit, is_plain_spacing, is_symbol, joins_pieces, tokens,
+};
 use super::spelled::spelled;
 use crate::text::{char_at, char_before};
 
@@ -17,7 +19,7 @@ const MIN_OPERANDS: usize = 4;
 /// than the plain space, which the scanner joins only into thousands, so a
 /// plain space at a figure's edge sets it apart from the next.
 const fn joins_groups(c: char) -> bool {
-    is_symbol(c) && c != ' '
+    is_symbol(c) && !is_plain_spacing(c)
 }
 
 /// Whether the figure at `span` of `text` is a piece of something longer,
@@ -52,7 +54,7 @@ fn gives_operands(text: &str) -> bool {
         .without_currency()
         .without_signs()
         .filter(|t| !is_piece(text, &(t.start..t.end())))
-        .map(|t| t.text.split(' ').count())
+        .map(|t| t.text.split(is_plain_spacing).count())
         .fold(0_usize, usize::saturating_add);
     let in_words = || {
         spelled(text)

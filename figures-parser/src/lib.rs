@@ -23,7 +23,7 @@
 //! | Amounts taken from a worksheet | | [`sheet_findings`] |
 //! | A turn's invariants | | [`evaluate_invariants`], [`claims_unbacked_action`], [`claims_refusal`] |
 //!
-//! [`ground_reply`], [`ground_message`] and [`ground_page`] run the checks
+//! [`ground_reply`], [`ground_message`] and [`ungrounded_on_page`] run the checks
 //! a turn runs on a reply, a message it sends and a page it makes, in one
 //! call.
 //!
@@ -87,9 +87,7 @@ pub use invariants::{
 pub use jiff::civil::Date;
 pub use kind::{Kind, UnknownKind};
 pub use memory::{MemoryGrounding, grounding_tokens, memory_grounding};
-pub use message::{
-    Detail, Finding, FindingKind, Grounding, Turn, ground_message, ground_page, ground_reply,
-};
+pub use message::{Detail, Finding, FindingKind, Grounding, Turn, ground_message, ground_reply};
 pub use number::{
     Amounts, Figure, MispairedFigure, Number, NumericToken, PrintedFigures, Reading, Sign,
     StatedFigure, extract_numbers, mispaired_per_unit, mispaired_per_unit_with, numbers,

@@ -76,8 +76,8 @@ apart, as it does everywhere in the library.
 
 ## Where the library reads more accurately than the TypeScript
 
-Each of these is pinned by a test in `figures-parser/tests/it/host.rs` or
-`scales.rs`.
+Each of these is pinned by a test in `figures-parser/tests/it/host.rs`,
+`scales.rs` or `spacing.rs`.
 
 - **A unit or a word is no scale where the words around say so.** "took
   5m", "5m ago" and "1h 5m" (minutes), "5m tall" (metres), "a 2481t truck"
@@ -112,7 +112,36 @@ Each of these is pinned by a test in `figures-parser/tests/it/host.rs` or
 - **A plain space joins only thousands.** "3442 12,480" in a print, or "95.11
   57.44x" in a reply, are two figures; the TypeScript joins any groups a
   space sets side by side into one token, and so misses a value a script
-  printed beside another, or names "95.1157.44x".
+  printed beside another, or names "95.1157.44x". The spaces that fold into
+  the plain one (the thin space SI groups with, the figure space, the
+  ideographic space) and the underscore code writes ("12_480") join
+  thousands as it does. Two-digit groups that end in one of three are one
+  Indian-grouped amount beside a currency or a scale word ("₹1 00 00 000",
+  "10 00 001 TL"), as the TypeScript reads them; without one they stay the
+  small values a list sets side by side ("scores: 10 20 30 400").
+- **A mark that only groups joins only groups of three it joined before.**
+  "1,458 5k" written with a no-break space is two figures, as it is with a
+  plain one, and an unprinted "$1,240,000" before "5m users" is held.
+- **A run glued after a word, read whole.** A grouped run glued after a
+  letter ("de3,442,000", "Итого12,500,000"), or a run after a currency
+  written in letters ("Rp1.250.000", "Kč915,478,593", "USD12,500"), is one
+  amount, held and grounded whole: the TypeScript reads the run's tail
+  ("250.000"), which a print of 1250000 does not ground. A run with no
+  grouping after a word ("p1789368220119", "Q1,12") is still part of it.
+  A currency written in letters glued after a run ("12.480.000đ") keeps the
+  run whole, where the TypeScript holds "12.480".
+- **A decimal comma reads a scale word as the locales that write one.**
+  "7,3 tn" is what Swedish compact notation prints for 7,307, and is
+  grounded by it: English never writes a decimal comma. "7.3tn" stays the
+  English 10¹².
+- **A display resolution and a time range are no scale.** "4K screens" and
+  "8K video" name a resolution; "takes 40-50m" measures minutes, the word
+  before a range's low bound measuring its high one. A multiplication sign
+  measures only between two measures ("3m x 5m"): "Grew 2x 5m users" and a
+  link path ending in "x" leave "5m" a scaled figure, which the TypeScript
+  holds and the library let pass.
+- **A line break ends a round range.** "- 1.2k\n- 9,100,000" is two list
+  items, and a printed 1.2k grounds no 9,100,000 under it.
 - **An approximation mark before a currency written with letters.** "≈
   R$3,000", "~US$882,915" and "≈ EUR 466,841" are approximate; the
   TypeScript reads the mark only right before a currency sign.
@@ -127,7 +156,8 @@ flagged:
 
 - digit groups are counted in code points, so astral digits group;
 - a figure is named as written, from its sign or approximation mark on, and
-  a scaled one through the currency after it ("~$1.2M", "500 k€");
+  a scaled one from the currency mark glued before it through the one after
+  it ("~$1.2M", "$34.0M", "500 k€"), as the TypeScript names it;
 - a ratio's percent sign is named as written ("19％"), a percent word after
   a space ("12 percent");
 - a per-unit amount is named with its currency mark as written ("R$45.83",
@@ -281,6 +311,7 @@ inputs each, and agree on all of them but the Thai cases above and, for the
 sheets, prints whose figures a plain space sets side by side, which this
 library reads as two figures; on 40,000 sheet inputs without such prints
 they agree on all. Korean is parted from a name as the original's segmenter
-parts it ("workspace.md에"). The invariants, `without_links` and
+parts it ("workspace.md에"). The invariants (given the turn's integration hosts, which the
+link invariant passes a built link on), `without_links` and
 `unopened_links` agree with theirs on 20,000 generated turns whose links the
 two read alike (see [Known gaps](known-gaps.md#links)).
