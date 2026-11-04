@@ -273,14 +273,17 @@ fn names_no_item(parts: &Parts<'_>, shape_host: bool, hosts: &[&str]) -> bool {
     names_a_page(page) && trusted()
 }
 
-/// Whether `segment` reads as a page's name: letters of any script and the
-/// marks a slug joins them with, no digit (which an item's id carries) and
-/// no bracket or sign a template leaves unfilled (`{owner}`, `<tab>`).
+/// Whether `segment` reads as a page's name: no digit, which an item's id
+/// carries, and none of the characters a link's path percent-encodes
+/// (`{owner}`, `<tab>`, a space or a quote), which a template leaves
+/// unfilled and which encode to digits. A letter outside ASCII is read as
+/// written.
 fn names_a_page(segment: &str) -> bool {
-    !segment.is_empty()
-        && segment
-            .chars()
-            .all(|c| c.is_alphabetic() || matches!(c, '-' | '_' | '.' | '~'))
+    !segment.bytes().any(|b| {
+        b.is_ascii_digit()
+            || b.is_ascii_control()
+            || matches!(b, b' ' | b'"' | b'<' | b'>' | b'`' | b'{' | b'}')
+    })
 }
 
 /// Whether `url` is a link a reply may build rather than copy.

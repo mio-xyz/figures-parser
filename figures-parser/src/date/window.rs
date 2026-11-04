@@ -613,8 +613,9 @@ struct Window<'l> {
     /// Whether the line's numeric dates are written day first (true) or
     /// month first (false); None when none of them says.
     order: Option<bool>,
-    /// The first and last date read in the other order, when none says and
-    /// the line writes a slash date: either may be the window.
+    /// The first and last date read day first, for a language that reads a
+    /// slash date month first, when none of the line's dates says and it
+    /// writes a slash date: either may be the window.
     other: Option<(Date, Date)>,
 }
 
@@ -641,15 +642,16 @@ fn window_in<'l>(
             })
     };
     let (first, last, name) = range(read)?;
-    let other = (order.is_none() && swaps(code))
-        .then(|| swapped_slashes(line))
+    let written = line.get(name.0..name.1).unwrap_or_default().trim();
+    let other = (order.is_none() && swaps(code) && !reads_day_first(code))
+        .then(|| swapped_slashes(written).and_then(|_| swapped_slashes(line)))
         .flatten()
         .and_then(|other_order| range(&other_order))
         .map(|(from, to, _)| (from, to));
     Some(Window {
         first,
         last,
-        written: line.get(name.0..name.1).unwrap_or_default().trim(),
+        written,
         order,
         other,
     })
@@ -855,9 +857,10 @@ fn outside_for(
                 .filter(|r| !r.range)
                 .and_then(|r| Some((r.from.and_then(Day::date)?, r.name)))
         };
-        // A row's slash date is read in the order its heading writes them;
-        // where the heading does not say, a date either order puts inside
-        // the window is let be.
+        // A row's slash date is read in the order its heading writes them.
+        // Where the heading does not say, a month-first reading is the one
+        // in doubt, since most of the world writes the day first: a date the
+        // day-first reading puts inside the window is let be.
         let swapped = swaps(code).then(|| swapped_slashes(lead)).flatten();
         let other_order = || swapped.as_deref().and_then(lead_date).map(|(date, _)| date);
         let own = match open.order {
@@ -875,8 +878,10 @@ fn outside_for(
                     .other
                     .is_none_or(|(first, last)| day < first || day > last)
         };
-        if outside(date) && (open.order.is_some() || other_order().is_none_or(outside)) {
-            let written = lead.get(name.0..name.1).unwrap_or_default().trim();
+        let written = lead.get(name.0..name.1).unwrap_or_default().trim();
+        let in_doubt =
+            open.order.is_none() && !reads_day_first(code) && swapped_slashes(written).is_some();
+        if outside(date) && (!in_doubt || other_order().is_none_or(outside)) {
             let finding = format!("\"{written}\" under \"{}\"", open.written);
             if !out.contains(&finding) {
                 out.push(finding);

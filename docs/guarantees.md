@@ -254,7 +254,9 @@ this library reads it as written. Each case is pinned by a test in
   as no window in English and flags no row a day-first reader would, but
   "03/02/2028 to 9.2.2028" as 2 March to 2 September; this library reads 3
   to 9 February. Where nothing says ("6/12-4/1", "28 Nov-04 December" over a
-  row "03/12"), a row either order puts inside the window is let be.
+  row "03/12"), English and Japanese, which read a slash date month first,
+  let be a row the day-first reading puts inside the window, since most of
+  the world writes the day first; a day-first language keeps its reading.
 - **A two-digit number before an hour word is the hour.** chrono reads the
   "16" of "17 de noviembre 16 h" as the year 2016; "16 h", "16 horas" and
   "16 Uhr" are hours here.
@@ -264,8 +266,10 @@ this library reads it as written. Each case is pinned by a test in
 - **A bare day ends at its line.** A word on the next line makes no count of
   "Tue 4", and a line that opens with a weekday, a date and a time ("Sun,
   2026-11-01 15:00") opens on that time, as chrono reads it.
-- **A month number glued to its mark is no bare day.** "土曜日 11月3日" is a
-  weekday and a date, not the bare day 11; "土曜日 11日" is one.
+- **A number glued to a word is no bare day.** "土曜日 11月3日" is a weekday
+  and a date, and "周五 3点到5点" a weekday and a time, not the bare days 11
+  and 3 the TypeScript check flags; the day's own mark keeps one ("土曜日
+  11日").
 - **A two-digit year before a Chinese date is this century's.** chrono keeps
   "03 11月5日" in the year 3; this library reads 2003, as chrono reads a
   two-digit year everywhere else.

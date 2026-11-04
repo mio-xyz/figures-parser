@@ -990,17 +990,33 @@ fn collect(re: &Regex, text: &str, read: Reader, out: &mut Vec<Part>) {
 /// between two letters or digits joins a name (`run_2h`) and stays. The
 /// text keeps its length, so a part's span is the same in both.
 fn without_emphasis(text: &str) -> Cow<'_, str> {
-    if !text.contains('_') {
+    let marks = |at: usize| {
+        !(char_before(text, at).is_some_and(char::is_alphanumeric)
+            && char_at(text, at.saturating_add(1)).is_some_and(char::is_alphanumeric))
+    };
+    let emphasis = |at: &usize| marks(*at) && amount_beside(text, *at);
+    let mut found = text
+        .match_indices('_')
+        .map(|(at, _)| at)
+        .filter(emphasis)
+        .peekable();
+    if found.peek().is_none() {
         return Cow::Borrowed(text);
     }
-    let mut out = String::with_capacity(text.len());
-    for (at, c) in text.char_indices() {
-        let joins = c == '_'
-            && char_before(text, at).is_some_and(char::is_alphanumeric)
-            && char_at(text, at.saturating_add(1)).is_some_and(char::is_alphanumeric);
-        out.push(if c == '_' && !joins { ' ' } else { c });
+    let mut out = text.as_bytes().to_vec();
+    for at in found {
+        if let Some(b) = out.get_mut(at) {
+            *b = b' ';
+        }
     }
-    Cow::Owned(out)
+    String::from_utf8(out).map_or(Cow::Borrowed(text), Cow::Owned)
+}
+
+/// Whether a digit or a letter stands right before or after the underscore
+/// at byte `at`, so the mark wraps something a length may be read in.
+fn amount_beside(text: &str, at: usize) -> bool {
+    char_at(text, at.saturating_add(1)).is_some_and(|c| c.is_alphanumeric() || c == '~')
+        || char_before(text, at).is_some_and(|c| c.is_alphanumeric() || c == '.')
 }
 
 /// Every part in `text`, in order, a longer one winning an overlap.
