@@ -18,7 +18,7 @@ The library has one module per kind, each with a reader and a comparison:
 |---|---|---|
 | `number` | `scan` (tokens), `readings`, `scale` (scale words), `spelled` (numbers in words), `digits` | `ground` (figures, and amounts against one print), `ratio`, `arithmetic`, `per_unit` |
 | `url` | `scan` | `ground`, `items` (the items named beside links), `shapes` (links built from printed ids) |
-| `date` | `languages`, `names` (a port of chrono-node, and Arabic), `clock` (its times of day) | `calendar`, `bare` (a weekday beside a bare day), `window` (rows under a date window) |
+| `date` | `languages`, `names` (a port of chrono-node, and Arabic), `clock` (its times of day, `east` for Japanese, Chinese and Vietnamese, `relative` for lengths from now) | `calendar`, `bare` (a weekday beside a bare day), `casual` (a weekday beside a casual word for a day), `window` (rows under a date window) |
 | `email` | `emails` | `ungrounded_emails` |
 | `id` | `identifiers` | `ungrounded_identifiers`, `unseen_tokens` |
 | `duration` | `grammar`, `words`, `groups` | `corpus` (the forms a corpus writes a length in) |
@@ -487,6 +487,14 @@ to"). A Hijri date has no month these parsers read, so a weekday beside one
 ("الجمعة 14 ربيع الأول 1448هـ") is never paired with the Gregorian date that
 may follow it.
 
+A weekday followed by a casual word for a day ("Friday, tomorrow", "vendredi
+demain", "пятница, завтра", "星期五今天"), or in Japanese a casual word
+followed by its weekday ("今日(金)"), is checked against the day the word
+names, today counted from `today`, as chrono's weekday refiner merges the
+two (`date/casual.rs`). A part of the day names no day ("this morning",
+"上午"), and "morgen" right after a weekday in German and Dutch is that
+day's morning ("Freitag morgen"); after a comma it is tomorrow.
+
 ### A weekday beside a bare day number
 
 A weekday a language reads alone, followed by one same-line run of spaces
@@ -518,18 +526,50 @@ The pair is skipped when:
 
 A pair is reported once, as written, the full-date pairs included.
 
-The time of day is `date/clock.rs`, a port of chrono's time parsers for the
-eleven languages that have them: its time expression (an optional prefix
-such as "at", "à", "um", "a las", "alle", "às", "om", "klo", "в", the hour,
-minutes and seconds, a meridiem, the language's suffix such as "o'clock" or
-"Uhr", and a range's second time), French and German written hours ("17h30",
-"17 Uhr abends"), a length from now in hours, minutes or seconds ("de 9h",
-"in 2 hours") and the casual words that set an hour ("noon", "midnight",
-"now", "maintenant"). Only a reading at the start counts, after chrono's own
-checks: a lone digit, a three-digit number and a text of digits and a dot are
-no time, and a longer time or date starting inside one removes it, as
-chrono's overlap removal does ("de 9h à 12h" reads "9h à 12h", which does not
-start the text).
+The time of day is `date/clock/`, a port of chrono's time parsers for the
+fourteen languages, read as chrono's first result at the start of the
+rest of the line:
+
+- the time expression (an optional prefix such as "at", "à", "um", "a las",
+  "alle", "às", "om", "klo", "в", the hour, minutes and seconds, a meridiem,
+  the language's suffix such as "o'clock" or "Uhr", and a range's second
+  time), French and German written hours ("17h30", "17 Uhr abends"), and
+  the casual words that set an hour ("noon", "midnight", "now",
+  "maintenant");
+- Japanese, Chinese and Vietnamese times (`east.rs`): "15時30分", "午後3時",
+  "下午3点半", "15:00", "lúc 7 giờ 30 phút sáng", with their numerals and
+  a range's second time;
+- a length from now (`relative.rs`): chrono's within, ago, later and casual
+  relative parsers in every language that has them, with their number
+  words ("in 2 hours", "for an hour", "il y a une heure", "vor 2 Stunden",
+  "через час", "两小时内"). A length sets an hour when it holds hours,
+  minutes or seconds, or a fraction of a day that rounds to some, as
+  chrono's `addDuration` carries it; a length of days sets only a date;
+- an ISO date with its time, and a date, a weekday or a casual date
+  ("tomorrow", "demain", "明日") merged with the time after it, as the
+  language's date-and-time refiner merges them ("tomorrow 15", "Nov 5 at
+  3pm"), or a time merged with the date after it. A range word joins two
+  results into a range first in the languages whose refiners do that
+  first (German, Finnish, Chinese, Vietnamese); a range starts on a time
+  only when the date it runs to falls on or after the day the time is
+  read on;
+- a zone after the result: an offset ("+02:00", "GMT+1") of at most 14
+  hours, which Chinese does not read, and a zone name chrono knows ("CET",
+  "UTC"), in capitals after a date with no time.
+
+The result at the start is the longest one there, compared in UTF-16 units
+as chrono compares them, unless a longer one starting inside it removes it,
+as chrono's overlap removal does ("de 9h à 12h" reads "9h à 12h", which does
+not start the text). A date with a day or a month of 0 is a result too, which
+removes what it overlaps and is dropped with whatever merged into it, as
+chrono drops it last. chrono's own checks follow: a lone digit, a three-digit
+number and a text of digits and a dot are no time, and a time at 24:00 drops
+the result.
+
+A full-date pair is named with the time written beside it on its line ("Fri
+26 Sep at 5pm", "at 5pm, Fri 26 Sep") and the zone after it. A bare number
+beside a date ("mardi 7 nov 15 personnes") is no time to a reader, so it is
+left out of the name.
 
 ## Rows under a date window
 
@@ -537,18 +577,41 @@ start the text).
 em dashes read as hyphens since chrono reads "Oct 23–30" as its first day
 alone. A line is a row when it is a table row (its lead is the first cell)
 or a list item (`- `, `* `, `•`, `◦`, `‣`, `1. `, `1) `; its lead is what
-follows), each without the emphasis around it. Any other line opens a window
-when a language reads a range of dates in it that runs forward: a
-month-name date's own range ("Oct 23-30", "19-26 oct.", "19. bis 26.
-Oktober") or two dates the language's range word joins ("Oct 19 to Oct 26",
-"Oct 28 - Nov 3", "19 au 26 octobre"), with chrono's year rules: a year
-written on one end is implied on the other, and a range whose start falls
-after its end moves the end a year on, or the start a year back, where the
-year is unwritten. A blank line, a heading, a label ending in a colon or a
+follows), each without the emphasis around it. Each of chrono's fourteen
+languages reads every line, ungated, as chrono's refiners read it:
+
+1. every date parser's results and the times of day around them (inside a
+   date, glued to its start, and where the language's words join a date and
+   a time), the longer of two overlapping results kept, compared in UTF-16
+   units;
+2. weekdays merged into their dates;
+3. two times a range word joins merged into one range of times ("2/11 9:00
+   - 17:00");
+4. a date merged with the time beside it: a range of hours makes a one-day
+   window ("Nov 4, 9:00-17:00"), or a two-day one when it ends before it
+   starts ("Nov 4, 22:00-02:00");
+5. two dates a range word joins merged into a range, with chrono's year
+   rules: a year written on one end is implied on the other, and a range
+   whose start falls after its end moves the end a year on, or the start a
+   year back, where the year is unwritten. English and Italian first take
+   in a zone name, drop a lone time in digits and a dot, and merge dates
+   and times again ("10:00 UTC Sep 14"), as their refiners run in that
+   order.
+
+Every language merges a date with its time before it joins ranges, so "4.
+Nov. - 15 Uhr" is one date and "10月2号15点30分-10月23日" runs to the 23rd,
+as English reads them. A date with a day or a month of 0 is dropped with
+whatever merged into it.
+
+Any line that is not a row opens a window when it reads a range of dates
+that runs forward. A blank line, a heading, a label ending in a colon or a
 wholly emphasised line keeps the window open; other prose closes it. A row
-whose lead starts with a single date outside the window is reported once, as
-`"<date>" under "<window>"`. Each of chrono's fourteen languages runs over
-every line, ungated; Arabic is not read.
+whose lead starts with a single date outside the window is reported once,
+as `"<date>" under "<window>"`; a row whose lead is a range, of dates or of
+hours, is left alone. A row and a window are named with the times and the
+zone written beside their dates ("Oct 20 at 5pm", "5pm Oct 20", "2026-10-20
+at 5pm CET"), a bare number beside a date ("Oct 20 - 12 posts") left out.
+Arabic is not read.
 
 ## Email addresses
 

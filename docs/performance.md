@@ -63,7 +63,12 @@ the other corpora move within noise.
   on 300 KB).
 - **Weekdays read only the reply** and allocate nothing: about 50 µs for a
   4 KB reply that names no weekday and 100 µs for one that does, after a
-  one-time compile of 5 to 13 ms for each language a reply names.
+  one-time compile of 5 to 13 ms for each language a reply names. A wrong
+  pair reads the times beside it to be named, so a reply of 900 wrong pairs,
+  each with a time, takes about 9 ms where its dates alone take 5.
 - **Date windows read only the reply**, line by line in every language, and
   allocate one copy of it: under 0.25 ms on each 300 KB corpus read as a
-  reply, after a one-time compile of every language's patterns.
+  reply, after a one-time compile of every language's patterns. The times
+  of day are read only beside a date, so a table of 300 rows each dated with
+  a time takes about 2.4 ms where its dates alone take 1.2, and the corpus
+  of every script, whose dates sit beside digits, about 18% more.

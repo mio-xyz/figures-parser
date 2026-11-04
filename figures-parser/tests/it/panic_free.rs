@@ -127,7 +127,7 @@ fn every_code_point_beside_a_figure_and_a_link() {
         let bare_run = catch_unwind(|| black_box(misdated_weekdays(&bare, today_for(&bare)).len()));
         assert!(bare_run.is_ok(), "panicked on {bare:?}");
         let table = format!(
-            "Oct 23{c}–30\n| Oct{c} 20 | x |\n- 19-26 oct.{c}\n- Oct 28 {c}to Nov{c} 3\n{c}"
+            "Oct 23{c}–30\n| Oct{c} 20 | x |\n- 19-26 oct.{c}\n- Oct 28 {c}to Nov{c} 3\n{c}Nov 4, 9{c}:00-17:00\n- 5pm{c} Oct 20 CET{c}\n11月4日 15時{c}から\n- 火曜日 4 下午{c}3点"
         );
         let table_run =
             catch_unwind(|| black_box(rows_outside_window(&table, today_for(&table)).len()));
@@ -356,6 +356,27 @@ const POOL: &[&str] = &[
     " à 17h",
     " at 5pm",
     "火曜日 ",
+    "15時30分",
+    "午後3時から5時",
+    "下午3点半",
+    "到24点",
+    "lúc 7 giờ 30 phút sáng",
+    " tomorrow 15",
+    " for an hour",
+    " 2.5 days ago",
+    " через полчаса",
+    "两小时内",
+    " +02:00",
+    " CET",
+    "T10:00Z",
+    "9:00-17:00",
+    "22:00-02:00",
+    "15.00-0500",
+    "00 19 de nov",
+    "Friday, tomorrow",
+    "今日(金)",
+    "Freitag, morgen",
+    " vanavond",
     "\n| Oct 20 | ",
     "Oct 23-30\n",
     "\n- ",

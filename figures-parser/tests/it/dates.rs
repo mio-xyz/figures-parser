@@ -306,6 +306,138 @@ fn leaves_a_number_that_is_a_count_an_hour_a_range_or_part_of_a_month_date_alone
     }
 }
 
+#[test]
+fn checks_a_bare_day_the_rest_of_its_line_opens_on_a_time_in_any_language() {
+    for reply in [
+        "火曜日 4 15:00から",
+        "星期二 4 下午3点",
+        "Tue 4 tomorrow 15",
+        "Tue 4 05.29 +02:00",
+        "Tue 4 noon",
+        "Tue 4 for an hour",
+        "Tue 4 in 2 hours",
+        "mardi 4 pendant une heure",
+        "Dienstag 4 für eine Stunde",
+    ] {
+        assert_eq!(
+            check(reply, OCT_30).len(),
+            1,
+            "{reply} should be read as Tuesday the 4th"
+        );
+    }
+}
+
+#[test]
+fn leaves_a_bare_day_whose_line_opens_on_no_time_alone() {
+    // A length of days sets no hour, and a slash date with a month of 0
+    // still removes the time it overlaps.
+    for reply in ["Tue 4 3 days ago", "ter 4 15.00-0500 15", "Tue 4 tomorrow"] {
+        assert_eq!(check(reply, OCT_30), Vec::<String>::new(), "{reply}");
+    }
+}
+
+#[test]
+fn names_a_pair_with_the_time_written_beside_it() {
+    assert_eq!(
+        check("Fri 7 Nov at 5 pm CET works.", OCT_30),
+        [r#""Fri 7 Nov at 5 pm CET" (2026-11-07 is a Saturday)"#]
+    );
+    assert_eq!(
+        check("at 5pm, Fri 7 Nov works.", OCT_30),
+        [r#""at 5pm, Fri 7 Nov" (2026-11-07 is a Saturday)"#]
+    );
+    assert_eq!(
+        check("le vendredi 7 novembre à 17h", OCT_30),
+        [r#""vendredi 7 novembre à 17h" (2026-11-07 is a Saturday)"#]
+    );
+}
+
+// The TypeScript check names "mardi 7 nov 15" here, reading the count as an
+// hour.
+#[test]
+fn names_a_pair_without_a_bare_number_after_it() {
+    assert_eq!(
+        check("mardi 7 nov 15 personnes", OCT_30),
+        [r#""mardi 7 nov" (2026-11-07 is a Saturday)"#]
+    );
+}
+
+// The TypeScript check loses both: chrono reads "+11" of "+11mins" as a zone
+// offset whose result outgrows the pair, and joins the second pair into a
+// range with the time on the line before.
+#[test]
+fn checks_a_pair_a_neighbouring_time_would_swallow() {
+    assert_eq!(
+        check("Fri 05 +11mins after", "2026-02-28"),
+        [r#""Fri 05" (2026-03-05 is a Thursday)"#]
+    );
+    assert_eq!(
+        check("2026-01-24T19:31\n- Sunday 21 Nov", "2026-12-26"),
+        [r#""Sunday 21 Nov" (2026-11-21 is a Saturday)"#]
+    );
+}
+
+#[test]
+fn checks_a_pair_after_a_count_on_the_line_before() {
+    assert_eq!(
+        check("Total: 15\n- Montag 20", "2026-10-15"),
+        [r#""Montag 20" (2026-10-20 is a Tuesday)"#]
+    );
+}
+
+// chrono keeps the year 3 here.
+#[test]
+fn reads_a_two_digit_year_before_a_chinese_date_in_this_century() {
+    assert_eq!(
+        check("周五 03 11月5日", "2026-05-05"),
+        [r#""周五 03 11月5日" (2003-11-05 is a Wednesday)"#]
+    );
+}
+
+#[test]
+fn checks_a_weekday_against_the_day_a_casual_word_beside_it_names() {
+    let today = "2026-11-04";
+    for (reply, finding) in [
+        (
+            "See you Friday, tomorrow.",
+            r#""Friday, tomorrow" (2026-11-05 is a Thursday)"#,
+        ),
+        (
+            "vendredi demain",
+            r#""vendredi demain" (2026-11-05 is a Thursday)"#,
+        ),
+        (
+            "пятница, завтра",
+            r#""пятница, завтра" (2026-11-05 is a Thursday)"#,
+        ),
+        (
+            "今日(金)は会議です",
+            r#""今日(金)" (2026-11-04 is a Wednesday)"#,
+        ),
+        ("星期五今天", r#""星期五今天" (2026-11-04 is a Wednesday)"#),
+        (
+            "Friday, last night",
+            r#""Friday, last night" (2026-11-03 is a Tuesday)"#,
+        ),
+    ] {
+        assert_eq!(check(reply, today), [finding], "{reply}");
+    }
+    assert_eq!(check("Wednesday, today", today), Vec::<String>::new());
+}
+
+// The TypeScript check flags the first two, reading each part of the day as
+// a date, and misses the third, whose " morgen" chrono reads as a morning.
+#[test]
+fn reads_a_part_of_the_day_after_a_weekday_as_no_date() {
+    let today = "2026-11-04";
+    assert_eq!(check("星期五上午", today), Vec::<String>::new());
+    assert_eq!(check("Freitag morgen um 9", today), Vec::<String>::new());
+    assert_eq!(
+        check("Freitag, morgen", today),
+        [r#""Freitag, morgen" (2026-11-05 is a Thursday)"#]
+    );
+}
+
 // chrono merges the weekday with the hour it reads in "24" and drops both.
 #[test]
 fn leaves_a_weekday_beside_24_alone() {
@@ -421,6 +553,108 @@ fn reads_a_window_across_months_and_years() {
 fn leaves_a_row_dated_by_a_range_and_a_window_running_backwards_alone() {
     assert_eq!(window("Oct 23-30\n- Oct 19-20: d"), Vec::<String>::new());
     assert_eq!(window("Oct 30-23\n- Oct 1: a"), Vec::<String>::new());
+}
+
+#[test]
+fn reads_a_date_with_a_range_of_hours_as_a_one_day_window() {
+    let meetings = "Your meetings on Nov 4, 9:00-17:00:\n| Date | Event |\n|---|---|\n| Nov 4 | standup |\n| Nov 6 | review |";
+    assert_eq!(
+        rows_outside_window(meetings, day("2026-11-05")),
+        [r#""Nov 6" under "Nov 4, 9:00-17:00""#]
+    );
+    for (heading, row) in [
+        ("Le 4 nov., 9h-17h :", "- 3 nov. : x"),
+        ("Am 4. November, 9-17 Uhr:", "- 3. November: x"),
+        ("11月4日 9:00-17:00", "- 11月3日: x"),
+        ("ngày 4 tháng 11, 9:00 - 17:00", "- ngày 3 tháng 11: x"),
+        ("2026-11-04 9:00-17:00", "- 2026-11-03: x"),
+    ] {
+        assert_eq!(
+            rows_outside_window(&format!("{heading}\n{row}"), day("2026-11-05")).len(),
+            1,
+            "{heading}"
+        );
+    }
+    // A range of hours that ends before it starts ends on the next day.
+    assert_eq!(
+        rows_outside_window(
+            "Nov 4, 22:00-02:00:\n- Nov 5: late\n- Nov 6: later",
+            day("2026-11-05")
+        ),
+        [r#""Nov 6" under "Nov 4, 22:00-02:00""#]
+    );
+}
+
+#[test]
+fn names_a_row_with_the_time_written_beside_its_date() {
+    assert_eq!(
+        window("Posts from Oct 23 to Oct 30:\n- Oct 20 at 5pm: launch\n- 5pm Oct 21: post"),
+        [
+            r#""Oct 20 at 5pm" under "Oct 23 to Oct 30""#,
+            r#""5pm Oct 21" under "Oct 23 to Oct 30""#
+        ]
+    );
+    assert_eq!(
+        window("Week Oct 23-30:\n| 2026-10-20 at 5pm CET | x |"),
+        [r#""2026-10-20 at 5pm CET" under "Oct 23-30""#]
+    );
+    assert_eq!(
+        window("Posts from Oct 19 9am to Oct 26 5pm:\n- Oct 20: launch\n- Oct 28: post"),
+        [r#""Oct 28" under "Oct 19 9am to Oct 26 5pm""#]
+    );
+}
+
+#[test]
+fn leaves_a_row_dated_by_a_range_of_hours_and_a_window_in_words_alone() {
+    assert_eq!(
+        window("Posts from Oct 23-30:\n- Oct 20, 9:00-17:00: workshop"),
+        Vec::<String>::new()
+    );
+    for heading in ["Posts this week:", "Posts from the last 7 days:"] {
+        assert_eq!(
+            window(&format!("{heading}\n- Oct 1: launch")),
+            Vec::<String>::new()
+        );
+    }
+}
+
+// The TypeScript check reads "-14" as a zone offset after "29 octobre", so it
+// opens no window here, and names the second window with the count.
+#[test]
+fn reads_two_dates_a_dash_joins_as_a_window_never_as_a_date_and_a_zone() {
+    assert_eq!(
+        window("Week of 29 octobre–14 déc.\n- 20 oct. : lancement\n- 2 nov. : point"),
+        [r#""20 oct." under "29 octobre-14 déc.""#]
+    );
+    assert_eq!(
+        rows_outside_window(
+            "Week of 1—22 nov — 6 posts\n- 2026-08-24: x",
+            day("2026-11-05")
+        ),
+        [r#""2026-08-24" under "1-22 nov""#]
+    );
+}
+
+// chrono's Chinese, Vietnamese, Finnish and German refiners join ranges
+// before they merge a date with its time: the TypeScript check ends this
+// window on October 2 and flags the 10th, and reads the German rows as
+// ranges it leaves alone.
+#[test]
+fn merges_a_date_with_its_time_before_it_joins_a_range_in_every_language() {
+    assert_eq!(
+        rows_outside_window(
+            "10月2号15点30分-10月23日\n- 10月10日: x\n- 11月3号: y",
+            day("2026-11-05")
+        ),
+        [r#""11月3号" under "10月2号15点30分-10月23日""#]
+    );
+    assert_eq!(
+        rows_outside_window(
+            "Woche vom 2. bis 8. November:\n- 4. Nov. - 15 Uhr: Termin\n- 12. Nov. - 15 Uhr: Termin",
+            day("2026-11-10")
+        ),
+        [r#""12. Nov. - 15 Uhr" under "2. bis 8. November""#]
+    );
 }
 
 #[test]

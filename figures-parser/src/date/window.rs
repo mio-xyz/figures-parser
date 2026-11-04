@@ -12,7 +12,7 @@ use jiff::civil::Date;
 use regex::Regex;
 
 use super::languages::{Found, LANGUAGES, Language, Reading, YearOf};
-use super::{calendar, pairs};
+use super::{calendar, clock, merged};
 
 /// The dashes chrono reads as the first day alone, not a range ("Oct 23–30").
 const RANGE_DASHES: &[char] = &['–', '—'];
@@ -51,17 +51,59 @@ impl Day {
 /// One result over a line: where it stands, the date it starts on if it
 /// has a day and a month, and where a range ends.
 #[derive(Debug, Clone, Copy)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag is one of chrono's components, set apart from the others"
+)]
 struct Read {
     /// Byte offset of its text.
     start: usize,
     /// One past its last byte.
     end: usize,
-    /// The date it starts on, None for a weekday alone or anything else.
+    /// The date it starts on, None for a weekday alone, a time alone or anything else.
     from: Option<Day>,
     /// Whether it is a range; chrono reads no window from a range of other things.
     range: bool,
     /// Where a range of dates ends.
     to: Option<Day>,
+    /// For a range of times, whether it ends on the next day.
+    next_day: bool,
+    /// Whether it writes a time of day.
+    timed: bool,
+    /// Whether it writes a date or a weekday; a time alone does not.
+    dated: bool,
+    /// The bytes it is named by: all of it, but a bare number chrono reads as
+    /// its hour ("Oct 20 - 12 posts") left out.
+    name: (usize, usize),
+    /// Whether every part of it exists on the calendar and the clock.
+    valid: bool,
+    /// Whether it is a time written only in digits and a dot.
+    unlikely: bool,
+}
+
+impl Read {
+    /// A result read by a date parser.
+    const fn date(
+        start: usize,
+        end: usize,
+        from: Option<Day>,
+        to: Option<Day>,
+        range: bool,
+    ) -> Self {
+        Self {
+            start,
+            end,
+            from,
+            range,
+            to,
+            next_day: false,
+            timed: false,
+            dated: true,
+            name: (start, end),
+            valid: true,
+            unlikely: false,
+        }
+    }
 }
 
 /// The date a reading starts on, with its year resolved as chrono resolves it.
@@ -110,7 +152,7 @@ static RANGE_WORDS: LazyLock<Vec<(&str, Option<Regex>)>> = LazyLock::new(|| {
 });
 
 /// Whether `between` joins two results into a range in the language `code`.
-fn joins_range(code: &str, between: &str) -> bool {
+pub(super) fn joins_range(code: &str, between: &str) -> bool {
     RANGE_WORDS
         .iter()
         .find(|(c, _)| *c == code)
@@ -143,41 +185,327 @@ fn merged_range(mut from: Day, mut to: Day) -> Option<(Day, Day)> {
     Some((to, from))
 }
 
-/// The language's results over `text`, weekdays merged into their dates and
-/// ranges into one result, as chrono's refiners merge them.
+/// The language's date results over `text` and the times of day written
+/// beside them, the longer of two overlapping results kept as chrono's
+/// overlap removal keeps it, then weekdays merged into their dates.
+fn dates_and_times(code: &str, language: &Language, text: &str, today: Date) -> Vec<Read> {
+    let dates = language.every_result(text);
+    if dates.is_empty() {
+        return Vec::new();
+    }
+    let mut starts: Vec<usize> = dates
+        .iter()
+        .flat_map(|d| clock::time_starts_around(code, text, d.start, d.end, true))
+        .collect();
+    starts.sort_unstable();
+    starts.dedup();
+    let mut times = clock::times_at(code, text, starts.into_iter());
+    // A time a range word joins to one of these is read too ("2/11 9:00 -
+    // 17:00"), so the two make one range of times.
+    let mut follow: Vec<usize> = times
+        .iter()
+        .flat_map(|t| {
+            (t.zoned_end..t.zoned_end.saturating_add(16).min(text.len())).filter(|&at| {
+                text.is_char_boundary(at)
+                    && text
+                        .get(t.zoned_end..at)
+                        .is_some_and(|gap| !gap.is_empty() && joins_range(code, gap))
+            })
+        })
+        .filter(|at| !times.iter().any(|t| t.start <= *at && *at < t.end))
+        .collect();
+    if !follow.is_empty() {
+        follow.sort_unstable();
+        follow.dedup();
+        times.extend(clock::times_at(code, text, follow.into_iter()));
+        times.sort_by_key(|t| t.start);
+    }
+    let mut all: Vec<Item> = dates.into_iter().map(Item::Date).collect();
+    all.extend(times.into_iter().map(Item::Time));
+    all.sort_by_key(Item::start);
+    let width = |item: &Item| {
+        text.get(item.start()..item.end())
+            .map_or(0, |t| t.chars().map(char::len_utf16).sum::<usize>())
+    };
+    let mut kept: Vec<Item> = Vec::with_capacity(all.len());
+    for item in all {
+        match kept.last_mut() {
+            Some(last) if item.start() < last.end() => {
+                if width(&item) > width(last) {
+                    *last = item;
+                }
+            }
+            _ => kept.push(item),
+        }
+    }
+    let mut out: Vec<Read> = Vec::with_capacity(kept.len());
+    let mut pending: Option<Found> = None;
+    for item in kept {
+        match item {
+            Item::Date(found) => {
+                let joined = pending.and_then(|current| {
+                    let between = text.get(current.end..found.start).unwrap_or_default();
+                    merged(language.merge, current.reading, found.reading, between).map(|reading| {
+                        Found {
+                            start: current.start,
+                            end: found.end,
+                            reading,
+                            to: current.to.or(found.to),
+                        }
+                    })
+                });
+                if joined.is_none()
+                    && let Some(current) = pending
+                {
+                    out.push(date_read(&current, today));
+                }
+                pending = Some(joined.unwrap_or(found));
+            }
+            Item::Time(time) => {
+                if let Some(current) = pending.take() {
+                    out.push(date_read(&current, today));
+                }
+                out.push(time_read(&time));
+            }
+        }
+    }
+    if let Some(current) = pending {
+        out.push(date_read(&current, today));
+    }
+    out
+}
+
+/// The read a time of day makes: no date, and no name for a bare number.
+const fn time_read(time: &clock::Clocked) -> Read {
+    Read {
+        start: time.start,
+        end: time.zoned_end,
+        from: None,
+        range: time.next_day.is_some(),
+        next_day: matches!(time.next_day, Some(true)),
+        to: None,
+        timed: true,
+        dated: false,
+        name: if time.bare {
+            (time.start, time.start)
+        } else {
+            (time.start, time.zoned_end)
+        },
+        valid: time.valid,
+        unlikely: time.unlikely,
+    }
+}
+
+/// A date parser's result or a time of day, before overlapping ones are removed.
+enum Item {
+    /// A date parser's result.
+    Date(Found),
+    /// A time of day.
+    Time(clock::Clocked),
+}
+
+impl Item {
+    /// Where its text starts.
+    const fn start(&self) -> usize {
+        match self {
+            Self::Date(found) => found.start,
+            Self::Time(time) => time.start,
+        }
+    }
+
+    /// Where its text ends, as its parser read it.
+    const fn end(&self) -> usize {
+        match self {
+            Self::Date(found) => found.end,
+            Self::Time(time) => time.end,
+        }
+    }
+}
+
+/// The read a date result makes.
+fn date_read(found: &Found, today: Date) -> Read {
+    let from = day_of(found, today);
+    let to = found.to.zip(from).map(|(day, from)| Day {
+        of_month: day,
+        ..from
+    });
+    Read {
+        valid: !matches!(found.reading, Reading::Void),
+        ..Read::date(found.start, found.end, from, to, found.to.is_some())
+    }
+}
+
+/// The language's results over `text`, merged as chrono's refiners merge
+/// them: two times a range word joins into one range of times, a date and
+/// the time beside it into one ("Nov 4, 9:00-17:00" is one day from 9 to
+/// 17), then two results a range word joins into a range. Every language
+/// merges a date with its time before it joins ranges, so "4. Nov. - 15
+/// Uhr" is one date and "10月2号15点30分-10月23日" runs to the 23rd.
 fn reads(code: &str, language: &Language, text: &str, today: Date) -> Vec<Read> {
-    let mut out: Vec<Read> = Vec::new();
-    for found in pairs(language, text) {
-        let from = day_of(&found, today);
-        let own = Read {
-            start: found.start,
-            end: found.end,
-            from,
-            range: found.to.is_some(),
-            to: found.to.zip(from).map(|(day, from)| Day {
-                of_month: day,
-                ..from
-            }),
-        };
+    let reads = dates_and_times(code, language, text, today);
+    let merged = dated_times(code, text, time_ranges(code, text, reads));
+    // English and Italian join ranges last, after the zone names and after
+    // dropping a lone time in digits and a dot; the others join them first.
+    let mut out = if matches!(code, "en" | "it") {
+        let mut named = with_zone_names(text, merged);
+        named.retain(|r| !r.unlikely || r.dated);
+        // They merge dates and times again once zones are taken in
+        // ("10:00 UTC Sep 14").
+        ranges(code, text, dated_times(code, text, named))
+    } else {
+        with_zone_names(text, ranges(code, text, merged))
+    };
+    out.retain(|r| r.valid && (!r.unlikely || r.dated));
+    out
+}
+
+/// The results with the zone name written after each taken in.
+fn with_zone_names(text: &str, mut reads: Vec<Read>) -> Vec<Read> {
+    for read in &mut reads {
+        let zone = clock::zone_name_len(text, read.end, read.timed);
+        if zone > 0 {
+            if read.name.1 == read.end {
+                read.name.1 = read.end.saturating_add(zone);
+            }
+            read.end = read.end.saturating_add(zone);
+        }
+    }
+    reads
+}
+
+/// The results with two times a range word joins merged into one range of
+/// times; chrono puts the earlier first, so the range never runs past the
+/// day.
+fn time_ranges(code: &str, text: &str, reads: Vec<Read>) -> Vec<Read> {
+    let mut out: Vec<Read> = Vec::with_capacity(reads.len());
+    for read in reads {
         let Some(last) = out.last_mut() else {
-            out.push(own);
+            out.push(read);
             continue;
         };
-        let between = text.get(last.end..own.start).unwrap_or_default();
-        if last.range || own.range || !joins_range(code, between) {
-            out.push(own);
+        let between = text.get(last.end..read.start).unwrap_or_default();
+        let times = !last.dated && !read.dated && !last.range && !read.range;
+        if !times || !joins_range(code, between) {
+            out.push(read);
+            continue;
+        }
+        let named = last.name.1 > last.name.0 || read.name.1 > read.name.0;
+        *last = Read {
+            end: read.end,
+            range: true,
+            next_day: false,
+            name: if named {
+                (last.start, read.end)
+            } else {
+                (last.start, last.start)
+            },
+            valid: last.valid && read.valid,
+            unlikely: false,
+            ..*last
+        };
+    }
+    out
+}
+
+/// The results with each date merged with the time beside it, as chrono's
+/// `AbstractMergeDateTimeRefiner` merges them.
+fn dated_times(code: &str, text: &str, reads: Vec<Read>) -> Vec<Read> {
+    let mut out: Vec<Read> = Vec::with_capacity(reads.len());
+    for read in reads {
+        let Some(last) = out.last_mut() else {
+            out.push(read);
+            continue;
+        };
+        let between = text.get(last.end..read.start).unwrap_or_default();
+        let date_then_time = !last.timed && !read.dated;
+        // "24: July 23" is a count before a date: a bare colon joins only a
+        // date to the time after it.
+        let time_then_date = !last.dated && !read.timed && between.trim() != ":";
+        if !(date_then_time || time_then_date) || !clock::joins_date_and_time(code, between) {
+            out.push(read);
+            continue;
+        }
+        let (date, time) = if date_then_time {
+            (*last, read)
+        } else {
+            (read, *last)
+        };
+        *last = with_time(date, time);
+    }
+    out
+}
+
+/// A date merged with its time: a range of times on a date that writes no
+/// range of its own ends on that date, or on the next when it ends before
+/// it starts ("Tuesday 9pm - 1am").
+fn with_time(date: Read, time: Read) -> Read {
+    let start = date.start.min(time.start);
+    let end = date.end.max(time.end);
+    let to = if date.range {
+        date.to
+    } else if time.range {
+        date.from.and_then(|from| {
+            if time.next_day {
+                let next = from.date()?.checked_add(1.day()).ok()?;
+                Some(Day {
+                    of_month: u8::try_from(next.day()).ok()?,
+                    month: u8::try_from(next.month()).ok()?,
+                    year: next.year(),
+                    year_written: from.year_written,
+                })
+            } else {
+                Some(from)
+            }
+        })
+    } else {
+        None
+    };
+    let named = time.name.1 > time.name.0;
+    Read {
+        start,
+        end,
+        from: date.from,
+        range: date.range || time.range,
+        to,
+        next_day: false,
+        timed: true,
+        dated: true,
+        name: if named { (start, end) } else { date.name },
+        valid: date.valid && time.valid,
+        unlikely: false,
+    }
+}
+
+/// The results with two a range word joins merged into a range, as
+/// chrono's `AbstractMergeDateRangeRefiner` merges them.
+fn ranges(code: &str, text: &str, reads: Vec<Read>) -> Vec<Read> {
+    let mut out: Vec<Read> = Vec::with_capacity(reads.len());
+    for read in reads {
+        let Some(last) = out.last_mut() else {
+            out.push(read);
+            continue;
+        };
+        let between = text.get(last.end..read.start).unwrap_or_default();
+        if last.range || read.range || !joins_range(code, between) {
+            out.push(read);
             continue;
         }
         let ends = last
             .from
-            .zip(own.from)
+            .zip(read.from)
             .and_then(|(a, b)| merged_range(a, b));
         *last = Read {
             start: last.start,
-            end: own.end,
+            end: read.end,
             from: ends.map(|(a, _)| a),
             range: true,
             to: ends.map(|(_, b)| b),
+            next_day: false,
+            timed: last.timed || read.timed,
+            dated: last.dated || read.dated,
+            name: (last.start, read.end),
+            valid: last.valid && read.valid,
+            unlikely: false,
         };
     }
     out
@@ -208,7 +536,7 @@ fn window_in<'l>(
             (first <= last).then(|| Window {
                 first,
                 last,
-                written: line.get(r.start..r.end).unwrap_or_default().trim(),
+                written: line.get(r.name.0..r.name.1).unwrap_or_default().trim(),
             })
         })
 }
@@ -283,7 +611,7 @@ fn outside_for(
             continue;
         };
         if date < open.first || date > open.last {
-            let written = lead.get(own.start..own.end).unwrap_or_default().trim();
+            let written = lead.get(own.name.0..own.name.1).unwrap_or_default().trim();
             let finding = format!("\"{written}\" under \"{}\"", open.written);
             if !out.contains(&finding) {
                 out.push(finding);
@@ -295,10 +623,11 @@ fn outside_for(
 /// The rows of a table or list, under a heading that names a date window,
 /// whose own leading date falls outside that window.
 ///
-/// Each is `"<row's date>" under "<window>"`, as written, with an en or em
-/// dash in either read as a hyphen. A heading opens a window when it writes
-/// a range of dates ("past week (Oct 23-30)", "Oct 19 to Oct 26", "19-26
-/// oct."); a blank line, a label ending in a colon or a line wholly
+/// Each is `"<row's date>" under "<window>"`, as written with the times beside
+/// the dates, an en or em dash in either read as a hyphen. A heading opens a
+/// window when it writes a range of dates ("past week (Oct 23-30)", "Oct 19
+/// to Oct 26", "19-26 oct.") or a day with a range of hours ("Nov 4,
+/// 9:00-17:00"); a blank line, a label ending in a colon or a line wholly
 /// emphasised keeps it open, and other prose closes it. A row is a table
 /// row, read by its first cell, or a list item, read by what follows its
 /// bullet or number; a row whose lead is a range is left alone. A date

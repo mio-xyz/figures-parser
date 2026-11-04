@@ -39,6 +39,8 @@ assert.throws(() => misdatedWeekdays("x", "2026-13-40"), /YYYY-MM-DD/);
 assert.deepEqual(misdatedWeekdays("tu as un RDV mardi 4 à 17h", "2026-10-30"), ['"mardi 4" (2026-11-04 is a Wednesday)']);
 assert.deepEqual(rowsOutsideWindow("Past week (Oct 23–30):\n| Oct 29 | a |\n| Oct 20 | b |", "2026-10-30"), ['"Oct 20" under "Oct 23-30"']);
 assert.throws(() => rowsOutsideWindow("x", "nope"), /YYYY-MM-DD/);
+assert.deepEqual(misdatedWeekdays("火曜日 4 15:00から", "2026-10-30"), ['"火曜日 4" (2026-11-04 is a Wednesday)']);
+assert.deepEqual(rowsOutsideWindow("Nov 4, 9:00-17:00:\n| Nov 4 | a |\n| Nov 6 | b |", "2026-11-05"), ['"Nov 6" under "Nov 4, 9:00-17:00"']);
 assert.deepEqual(extract("run 9f2e4c1a", { kinds: ["id"] }).map((e) => [e.kind, e.text, e.shape]), [["id", "9f2e4c1a", "hex"]]);
 assert.deepEqual(ungroundedIdentifiers("CORE-1711 and CORE-1710", "CORE-1710"), ["CORE-1711"]);
 assert.deepEqual(unseenTokens("model claude-opus-5-5", ""), ["claude-opus-5-5"]);

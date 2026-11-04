@@ -61,6 +61,9 @@ pub enum Reading {
     },
     /// Anything else a parser takes: it removes what it overlaps and merges with nothing.
     Other,
+    /// A date with a day or month of 0, which chrono reads, lets remove what
+    /// it overlaps, and drops with whatever merged into it at its last filter.
+    Void,
 }
 
 /// One result: its byte range in the text and what it read.
@@ -1133,11 +1136,7 @@ impl Language {
     /// removed as chrono removes them: of two that overlap, the longer stays.
     #[must_use]
     pub fn results(&self, text: &str) -> Vec<Found> {
-        let mut all: Vec<Found> = Vec::new();
-        for parser in &self.parsers {
-            run(parser, text, &mut all);
-        }
-        all.sort_by_key(|f| f.start);
+        let all = self.every_result(text);
         let mut kept: Vec<Found> = Vec::with_capacity(all.len());
         let mut iter = all.into_iter();
         let Some(mut prev) = iter.next() else {
@@ -1153,6 +1152,18 @@ impl Language {
         }
         kept.push(prev);
         kept
+    }
+
+    /// Every result of every parser over `text`, by where it starts, in
+    /// parser order where two start together: what chrono's first overlap
+    /// removal sees, before it removes any.
+    pub fn every_result(&self, text: &str) -> Vec<Found> {
+        let mut all: Vec<Found> = Vec::new();
+        for parser in &self.parsers {
+            run(parser, text, &mut all);
+        }
+        all.sort_by_key(|f| f.start);
+        all
     }
 }
 
@@ -1270,7 +1281,7 @@ fn read_month_name(
     year_check: YearCheck,
 ) -> Option<Reading> {
     let day_text = m.group("d")?;
-    let day = parse_day(day_text, words.ordinals).filter(|d| (1..=31).contains(d))?;
+    let day = parse_day(day_text, words.ordinals).filter(|&d| d <= 31)?;
     // Month first, a day followed by `am` or `pm` is a time.
     let after_day = m.after("d").trim_start();
     if !day_first
@@ -1278,6 +1289,19 @@ fn read_month_name(
             .iter()
             .any(|w| starts_with_lowercase(after_day, w))
     {
+        return None;
+    }
+    // Month first, a date followed by a colon and a digit is a time ("Nov
+    // 17:00").
+    let ends_on_clock = m
+        .caps
+        .name("post")
+        .and_then(|post| m.text.get(m.from.saturating_add(post.start())..))
+        .is_some_and(|after| {
+            let mut chars = after.chars();
+            chars.next() == Some(':') && chars.next().is_some_and(|c| c.is_ascii_digit())
+        });
+    if !day_first && ends_on_clock {
         return None;
     }
     let month = lookup(words.months, m.group("m")?)?;
@@ -1290,6 +1314,11 @@ fn read_month_name(
     let year_like = matches!(day_text.as_bytes(), [b'2', b'0'..=b'5']);
     if skip_year_like && m.group("d2").is_none() && year.is_none() && year_like {
         return None;
+    }
+    // chrono keeps a day of 0 until its last filter, so it still removes
+    // what it overlaps ("9:00-17:00 19 de nov" reads "00 19 de nov").
+    if day == 0 {
+        return Some(Reading::Void);
     }
     Some(Reading::Date {
         day,
@@ -1370,6 +1399,16 @@ fn read_slash(m: &Match<'_, '_>, end: usize, day_first: bool) -> Option<Found> {
     } else {
         (first, second)
     };
+    // chrono keeps a month of 0 until its last filter, so it still removes
+    // what it overlaps ("15.00-0500" is no time).
+    if month == 0 && (1..=31).contains(&day) {
+        return Some(Found {
+            start: index,
+            end,
+            reading: Reading::Void,
+            to: None,
+        });
+    }
     let (month, day) = ordered(month, day)?;
     let year = match year {
         Some(y) => YearOf::Written(likely_ad_year(y.parse().ok()?)),

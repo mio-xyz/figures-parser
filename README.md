@@ -376,7 +376,8 @@ assert!(misdated_weekdays("Monday 3 meetings, Tue 4 pm", today).is_empty());
 
 `rows_outside_window(reply, today)` reads a table or list under a heading
 that names a range of dates ("past week (Oct 23-30)", "Oct 19 to Oct 26",
-"19-26 oct.") and names the rows whose leading date falls outside it. A row
+"19-26 oct.") or a day with a range of hours ("Nov 4, 9:00-17:00") and
+names the rows whose leading date falls outside it. A row
 is a table row, read by its first cell, or a list item, read by what follows
 its bullet or number. A blank line, a label ending in a colon or an
 emphasised line keeps the window open; other prose closes it. It reads the

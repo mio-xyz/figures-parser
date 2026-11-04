@@ -4,6 +4,7 @@
 
 mod bare;
 mod calendar;
+mod casual;
 mod clock;
 mod languages;
 mod names;
@@ -117,11 +118,12 @@ fn pairs(language: &Language, text: &str) -> Vec<Found> {
 
 /// The weekday-and-date pairs in `reply` whose weekday is wrong for that date.
 ///
-/// Each is `"<as written>" (<date> is a <weekday>)`. A date written without a
-/// year is read in the year nearest `today`. A weekday beside a bare day
-/// number ("mardi 4", "Tue 4th") is read against the dates from three weeks
-/// before `today` to five weeks after it that carry that number, and is
-/// wrong only when none of them falls on it; the finding names the nearest.
+/// Each is `"<as written>" (<date> is a <weekday>)`, a pair named with the
+/// time written beside it on its line. A date written without a year is read
+/// in the year nearest `today`. A weekday beside a bare day number ("mardi
+/// 4", "Tue 4th") is read against the dates from three weeks before `today`
+/// to five weeks after it that carry that number, and is wrong only when
+/// none of them falls on it; the finding names the nearest.
 /// A language is read only when the reply names one of its weekdays.
 ///
 /// # Examples
@@ -160,7 +162,20 @@ pub fn misdated_weekdays(reply: &str, today: Date) -> Vec<String> {
     for (entry, results) in &read {
         for found in results {
             match found.reading {
-                Reading::Weekday(_) if entry.code != "ar" => {
+                Reading::Weekday(weekday) if entry.code != "ar" => {
+                    if let Some((span, date)) = casual::beside(entry.code, reply, found, today) {
+                        let written = reply
+                            .get(span.0..span.1)
+                            .unwrap_or_default()
+                            .trim()
+                            .trim_end_matches([',', '.', ';', ':']);
+                        let wrong = calendar::from_sunday(date) != weekday;
+                        if wrong && !seen.contains(&written) {
+                            seen.push(written);
+                            out.push(bare::finding(written, date));
+                        }
+                        continue;
+                    }
                     let Some(pair) =
                         bare::bare_day_at(reply, found.start, found.end, entry.code, entry.names)
                     else {
@@ -198,11 +213,39 @@ pub fn misdated_weekdays(reply: &str, today: Date) -> Vec<String> {
                         out.push(finding);
                     }
                 }
-                Reading::Weekday(_) | Reading::Date { .. } | Reading::Other => {}
+                Reading::Weekday(_) | Reading::Date { .. } | Reading::Other | Reading::Void => {}
             }
         }
     }
     out
+}
+
+/// The span of a date in `reply` with the times of day chrono merges into
+/// it, as a pair is named: a time the language's words join before or after
+/// it ("Fri 26 Sep at 5pm", "at 5pm, Fri 26 Sep") and the zone written after
+/// it, on the same line. A bare number beside a date ("Fri 26 Sep 15") is no
+/// time to a reader, so it is left out.
+fn with_times(code: &str, reply: &str, start: usize, end: usize) -> (usize, usize) {
+    let times = clock::times_around(code, reply, start, end);
+    let shown = |t: &&clock::Clocked| t.valid && !t.bare;
+    let after = times.iter().filter(shown).find(|t| {
+        t.start >= end
+            && reply
+                .get(end..t.start)
+                .is_some_and(|gap| clock::joins_date_and_time(code, gap))
+    });
+    let before = times.iter().filter(shown).rev().find(|t| {
+        t.zoned_end <= start
+            && reply
+                .get(t.zoned_end..start)
+                .is_some_and(|gap| gap.trim() != ":" && clock::joins_date_and_time(code, gap))
+    });
+    let start = before.map_or(start, |t| t.start);
+    let end = after.map_or(end, |t| t.zoned_end);
+    (
+        start,
+        end.saturating_add(clock::zone_name_len(reply, end, after.is_some())),
+    )
 }
 
 /// The finding for a weekday merged into its date, if the weekday is wrong
@@ -215,24 +258,35 @@ fn check_dated<'r>(
     today: Date,
     seen: &mut Vec<&'r str>,
 ) -> Option<String> {
-    let written = reply
-        .get(found.start..found.end)
-        .unwrap_or_default()
-        .trim()
-        .trim_end_matches([',', '.', ';', ':']);
+    let name = |(start, end): (usize, usize)| {
+        reply
+            .get(start..end)
+            .unwrap_or_default()
+            .trim()
+            .trim_end_matches([',', '.', ';', ':'])
+    };
+    let date_only = name((found.start, found.end));
     let ambiguous = code == "en"
         && ENGLISH_AMBIGUOUS
             .as_ref()
-            .is_some_and(|re| re.is_match(written));
-    if ambiguous || seen.contains(&written) {
+            .is_some_and(|re| re.is_match(date_only));
+    if ambiguous {
         return None;
     }
-    seen.push(written);
     let year = match year {
         YearOf::Written(y) => i16::try_from(y).ok(),
         YearOf::Nearest => calendar::nearest_year(today, month, day),
         YearOf::Current => Some(today.year()),
     };
     let date = Date::new(year?, i8::try_from(month).ok()?, i8::try_from(day).ok()?).ok()?;
-    (calendar::from_sunday(date) != weekday).then(|| bare::finding(written, date))
+    if calendar::from_sunday(date) == weekday {
+        return None;
+    }
+    // Only a wrong pair is named, so only one reads the times beside it.
+    let written = name(with_times(code, reply, found.start, found.end));
+    if seen.contains(&written) {
+        return None;
+    }
+    seen.push(written);
+    Some(bare::finding(written, date))
 }

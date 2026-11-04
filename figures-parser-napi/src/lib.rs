@@ -473,8 +473,9 @@ pub fn misdated_weekdays(reply: String, today: String) -> napi::Result<Vec<Strin
 /// The rows of a table or list, under a heading that names a date window,
 /// whose own leading date falls outside it, each `"<date>" under "<window>"`.
 ///
-/// `today` is `YYYY-MM-DD`; a date written without a year is read in the year
-/// nearest it.
+/// A window is a range of dates or a day with a range of hours. `today` is
+/// `YYYY-MM-DD`; a date written without a year is read in the year nearest
+/// it.
 ///
 /// # Errors
 ///
